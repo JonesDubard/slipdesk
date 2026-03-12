@@ -13,14 +13,17 @@ import {
   Bell,
   Menu,
   X,
+  CreditCard,
 } from "lucide-react";
 import { useState } from "react";
+import { useApp } from "@/context/AppContext";
 
 const NAV_ITEMS = [
-  { href: "/dashboard",  label: "Dashboard",  icon: LayoutDashboard },
-  { href: "/employees",  label: "Employees",  icon: Users           },
-  { href: "/payroll",    label: "Payroll",     icon: FileText        },
-  { href: "/settings",   label: "Settings",   icon: Settings        },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/employees", label: "Employees", icon: Users           },
+  { href: "/payroll",   label: "Payroll",   icon: FileText        },
+  { href: "/billing",   label: "Billing",   icon: CreditCard      },
+  { href: "/settings",  label: "Settings",  icon: Settings        },
 ];
 
 const STYLES = (
@@ -41,22 +44,20 @@ const STYLES = (
   `}</style>
 );
 
-export default function DashboardLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+// ── Pulled OUT of DashboardLayout so hooks work correctly ──────────────────────
+function SidebarContent({ onClose }: { onClose: () => void }) {
   const pathname = usePathname();
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const { employees, companyName } = useApp();
+  const activeCount = employees.filter((e) => e.isActive).length;
 
-  const SidebarContent = () => (
+  return (
     <div className="flex flex-col h-full">
       {/* Logo */}
       <div className="px-5 py-5 border-b border-white/10">
         <Link
           href="/"
           className="flex items-center gap-2.5"
-          onClick={() => setMobileOpen(false)}
+          onClick={onClose}
         >
           <Image
             src="/Slipdesk_Logo_.png"
@@ -70,13 +71,15 @@ export default function DashboardLayout({
         </Link>
       </div>
 
-      {/* Company badge */}
+      {/* Company badge — now dynamic */}
       <div className="px-4 py-3 mx-3 mt-4 rounded-xl bg-white/5 border border-white/10">
         <p className="text-white/40 text-[10px] font-mono uppercase tracking-widest mb-0.5">
           Company
         </p>
-        <p className="text-white text-sm font-medium truncate">Demo Company Ltd.</p>
-        <p className="text-white/40 text-xs font-mono">6 active employees</p>
+        <p className="text-white text-sm font-medium truncate">{companyName}</p>
+        <p className="text-white/40 text-xs font-mono">
+          {activeCount} active employee{activeCount !== 1 ? "s" : ""}
+        </p>
       </div>
 
       {/* Nav links */}
@@ -87,7 +90,7 @@ export default function DashboardLayout({
             <Link
               key={item.href}
               href={item.href}
-              onClick={() => setMobileOpen(false)}
+              onClick={onClose}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm
                 transition-all group
                 ${active
@@ -122,6 +125,15 @@ export default function DashboardLayout({
       </div>
     </div>
   );
+}
+
+// ── Main layout ────────────────────────────────────────────────────────────────
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
     <>
@@ -133,7 +145,7 @@ export default function DashboardLayout({
           className="hidden md:flex flex-col flex-shrink-0 w-60 bg-navy"
           style={{ width: "var(--sidebar-w)" }}
         >
-          <SidebarContent />
+          <SidebarContent onClose={() => {}} />
         </aside>
 
         {/* ── Mobile Sidebar overlay ── */}
@@ -150,7 +162,7 @@ export default function DashboardLayout({
               >
                 <X className="w-5 h-5" />
               </button>
-              <SidebarContent />
+              <SidebarContent onClose={() => setMobileOpen(false)} />
             </aside>
           </div>
         )}
