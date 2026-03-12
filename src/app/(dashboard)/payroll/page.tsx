@@ -1,47 +1,93 @@
 "use client";
 
-import { useReducer, useMemo, useRef, useState, useCallback } from "react";
+/**
+ * Slipdesk — Payroll Page
+ * Place at: src/app/(dashboard)/payroll/page.tsx
+ */
+
 import {
-  createColumnHelper,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
+  useReducer, useMemo, useState, useCallback,
+} from "react";
+import {
+  createColumnHelper, flexRender,
+  getCoreRowModel, useReactTable,
 } from "@tanstack/react-table";
 import {
-  AlertTriangle,
-  CheckCircle2,
-  Download,
-  Upload,
-  ChevronRight,
-  FileText,
-  Lock,
-  Play,
-  RotateCcw,
-  Clock,
+  AlertTriangle, CheckCircle2, Upload, ChevronRight,
+  FileText, Lock, Play, Clock, Download, FileDown,
+  Loader, Plus, Calendar, RefreshCw, DollarSign, Users,
 } from "lucide-react";
-import {
-  calculatePayroll,
-  type PayrollResult,
-} from "@/lib/slipdesk-payroll-engine";
-import { MOCK_PAY_RUN_LINES, MOCK_PAY_RUNS, type PayRunLine } from "@/lib/mock-data";
+import { calculatePayroll } from "@/lib/slipdesk-payroll-engine";
+import type { PayRunLine } from "@/lib/mock-data";
+import BulkUpload, { type BulkRow } from "@/components/BulkUpload";
+import { employeeToPayrollInput } from "@/lib/payroll-adapter";
+import { useApp } from "@/context/AppContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type RunStatus = "draft" | "review" | "approved" | "paid";
 
-// ─── Grid Reducer ─────────────────────────────────────────────────────────────
+interface SavedRun {
+  id:            string;
+  periodLabel:   string;
+  payDate:       string;
+  status:        RunStatus;
+  employeeCount: number;
+  totalGross:    number;
+  totalNet:      number;
+  lines:         PayRunLine[];
+  createdAt:     string;
+}
 
 type GridAction =
   | { type: "UPDATE_FIELD"; id: string; field: keyof PayRunLine; value: number }
-  | { type: "RESET" };
+  | { type: "IMPORT_ROWS";  rows: PayRunLine[] }
+  | { type: "SET_ROWS";     rows: PayRunLine[] }
+  | { type: "CLEAR" };
+
+interface PdfCompany {
+  name:          string;
+  tin:           string;
+  nasscorpRegNo: string;
+  address:       string;
+  logoUrl:       string | null;
+}
+
+// ─── BulkRow → PayRunLine mapper ──────────────────────────────────────────────
+// BulkRow = { employee: Omit<Employee, "id"|"fullName">, regularHours, overtimeHours, holidayHours }
+// PayRunLine = flat object with employeeId, fullName, etc.
+
+function bulkRowToPayRunLine(r: BulkRow, exchangeRate: number): PayRunLine {
+  const emp = r.employee;
+  const tempId = `BULK-${emp.employeeNumber || Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  return {
+    id:                 tempId,
+    employeeId:         tempId,
+    employeeNumber:     emp.employeeNumber,
+    fullName:           `${emp.firstName} ${emp.lastName}`.trim(),
+    jobTitle:           emp.jobTitle,
+    department:         emp.department,
+    currency:           emp.currency,
+    rate:               emp.rate,
+    regularHours:       r.regularHours,
+    overtimeHours:      r.overtimeHours,
+    holidayHours:       r.holidayHours,
+    additionalEarnings: emp.allowances ?? 0,
+    exchangeRate,
+    calc:               null,
+  };
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function recalcLine(line: PayRunLine): PayRunLine {
   try {
+    const base = employeeToPayrollInput({
+      id: line.employeeId, currency: line.currency,
+      rate: line.rate, standardHours: line.regularHours,
+    });
     const calc = calculatePayroll({
-      employeeId:         line.employeeId,
-      currency:           line.currency,
-      rate:               line.rate,
-      regularHours:       line.regularHours,
+      ...base,
       overtimeHours:      line.overtimeHours,
       holidayHours:       line.holidayHours,
       exchangeRate:       line.exchangeRate,
@@ -56,129 +102,373 @@ function recalcLine(line: PayRunLine): PayRunLine {
 function gridReducer(state: PayRunLine[], action: GridAction): PayRunLine[] {
   switch (action.type) {
     case "UPDATE_FIELD":
-      return state.map((line) => {
-        if (line.id !== action.id) return line;
-        const updated = { ...line, [action.field]: action.value };
-        return recalcLine(updated);
-      });
-    case "RESET":
-      return MOCK_PAY_RUN_LINES.map(recalcLine);
-    default:
-      return state;
+      return state.map((l) =>
+        l.id !== action.id ? l : recalcLine({ ...l, [action.field]: action.value }),
+      );
+    case "IMPORT_ROWS": return [...state, ...action.rows.map(recalcLine)];
+    case "SET_ROWS":    return action.rows.map(recalcLine);
+    case "CLEAR":       return [];
+    default:            return state;
   }
 }
 
-// ─── Editable Cell ────────────────────────────────────────────────────────────
+function fmtMoney(n: number, sym: string) {
+  return `${sym}${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
-function EditableCell({
-  value,
-  lineId,
-  field,
-  isLocked,
-  dispatch,
-  prefix = "",
-  decimals = 2,
-}: {
-  value: number;
-  lineId: string;
-  field: keyof PayRunLine;
-  isLocked: boolean;
-  dispatch: React.Dispatch<GridAction>;
-  prefix?: string;
-  decimals?: number;
+function getCurrentPeriod() {
+  const now   = new Date();
+  const label = now.toLocaleDateString("en-LR", { year: "numeric", month: "long" });
+  const last  = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  return { label, payDate: last.toISOString().split("T")[0] };
+}
+
+function safePeriod(label: string) {
+  return label.trim().replace(/\s+/g, "_");
+}
+
+// ─── PDF generation ───────────────────────────────────────────────────────────
+
+let pdfLib: typeof import("@react-pdf/renderer") | null = null;
+async function getPdfLib() {
+  if (!pdfLib) pdfLib = await import("@react-pdf/renderer");
+  return pdfLib;
+}
+
+interface PdfOptions {
+  line:        PayRunLine;
+  periodLabel: string;
+  payDate:     string;
+  company:     PdfCompany;
+}
+
+async function generatePayslipBlob({ line, periodLabel, payDate, company }: PdfOptions): Promise<Blob> {
+  const { Document, Page, Text, View, StyleSheet, pdf, Image } = await getPdfLib()!;
+  const { calc, currency } = line;
+  if (!calc) throw new Error("No calculation data");
+
+  const sym   = currency === "USD" ? "$" : "L$";
+  const fx    = line.exchangeRate;
+  const NAVY  = "#002147"; const EMERALD = "#50C878";
+  const SLATE = "#64748b"; const LIGHT   = "#f8fafc"; const BORDER = "#e2e8f0";
+
+  const S = StyleSheet.create({
+    page:       { fontFamily: "Helvetica", fontSize: 9, color: "#1e293b", backgroundColor: "#fff", paddingHorizontal: 36, paddingVertical: 32 },
+    header:     { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, paddingBottom: 16, borderBottomWidth: 2, borderBottomColor: NAVY },
+    coLeft:     { flexDirection: "row", alignItems: "center", gap: 10 },
+    logo:       { width: 48, height: 48, objectFit: "contain" },
+    coName:     { fontSize: 16, fontFamily: "Helvetica-Bold", color: NAVY, marginBottom: 3 },
+    coMeta:     { fontSize: 8, color: SLATE, lineHeight: 1.5 },
+    badge:      { backgroundColor: NAVY, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 4 },
+    badgeText:  { fontSize: 10, fontFamily: "Helvetica-Bold", color: "#fff", letterSpacing: 1 },
+    infoGrid:   { flexDirection: "row", gap: 12, marginBottom: 18 },
+    infoBox:    { flex: 1, backgroundColor: LIGHT, borderRadius: 6, padding: 10, borderWidth: 1, borderColor: BORDER },
+    infoLbl:    { fontSize: 7, fontFamily: "Helvetica-Bold", color: SLATE, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 },
+    infoVal:    { fontSize: 9, color: NAVY, fontFamily: "Helvetica-Bold" },
+    infoSub:    { fontSize: 8, color: "#374151" },
+    secTitle:   { fontSize: 8, fontFamily: "Helvetica-Bold", color: SLATE, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6, marginTop: 14 },
+    table:      { borderWidth: 1, borderColor: BORDER, borderRadius: 6, overflow: "hidden" },
+    tHead:      { flexDirection: "row", backgroundColor: NAVY, paddingHorizontal: 10, paddingVertical: 6 },
+    thDesc:     { fontSize: 7.5, fontFamily: "Helvetica-Bold", color: "#fff", width: 140 },
+    thNotes:    { fontSize: 7.5, fontFamily: "Helvetica-Bold", color: "#fff", flex: 1 },
+    thAmt:      { fontSize: 7.5, fontFamily: "Helvetica-Bold", color: "#fff", textAlign: "right", width: 90 },
+    tRow:       { flexDirection: "row", paddingHorizontal: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: BORDER, alignItems: "flex-start" },
+    tAlt:       { backgroundColor: LIGHT },
+    tdDesc:     { width: 140, fontSize: 8.5, fontFamily: "Helvetica-Bold", color: NAVY },
+    tdNotes:    { flex: 1, fontSize: 8, color: "#374151", lineHeight: 1.6 },
+    tdAmt:      { width: 90, fontSize: 8.5, color: "#374151", textAlign: "right" },
+    tdAmtBold:  { width: 90, fontSize: 8.5, fontFamily: "Helvetica-Bold", color: NAVY, textAlign: "right" },
+    tdRed:      { width: 90, fontSize: 8.5, color: "#dc2626", textAlign: "right" },
+    tdNote:     { flex: 1, fontSize: 7.5, color: SLATE, lineHeight: 1.5 },
+    netBox:     { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: NAVY, borderRadius: 6, paddingHorizontal: 14, paddingVertical: 10, marginTop: 12 },
+    netLabel:   { fontSize: 10, fontFamily: "Helvetica-Bold", color: "#fff" },
+    netValue:   { fontSize: 16, fontFamily: "Helvetica-Bold", color: EMERALD, textAlign: "right" },
+    netLRD:     { fontSize: 8, color: "rgba(255,255,255,0.5)", textAlign: "right" },
+    erBox:      { marginTop: 10, backgroundColor: LIGHT, borderRadius: 6, padding: 8, borderWidth: 1, borderColor: BORDER },
+    erLabel:    { fontSize: 7, fontFamily: "Helvetica-Bold", color: SLATE, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 },
+    erRow:      { flexDirection: "row", gap: 20 },
+    erText:     { fontSize: 7.5, color: SLATE },
+    compRow:    { flexDirection: "row", gap: 8, marginTop: 10 },
+    compBadge:  { flex: 1, flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#f0fdf4", borderWidth: 1, borderColor: "#86efac", borderRadius: 4, paddingHorizontal: 8, paddingVertical: 5 },
+    compDot:    { width: 5, height: 5, borderRadius: 3, backgroundColor: EMERALD },
+    compText:   { fontSize: 7.5, color: "#166534", fontFamily: "Helvetica-Bold" },
+    sigSection: { flexDirection: "row", gap: 30, marginTop: 24, paddingTop: 16, borderTopWidth: 1, borderTopColor: BORDER },
+    sigBox:     { flex: 1 },
+    sigLine:    { borderBottomWidth: 1, borderBottomColor: "#cbd5e1", marginBottom: 4, height: 20 },
+    sigLabel:   { fontSize: 7.5, color: SLATE, textAlign: "center" },
+    footer:     { marginTop: 16, paddingTop: 10, borderTopWidth: 1, borderTopColor: BORDER, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+    footerTxt:  { fontSize: 7, color: "#94a3b8" },
+    footerBrand:{ fontSize: 7.5, fontFamily: "Helvetica-Bold", color: NAVY },
+  });
+
+  const buildNote = (main: string) => main;
+
+  const earningsRows = [
+    { label: "Regular Salary", note: buildNote(`${line.regularHours} hrs × ${sym}${line.rate.toFixed(2)}/hr`), amount: calc.regularSalary },
+    ...(line.overtimeHours > 0 ? [{ label: "Overtime Pay",       note: buildNote(`${line.overtimeHours} hrs × ${sym}${line.rate.toFixed(2)} × 1.5`),   amount: calc.overtimePay }]   : []),
+    ...(line.holidayHours  > 0 ? [{ label: "Holiday Pay",        note: buildNote(`${line.holidayHours} hrs × ${sym}${line.rate.toFixed(2)} × 2.0`),    amount: calc.holidayPay }]    : []),
+    ...(calc.additionalEarnings > 0 ? [{ label: "Allowances & Extras", note: "Recurring allowances + one-off earnings", amount: calc.additionalEarnings }] : []),
+  ];
+
+  const deductionRows = [
+    { label: "NASSCORP (Employee 4%)", note: `4% of ${sym}${calc.nasscorp.base.toFixed(2)} regular salary`, amount: calc.nasscorp.employeeContribution },
+    { label: "Income Tax (LRA)",       note: `Eff. rate: ${(calc.Paye.effectiveRate * 100).toFixed(1)}%\nAnnual gross: L$${calc.Paye.annualGrossInLRD.toLocaleString("en-LR", { maximumFractionDigits: 0 })}`, amount: calc.Paye.taxInBase },
+  ];
+
+  const generated  = new Date().toLocaleDateString("en-LR", { year: "numeric", month: "long", day: "numeric" });
+  const payDateFmt = new Date(payDate).toLocaleDateString("en-LR", { year: "numeric", month: "long", day: "numeric" });
+
+  const doc = (
+    <Document title={`Payslip - ${line.fullName} - ${periodLabel}`} author="Slipdesk">
+      <Page size="A4" style={S.page}>
+        <View style={S.header}>
+          <View style={S.coLeft}>
+            {company.logoUrl && <Image src={company.logoUrl} style={S.logo}/>}
+            <View>
+              <Text style={S.coName}>{company.name || "Company Name"}</Text>
+              {company.address       && <Text style={S.coMeta}>{company.address}</Text>}
+              {company.tin           && <Text style={S.coMeta}>LRA TIN: {company.tin}</Text>}
+              {company.nasscorpRegNo && <Text style={S.coMeta}>NASSCORP Reg: {company.nasscorpRegNo}</Text>}
+            </View>
+          </View>
+          <View style={S.badge}><Text style={S.badgeText}>PAYSLIP</Text></View>
+        </View>
+
+        <View style={S.infoGrid}>
+          <View style={S.infoBox}>
+            <Text style={S.infoLbl}>Employee</Text>
+            <Text style={S.infoVal}>{line.fullName}</Text>
+            <Text style={S.infoSub}>{line.jobTitle}</Text>
+            <Text style={S.infoSub}>{line.department}</Text>
+          </View>
+          <View style={S.infoBox}>
+            <Text style={S.infoLbl}>Employee Number</Text>
+            <Text style={S.infoVal}>{line.employeeNumber}</Text>
+            <Text style={[S.infoLbl, { marginTop: 6 }]}>Pay Period</Text>
+            <Text style={S.infoSub}>{periodLabel}</Text>
+          </View>
+          <View style={S.infoBox}>
+            <Text style={S.infoLbl}>Pay Date</Text>
+            <Text style={S.infoVal}>{payDateFmt}</Text>
+            <Text style={[S.infoLbl, { marginTop: 6 }]}>Currency</Text>
+            <Text style={S.infoSub}>{currency}</Text>
+          </View>
+        </View>
+
+        <Text style={S.secTitle}>Earnings</Text>
+        <View style={S.table}>
+          <View style={S.tHead}>
+            <Text style={S.thDesc}>Description</Text>
+            <Text style={S.thNotes}>Notes</Text>
+            <Text style={S.thAmt}>Amount ({currency})</Text>
+          </View>
+          {earningsRows.map((row, i) => (
+            <View key={row.label} style={[S.tRow, i % 2 === 1 ? S.tAlt : {}]}>
+              <Text style={S.tdDesc}>{row.label}</Text>
+              <Text style={S.tdNotes}>{row.note}</Text>
+              <Text style={S.tdAmt}>{fmtMoney(row.amount, sym)}</Text>
+            </View>
+          ))}
+          <View style={[S.tRow, { backgroundColor: "#f0fdf4" }]}>
+            <Text style={S.tdDesc}>GROSS PAY</Text>
+            <Text style={S.tdNotes}>{" "}</Text>
+            <Text style={S.tdAmtBold}>{fmtMoney(calc.grossPay, sym)}</Text>
+          </View>
+        </View>
+
+        <Text style={S.secTitle}>Deductions</Text>
+        <View style={S.table}>
+          <View style={S.tHead}>
+            <Text style={S.thDesc}>Description</Text>
+            <Text style={S.thNotes}>Basis</Text>
+            <Text style={S.thAmt}>Amount ({currency})</Text>
+          </View>
+          {deductionRows.map((row, i) => (
+            <View key={row.label} style={[S.tRow, i % 2 === 1 ? S.tAlt : {}]}>
+              <Text style={S.tdDesc}>{row.label}</Text>
+              <Text style={S.tdNote}>{row.note}</Text>
+              <Text style={S.tdRed}>({fmtMoney(row.amount, sym)})</Text>
+            </View>
+          ))}
+          <View style={[S.tRow, { backgroundColor: "#fff7ed" }]}>
+            <Text style={S.tdDesc}>TOTAL DEDUCTIONS</Text>
+            <Text style={S.tdNotes}>{" "}</Text>
+            <Text style={[S.tdRed, { fontFamily: "Helvetica-Bold" }]}>({fmtMoney(calc.totalDeductions, sym)})</Text>
+          </View>
+        </View>
+
+        <View style={S.erBox}>
+          <Text style={S.erLabel}>Employer Contributions (not deducted from employee)</Text>
+          <View style={S.erRow}>
+            <Text style={S.erText}>NASSCORP Employer Contribution: 6% of regular salary</Text>
+          </View>
+        </View>
+
+        <View style={S.netBox}>
+          <Text style={S.netLabel}>NET PAY</Text>
+          <View style={{ alignItems: "flex-end" }}>
+            <Text style={S.netValue}>{fmtMoney(calc.netPay, sym)}</Text>
+        </View>
+
+        <View style={S.compRow}>
+          <View style={S.compBadge}><View style={S.compDot}/><Text style={S.compText}>LRA Income Tax Compliant</Text></View>
+          <View style={S.compBadge}><View style={S.compDot}/><Text style={S.compText}>NASSCORP Verified</Text></View>
+          <View style={S.compBadge}><View style={S.compDot}/><Text style={S.compText}>{"Generated by Slipdesk · " + generated}</Text></View>
+        </View>
+
+        <View style={S.sigSection}>
+          {["Authorised Signatory", "Date", "Employee Acknowledgement"].map((label) => (
+            <View key={label} style={S.sigBox}>
+              <View style={S.sigLine}/>
+              <Text style={S.sigLabel}>{label}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={S.footer}>
+          <Text style={S.footerTxt}>This payslip is computer-generated and is valid without a physical signature.</Text>
+          <Text style={S.footerBrand}>Slipdesk · slipdesk.lr</Text>
+        </View>
+      </Page>
+    </Document>
+  );
+
+  return await pdf(doc).toBlob();
+}
+
+// ─── Download helpers ─────────────────────────────────────────────────────────
+
+function buildFilename(fullName: string, periodLabel: string) {
+  return `${fullName.trim().replace(/\s+/g, "_")}_Payslip_${safePeriod(periodLabel)}.pdf`;
+}
+
+function DownloadSlipButton({ line, periodLabel, payDate, company }: {
+  line: PayRunLine; periodLabel: string; payDate: string; company: PdfCompany;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [local, setLocal] = useState(String(value));
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const commit = useCallback(() => {
-    const num = parseFloat(local);
-    if (!isNaN(num) && num >= 0) {
-      dispatch({ type: "UPDATE_FIELD", id: lineId, field, value: num });
-    } else {
-      setLocal(String(value));
-    }
-    setEditing(false);
-  }, [local, lineId, field, value, dispatch]);
-
-  if (isLocked) {
-    return (
-      <span className="block text-right font-mono text-xs text-slate-400">
-        {prefix}{value.toFixed(decimals)}
-      </span>
-    );
+  const [loading, setLoading] = useState(false);
+  async function handle() {
+    if (!line.calc) return;
+    setLoading(true);
+    try {
+      const blob = await generatePayslipBlob({ line, periodLabel, payDate, company });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href = url; a.download = buildFilename(line.fullName, periodLabel); a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { console.error(e); alert("Could not generate payslip."); }
+    finally { setLoading(false); }
   }
+  return (
+    <button onClick={handle} disabled={loading || !line.calc}
+      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-mono
+                 text-slate-500 hover:text-[#002147] hover:bg-emerald-50
+                 disabled:opacity-40 disabled:cursor-not-allowed transition-all group">
+      {loading ? <Loader className="w-3.5 h-3.5 animate-spin text-emerald-500"/> : <FileDown className="w-3.5 h-3.5 group-hover:text-emerald-600"/>}
+      <span className="hidden sm:inline">{loading ? "…" : "PDF"}</span>
+    </button>
+  );
+}
 
-  if (editing) {
-    return (
-      <input
-        ref={inputRef}
-        autoFocus
-        className="w-full text-right font-mono text-xs bg-emerald-50 border border-emerald-400
-                   rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-emerald-400"
-        value={local}
-        onChange={(e) => setLocal(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
-          if (e.key === "Escape") { setLocal(String(value)); setEditing(false); }
-        }}
-      />
-    );
+function BulkDownloadButton({ lines, periodLabel, payDate, company }: {
+  lines: PayRunLine[]; periodLabel: string; payDate: string; company: PdfCompany;
+}) {
+  const [loading,   setLoading]   = useState(false);
+  const [progress,  setProgress]  = useState({ done: 0, total: 0 });
+  const valid = lines.filter((l) => l.calc !== null);
+
+  async function handleAll() {
+    if (!valid.length) return;
+    setLoading(true); setProgress({ done: 0, total: valid.length });
+    try {
+      for (let i = 0; i < valid.length; i++) {
+        const blob = await generatePayslipBlob({ line: valid[i], periodLabel, payDate, company });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement("a");
+        a.href = url; a.download = buildFilename(valid[i].fullName, periodLabel); a.click();
+        URL.revokeObjectURL(url);
+        setProgress({ done: i + 1, total: valid.length });
+        await new Promise((r) => setTimeout(r, 350));
+      }
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); setProgress({ done: 0, total: 0 }); }
   }
 
   return (
-    <button
-      onClick={() => { setLocal(String(value)); setEditing(true); }}
-      className="w-full text-right font-mono text-xs text-slate-600 hover:bg-emerald-50
-                 hover:text-emerald-700 rounded px-1.5 py-0.5 transition-colors cursor-text"
-    >
+    <button onClick={handleAll} disabled={loading || !valid.length}
+      className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl
+                 bg-[#50C878] text-[#002147] hover:bg-[#3aa85f] disabled:opacity-50 disabled:cursor-not-allowed">
+      {loading
+        ? <><Loader className="w-3.5 h-3.5 animate-spin"/>{progress.total > 0 ? `${progress.done}/${progress.total} payslips…` : "Generating…"}</>
+        : <><Download className="w-3.5 h-3.5"/>All Payslips ({valid.length})</>}
+    </button>
+  );
+}
+
+// ─── Editable cell ────────────────────────────────────────────────────────────
+
+function EditableCell({ value, lineId, field, isLocked, dispatch, prefix = "", decimals = 2 }: {
+  value: number; lineId: string; field: keyof PayRunLine; isLocked: boolean;
+  dispatch: React.Dispatch<GridAction>; prefix?: string; decimals?: number;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [local,   setLocal]   = useState(String(value));
+
+  const commit = useCallback(() => {
+    const num = parseFloat(local);
+    if (!isNaN(num) && num >= 0) dispatch({ type: "UPDATE_FIELD", id: lineId, field, value: num });
+    else setLocal(String(value));
+    setEditing(false);
+  }, [local, lineId, field, value, dispatch]);
+
+  if (isLocked) return (
+    <span className="block text-right font-mono text-xs text-slate-400">{prefix}{value.toFixed(decimals)}</span>
+  );
+  if (editing) return (
+    <input autoFocus value={local}
+      className="w-full text-right font-mono text-xs bg-emerald-50 border border-emerald-400 rounded px-1.5 py-0.5 focus:outline-none"
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") { setLocal(String(value)); setEditing(false); }
+      }}/>
+  );
+  return (
+    <button onClick={() => { setLocal(String(value)); setEditing(true); }}
+      className="w-full text-right font-mono text-xs text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 rounded px-1.5 py-0.5 cursor-text">
       {prefix}{value.toFixed(decimals)}
     </button>
   );
 }
 
-// ─── Summary Footer ───────────────────────────────────────────────────────────
+// ─── Run summary ──────────────────────────────────────────────────────────────
 
-function RunSummary({ lines }: { lines: PayRunLine[] }) {
-  const FX = 193.5;
-  const totals = useMemo(() => {
-    return lines.reduce(
-      (acc, line) => {
-        if (!line.calc) return acc;
-        const toUSD = (n: number) => (line.currency === "USD" ? n : n / FX);
-        return {
-          gross:    acc.gross    + toUSD(line.calc.grossPay),
-          nasscorp: acc.nasscorp + toUSD(line.calc.nasscorp.employeeContribution),
-          erNasc:   acc.erNasc   + toUSD(line.calc.nasscorp.employerContribution),
-          paye:     acc.paye     + toUSD(line.calc.paye.taxInBase),
-          net:      acc.net      + toUSD(line.calc.netPay),
-          cost:     acc.cost     + toUSD(line.calc.totalEmployerCost),
-        };
-      },
-      { gross: 0, nasscorp: 0, erNasc: 0, paye: 0, net: 0, cost: 0 }
-    );
-  }, [lines]);
+function RunSummary({ lines, exchangeRate }: { lines: PayRunLine[]; exchangeRate: number }) {
+  const t = useMemo(() => lines.reduce((acc, l) => {
+    if (!l.calc) return acc;
+    const u = (n: number) => l.currency === "USD" ? n : n / exchangeRate;
+    return {
+      gross:    acc.gross    + u(l.calc.grossPay),
+      nasscorp: acc.nasscorp + u(l.calc.nasscorp.employeeContribution),
+      erNasc:   acc.erNasc   + u(l.calc.nasscorp.employerContribution),
+      tax:      acc.tax      + u(l.calc.Paye.taxInBase),
+      net:      acc.net      + u(l.calc.netPay),
+    };
+  }, { gross: 0, nasscorp: 0, erNasc: 0, tax: 0, net: 0 }), [lines, exchangeRate]);
 
-  const fmt = (n: number) =>
-    `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-  const items = [
-    { label: "Gross Pay",       value: fmt(totals.gross),    color: "text-white" },
-    { label: "NASSCORP (EE)",   value: fmt(totals.nasscorp), color: "text-orange-300" },
-    { label: "NASSCORP (ER)",   value: fmt(totals.erNasc),   color: "text-orange-400" },
-    { label: "PAYE to LRA",     value: fmt(totals.paye),     color: "text-red-300" },
-    { label: "Net Pay",         value: fmt(totals.net),      color: "text-[#50C878]" },
-    { label: "Total Employer Cost", value: fmt(totals.cost), color: "text-blue-300" },
-  ];
+  const f = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   return (
-    <div className="bg-[#002147] rounded-b-2xl px-4 py-4">
-      <div className="flex flex-wrap gap-x-6 gap-y-2 items-center">
-        <span className="text-white/30 text-[10px] font-mono uppercase tracking-widest mr-auto hidden sm:block">
-          USD Totals
-        </span>
-        {items.map((item) => (
+    <div className="bg-[#002147] rounded-b-2xl px-4 py-3.5">
+      <div className="flex flex-wrap gap-x-5 gap-y-2 items-center">
+        <span className="text-white/30 text-[9px] font-mono uppercase tracking-widest mr-auto hidden sm:block">USD Equiv. Totals</span>
+        {[
+          { label: "Gross",            value: f(t.gross),    color: "text-white"      },
+          { label: "NASSCORP (EE)",    value: f(t.nasscorp), color: "text-orange-300" },
+          { label: "NASSCORP (ER)",    value: f(t.erNasc),   color: "text-orange-400" },
+          { label: "Income Tax (LRA)", value: f(t.tax),      color: "text-red-300"    },
+          { label: "Net Pay",          value: f(t.net),      color: "text-[#50C878]"  },
+        ].map((item) => (
           <div key={item.label} className="text-center">
             <p className="text-[9px] font-mono text-white/30 uppercase">{item.label}</p>
             <p className={`font-mono font-bold text-sm ${item.color}`}>{item.value}</p>
@@ -189,66 +479,35 @@ function RunSummary({ lines }: { lines: PayRunLine[] }) {
   );
 }
 
-// ─── Status Steps ─────────────────────────────────────────────────────────────
+// ─── Status stepper ───────────────────────────────────────────────────────────
 
-const STATUS_STEPS: RunStatus[] = ["draft", "review", "approved", "paid"];
-const STATUS_LABELS: Record<RunStatus, string> = {
-  draft:    "Draft",
-  review:   "In Review",
-  approved: "Approved",
-  paid:     "Paid",
-};
+const STATUS_STEPS:  RunStatus[]                 = ["draft", "review", "approved", "paid"];
+const STATUS_LABELS: Record<RunStatus, string>   = { draft: "Draft", review: "In Review", approved: "Approved", paid: "Paid" };
+const NEXT_LABELS:   Record<RunStatus, string>   = { draft: "Submit for Review", review: "Approve Pay Run", approved: "Mark as Paid", paid: "Completed" };
 
-function StatusStepper({
-  current,
-  onAdvance,
-}: {
-  current: RunStatus;
-  onAdvance: () => void;
-}) {
-  const currentIdx = STATUS_STEPS.indexOf(current);
-  const canAdvance = current !== "paid";
-
-  const nextLabel: Record<RunStatus, string> = {
-    draft:    "Submit for Review",
-    review:   "Approve Pay Run",
-    approved: "Mark as Paid",
-    paid:     "Completed",
-  };
-
+function StatusStepper({ current, onAdvance }: { current: RunStatus; onAdvance: () => void }) {
+  const idx = STATUS_STEPS.indexOf(current);
   return (
     <div className="flex items-center gap-3 flex-wrap">
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 flex-wrap">
         {STATUS_STEPS.map((step, i) => {
-          const done = i < currentIdx;
-          const active = i === currentIdx;
+          const done = i < idx; const active = i === idx;
           return (
             <div key={step} className="flex items-center gap-1">
-              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-mono ${
-                active
-                  ? "bg-[#50C878] text-[#002147] font-bold"
-                  : done
-                  ? "bg-emerald-100 text-emerald-600"
-                  : "bg-slate-100 text-slate-400"
-              }`}>
-                {done && <CheckCircle2 className="w-3 h-3" />}
+              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-mono
+                ${active ? "bg-[#50C878] text-[#002147] font-bold" : done ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-400"}`}>
+                {done && <CheckCircle2 className="w-3 h-3"/>}
                 {STATUS_LABELS[step]}
               </div>
-              {i < STATUS_STEPS.length - 1 && (
-                <ChevronRight className="w-3 h-3 text-slate-300" />
-              )}
+              {i < STATUS_STEPS.length - 1 && <ChevronRight className="w-3 h-3 text-slate-300"/>}
             </div>
           );
         })}
       </div>
-      {canAdvance && (
-        <button
-          onClick={onAdvance}
-          className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold
-                     bg-[#002147] text-white hover:bg-[#002147]/80 transition-colors"
-        >
-          <Play className="w-3 h-3" />
-          {nextLabel[current]}
+      {current !== "paid" && (
+        <button onClick={onAdvance}
+          className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold bg-[#002147] text-white hover:bg-[#002147]/80">
+          <Play className="w-3 h-3"/>{NEXT_LABELS[current]}
         </button>
       )}
     </div>
@@ -258,383 +517,366 @@ function StatusStepper({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PayrollPage() {
-  const [lines, dispatch] = useReducer(
-    gridReducer,
-    MOCK_PAY_RUN_LINES,
-    (init) => init.map(recalcLine)
-  );
-  const [status, setStatus] = useState<RunStatus>("draft");
-  const isLocked = status === "approved" || status === "paid";
+  const { employees, company } = useApp();
 
-  const warningCount = lines.filter((l) => l.calc && l.calc.warnings.length > 0).length;
+  // company is always CompanyProfile (never null) — safe to access directly
+  const pdfCompany: PdfCompany = {
+    name:          company.name,
+    tin:           company.tin,
+    nasscorpRegNo: company.nasscorpRegNo,
+    address:       company.address,
+    logoUrl:       company.logoUrl,
+  };
+
+  const defaultPeriod = getCurrentPeriod();
+  const [periodLabel,  setPeriodLabel]  = useState(defaultPeriod.label);
+  const [payDate,      setPayDate]      = useState(defaultPeriod.payDate);
+  const [exchangeRate, setExchangeRate] = useState(185.44);
+  const [runStarted,   setRunStarted]   = useState(false);
+  const [lines,        dispatch]        = useReducer(gridReducer, []);
+  const [status,       setStatus]       = useState<RunStatus>("draft");
+  const [showUpload,   setShowUpload]   = useState(false);
+  const [history,      setHistory]      = useState<SavedRun[]>([]);
+
+  const isLocked        = status === "approved" || status === "paid";
+  const warningCount    = lines.filter((l) => l.calc && l.calc.warnings.length > 0).length;
+  const activeEmployees = employees.filter((e) => e.isActive);
+
+  function handleStartRun() {
+    const rows: PayRunLine[] = activeEmployees.map((emp) => ({
+      id:                 emp.id,
+      employeeId:         emp.id,
+      employeeNumber:     emp.employeeNumber,
+      fullName:           emp.fullName,
+      jobTitle:           emp.jobTitle,
+      department:         emp.department,
+      currency:           emp.currency,
+      rate:               emp.rate,
+      regularHours:       emp.standardHours,
+      overtimeHours:      0,
+      holidayHours:       0,
+      additionalEarnings: emp.allowances ?? 0,
+      exchangeRate,
+      calc:               null,
+    }));
+    dispatch({ type: "SET_ROWS", rows });
+    setRunStarted(true);
+  }
 
   function advanceStatus() {
     const idx = STATUS_STEPS.indexOf(status);
     if (idx < STATUS_STEPS.length - 1) {
-      setStatus(STATUS_STEPS[idx + 1]);
+      const next = STATUS_STEPS[idx + 1];
+      setStatus(next);
+      if (next === "paid") {
+        const FX     = exchangeRate;
+        const toUSD  = (n: number, ccy: string) => ccy === "USD" ? n : n / FX;
+        setHistory((prev) => [{
+          id:            `RUN-${Date.now()}`,
+          periodLabel, payDate, status: "paid",
+          employeeCount: lines.length,
+          totalGross:    lines.reduce((s, l) => s + (l.calc ? toUSD(l.calc.grossPay, l.currency) : 0), 0),
+          totalNet:      lines.reduce((s, l) => s + (l.calc ? toUSD(l.calc.netPay,   l.currency) : 0), 0),
+          lines:         [...lines],
+          createdAt:     new Date().toISOString(),
+        }, ...prev]);
+      }
     }
   }
 
-  // ── Columns ──
-  const col = createColumnHelper<PayRunLine>();
+  function startNewRun() {
+    dispatch({ type: "CLEAR" }); setStatus("draft");
+    const p = getCurrentPeriod(); setPeriodLabel(p.label); setPayDate(p.payDate);
+    setRunStarted(false);
+  }
 
+  // ── Columns ───────────────────────────────────────────────────────────────
+  const col = createColumnHelper<PayRunLine>();
   const columns = useMemo(() => [
-    col.accessor("employeeNumber", {
-      header: "Emp #",
-      size: 72,
-      cell: (c) => <span className="font-mono text-[10px] text-slate-400">{c.getValue()}</span>,
-    }),
-    col.accessor("fullName", {
-      header: "Name",
-      size: 140,
+    col.accessor("employeeNumber", { header: "#", size: 64,
+      cell: (c) => <span className="font-mono text-[10px] text-slate-400">{c.getValue()}</span> }),
+    col.accessor("fullName", { header: "Name", size: 148,
       cell: (c) => (
         <div>
-          <p className="text-xs font-medium text-slate-700 leading-tight">{c.getValue()}</p>
-          <p className="text-[10px] text-slate-400">{c.row.original.department}</p>
+          <p className="text-xs font-medium text-slate-700 leading-tight truncate max-w-[130px]">{c.getValue()}</p>
+          <p className="text-[10px] text-slate-400 truncate max-w-[130px]">{c.row.original.department}</p>
         </div>
-      ),
-    }),
-    col.accessor("currency", {
-      header: "CCY",
-      size: 52,
+      ) }),
+    col.accessor("currency", { header: "CCY", size: 48,
       cell: (c) => (
-        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-          c.getValue() === "USD" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"
-        }`}>
+        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${c.getValue() === "USD" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
           {c.getValue()}
         </span>
-      ),
-    }),
-    col.accessor("rate", {
-      header: "Rate",
-      size: 80,
-      cell: (c) => (
-        <EditableCell
-          value={c.getValue()}
-          lineId={c.row.original.id}
-          field="rate"
-          dispatch={dispatch}
-          isLocked={isLocked}
-          prefix={c.row.original.currency === "USD" ? "$" : "L$"}
-        />
-      ),
-    }),
-    col.accessor("regularHours", {
-      header: "Reg Hrs",
-      size: 72,
-      cell: (c) => (
-        <EditableCell
-          value={c.getValue()}
-          lineId={c.row.original.id}
-          field="regularHours"
-          dispatch={dispatch}
-          isLocked={isLocked}
-        />
-      ),
-    }),
-    col.accessor("overtimeHours", {
-      header: "OT Hrs",
-      size: 68,
-      cell: (c) => (
-        <EditableCell
-          value={c.getValue()}
-          lineId={c.row.original.id}
-          field="overtimeHours"
-          dispatch={dispatch}
-          isLocked={isLocked}
-        />
-      ),
-    }),
-    col.accessor("holidayHours", {
-      header: "Hol Hrs",
-      size: 68,
-      cell: (c) => (
-        <EditableCell
-          value={c.getValue()}
-          lineId={c.row.original.id}
-          field="holidayHours"
-          dispatch={dispatch}
-          isLocked={isLocked}
-        />
-      ),
-    }),
-    col.accessor("additionalEarnings", {
-      header: "Extras",
-      size: 72,
-      cell: (c) => (
-        <EditableCell
-          value={c.getValue()}
-          lineId={c.row.original.id}
-          field="additionalEarnings"
-          dispatch={dispatch}
-          isLocked={isLocked}
-          prefix={c.row.original.currency === "USD" ? "$" : "L$"}
-        />
-      ),
-    }),
-    col.display({
-      id: "grossPay",
-      header: "Gross",
-      size: 88,
-      cell: (c) => {
-        const sym = c.row.original.currency === "USD" ? "$" : "L$";
-        return (
-          <span className="block text-right font-mono text-xs font-semibold text-slate-700">
-            {c.row.original.calc ? `${sym}${c.row.original.calc.grossPay.toFixed(2)}` : "—"}
-          </span>
-        );
-      },
-    }),
-    col.display({
-      id: "nasscorp",
-      header: "NASSCORP",
-      size: 88,
-      cell: (c) => {
-        const sym = c.row.original.currency === "USD" ? "$" : "L$";
-        return (
-          <span className="block text-right font-mono text-xs text-orange-500">
-            {c.row.original.calc
-              ? `${sym}${c.row.original.calc.nasscorp.employeeContribution.toFixed(2)}`
-              : "—"}
-          </span>
-        );
-      },
-    }),
-    col.display({
-      id: "paye",
-      header: "PAYE",
-      size: 88,
-      cell: (c) => {
-        const sym = c.row.original.currency === "USD" ? "$" : "L$";
-        const calc = c.row.original.calc;
+      ) }),
+    col.accessor("rate", { header: "Rate/hr", size: 78,
+      cell: (c) => <EditableCell value={c.getValue()} lineId={c.row.original.id} field="rate" dispatch={dispatch} isLocked={isLocked} prefix={c.row.original.currency === "USD" ? "$" : "L$"}/> }),
+    col.accessor("regularHours",  { header: "Reg Hrs",  size: 70,
+      cell: (c) => <EditableCell value={c.getValue()} lineId={c.row.original.id} field="regularHours"  dispatch={dispatch} isLocked={isLocked}/> }),
+    col.accessor("overtimeHours", { header: "OT Hrs",   size: 64,
+      cell: (c) => <EditableCell value={c.getValue()} lineId={c.row.original.id} field="overtimeHours" dispatch={dispatch} isLocked={isLocked}/> }),
+    col.accessor("holidayHours",  { header: "Hol Hrs",  size: 64,
+      cell: (c) => <EditableCell value={c.getValue()} lineId={c.row.original.id} field="holidayHours"  dispatch={dispatch} isLocked={isLocked}/> }),
+    col.accessor("additionalEarnings", { header: "Extras", size: 70,
+      cell: (c) => <EditableCell value={c.getValue()} lineId={c.row.original.id} field="additionalEarnings" dispatch={dispatch} isLocked={isLocked} prefix={c.row.original.currency === "USD" ? "$" : "L$"}/> }),
+    col.display({ id: "gross", header: "Gross", size: 86,
+      cell: (c) => { const sym = c.row.original.currency === "USD" ? "$" : "L$";
+        return <span className="block text-right font-mono text-xs font-semibold text-slate-700">{c.row.original.calc ? `${sym}${c.row.original.calc.grossPay.toFixed(2)}` : "—"}</span>; } }),
+    col.display({ id: "nasc", header: "NASSCORP", size: 84,
+      cell: (c) => { const sym = c.row.original.currency === "USD" ? "$" : "L$";
+        return <span className="block text-right font-mono text-xs text-orange-500">{c.row.original.calc ? `${sym}${c.row.original.calc.nasscorp.employeeContribution.toFixed(2)}` : "—"}</span>; } }),
+    col.display({ id: "tax", header: "Income Tax", size: 84,
+      cell: (c) => { const sym = c.row.original.currency === "USD" ? "$" : "L$"; const calc = c.row.original.calc;
         return (
           <div className="text-right">
-            <span className="font-mono text-xs text-red-500">
-              {calc ? `${sym}${calc.paye.taxInBase.toFixed(2)}` : "—"}
-            </span>
-            {calc && calc.paye.effectiveRate > 0 && (
-              <p className="text-[9px] text-slate-400 font-mono">
-                {(calc.paye.effectiveRate * 100).toFixed(1)}%
-              </p>
-            )}
+            <span className="font-mono text-xs text-red-500">{calc ? `${sym}${calc.Paye.taxInBase.toFixed(2)}` : "—"}</span>
+            {calc && calc.Paye.effectiveRate > 0 && <p className="text-[9px] text-slate-400 font-mono">{(calc.Paye.effectiveRate * 100).toFixed(1)}%</p>}
           </div>
-        );
-      },
-    }),
-    col.display({
-      id: "netPay",
-      header: "Net Pay",
-      size: 96,
-      cell: (c) => {
-        const sym = c.row.original.currency === "USD" ? "$" : "L$";
-        return (
-          <span className="block text-right font-mono text-xs font-bold text-emerald-600">
-            {c.row.original.calc
-              ? `${sym}${c.row.original.calc.netPay.toFixed(2)}`
-              : "—"}
-          </span>
-        );
-      },
-    }),
-    col.display({
-      id: "warn",
-      header: "",
-      size: 32,
-      cell: (c) => {
-        const warnings = c.row.original.calc?.warnings ?? [];
-        if (warnings.length === 0) {
-          return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 mx-auto" />;
-        }
+        ); } }),
+    col.display({ id: "net", header: "Net Pay", size: 94,
+      cell: (c) => { const sym = c.row.original.currency === "USD" ? "$" : "L$";
+        return <span className="block text-right font-mono text-xs font-bold text-emerald-600">{c.row.original.calc ? `${sym}${c.row.original.calc.netPay.toFixed(2)}` : "—"}</span>; } }),
+    col.display({ id: "slip", header: "Payslip", size: 72,
+      cell: (c) => <DownloadSlipButton line={c.row.original} periodLabel={periodLabel} payDate={payDate} company={pdfCompany}/> }),
+    col.display({ id: "warn", header: "", size: 28,
+      cell: (c) => { const warnings = c.row.original.calc?.warnings ?? [];
+        if (!warnings.length) return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 mx-auto"/>;
         return (
           <div className="relative group mx-auto w-fit">
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-500 cursor-pointer" />
-            <div className="absolute right-0 top-5 z-50 hidden group-hover:block w-64
-                            bg-white shadow-xl border border-amber-100 rounded-xl p-3
-                            text-xs text-amber-700 leading-relaxed">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-500 cursor-pointer"/>
+            <div className="absolute right-0 top-5 z-50 hidden group-hover:block w-64 bg-white shadow-xl border border-amber-100 rounded-xl p-3 text-xs text-amber-700 space-y-1">
               {warnings.map((w, i) => <p key={i}>{w}</p>)}
             </div>
           </div>
-        );
-      },
-    }),
-  ], [isLocked]);
+        ); } }),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [isLocked, periodLabel, payDate, pdfCompany.logoUrl]);
 
-  const table = useReactTable({
-    data: lines,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-  });
+  const table = useReactTable({ data: lines, columns, getCoreRowModel: getCoreRowModel() });
 
+  // ── Setup screen ──────────────────────────────────────────────────────────
+  if (!runStarted) {
+    return (
+      <div className="max-w-6xl mx-auto space-y-5">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Payroll</h1>
+          <p className="text-slate-400 text-sm mt-0.5">Configure and start a new pay run</p>
+        </div>
+
+        {activeEmployees.length === 0 && (
+          <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4">
+            <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5"/>
+            <div>
+              <p className="text-sm font-semibold text-amber-800">No active employees</p>
+              <p className="text-xs text-amber-600 mt-0.5">Add employees on the <strong>Employees</strong> page first.</p>
+            </div>
+          </div>
+        )}
+
+        {activeEmployees.length > 0 && (
+          <div className="bg-white rounded-2xl border border-slate-200 px-5 py-4 flex items-center gap-3">
+            <Users className="w-4 h-4 text-[#50C878] flex-shrink-0"/>
+            <p className="text-sm text-slate-600">
+              <span className="font-semibold text-slate-800">{activeEmployees.length} active employee{activeEmployees.length !== 1 ? "s" : ""}</span>
+              {" "}will be loaded. Recurring allowances pre-fill in the Extras column.
+            </p>
+          </div>
+        )}
+
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-5 max-w-lg">
+          <h2 className="font-semibold text-slate-800">New Pay Run</h2>
+
+          <div>
+            <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">Pay Period Label</label>
+            <input value={periodLabel} onChange={(e) => setPeriodLabel(e.target.value)} placeholder="e.g. July 2025"
+              className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#50C878] bg-white"/>
+          </div>
+          <div>
+            <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">Pay Date</label>
+            <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)}
+              className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#50C878] bg-white"/>
+          </div>
+          <div>
+            <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">LRD / USD Exchange Rate</label>
+            <div className="relative">
+              <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300"/>
+              <input type="number" value={exchangeRate} onChange={(e) => setExchangeRate(parseFloat(e.target.value) || 185.44)}
+                placeholder="185.44"
+                className="w-full pl-9 pr-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#50C878] bg-white"/>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">Used to convert LRD salaries for Income Tax (LRA) calculation</p>
+          </div>
+
+          <button onClick={handleStartRun} disabled={activeEmployees.length === 0}
+            className="w-full flex items-center justify-center gap-2 py-3 text-sm font-semibold rounded-xl
+                       bg-[#50C878] text-[#002147] hover:bg-[#3aa85f] disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+            <Play className="w-4 h-4"/>
+            Start Pay Run for {periodLabel}{activeEmployees.length > 0 && ` · ${activeEmployees.length} employees`}
+          </button>
+        </div>
+
+        {history.length > 0 && (
+          <div className="bg-white rounded-2xl border border-slate-200 p-5">
+            <h2 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-slate-400"/> Pay Run History
+            </h2>
+            <div className="space-y-1">
+              {history.map((run) => (
+                <div key={run.id} className="flex items-center justify-between py-3 px-4 rounded-xl hover:bg-slate-50">
+                  <div>
+                    <p className="text-sm font-medium text-slate-700">{run.periodLabel}</p>
+                    <p className="text-xs text-slate-400 font-mono">
+                      {run.employeeCount} employees · Gross ${run.totalGross.toLocaleString("en-US", { minimumFractionDigits: 2 })} · Net ${run.totalNet.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-mono uppercase px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">{run.status}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Active pay run ────────────────────────────────────────────────────────
   return (
     <div className="max-w-6xl mx-auto space-y-5">
-
-      {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Payroll</h1>
-          <p className="text-slate-400 text-sm mt-0.5">
-            June 2025 · {lines.length} employees
+          <p className="text-slate-400 text-sm mt-0.5 flex items-center gap-2">
+            <Calendar className="w-3.5 h-3.5"/> {periodLabel} · {lines.length} employees
+            <span className="text-slate-300">·</span>
+            <RefreshCw className="w-3.5 h-3.5"/> L${exchangeRate} per $1
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {!isLocked && (
-            <button
-              onClick={() => dispatch({ type: "RESET" })}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs text-slate-500
-                         border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              Reset
+          {status === "paid" && (
+            <button onClick={startNewRun}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50">
+              <Plus className="w-3.5 h-3.5"/> New Pay Run
             </button>
           )}
-          <button className="flex items-center gap-1.5 px-3 py-2 text-xs text-slate-500
-                             border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
-            <Upload className="w-3.5 h-3.5" />
-            Import CSV
-          </button>
-          <button className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold
-                             text-[#002147] bg-[#50C878] hover:bg-[#3aa85f] rounded-xl transition-colors">
-            <Download className="w-3.5 h-3.5" />
-            Export
-          </button>
+          {!isLocked && (
+            <button onClick={() => setShowUpload(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50">
+              <Upload className="w-3.5 h-3.5"/> Import CSV
+            </button>
+          )}
+          <BulkDownloadButton lines={lines} periodLabel={periodLabel} payDate={payDate} company={pdfCompany}/>
         </div>
       </div>
 
-      {/* Status stepper */}
       <div className="bg-white rounded-2xl border border-slate-200 px-5 py-4">
-        <StatusStepper current={status} onAdvance={advanceStatus} />
+        <StatusStepper current={status} onAdvance={advanceStatus}/>
       </div>
 
-      {/* Warnings banner */}
+      <div className="flex items-start gap-3 bg-blue-50 border border-blue-100 rounded-2xl px-5 py-3.5">
+        <FileDown className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5"/>
+        <p className="text-xs text-blue-600 leading-relaxed">
+          Employees loaded from your registry · allowances pre-filled in Extras. Click any cell to edit —
+          NASSCORP, Income Tax (LRA) and Net Pay recalculate instantly. Use <strong>Import CSV</strong> to add extra rows with hours pre-filled.
+        </p>
+      </div>
+
       {warningCount > 0 && (
         <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3.5">
-          <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
+          <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0"/>
           <p className="text-sm text-amber-700">
-            <strong>{warningCount} employee{warningCount > 1 ? "s" : ""}</strong> have earnings
-            below the $150 USD minimum wage threshold. Review before approving.
+            <strong>{warningCount} employee{warningCount > 1 ? "s" : ""}</strong> have gross pay below the $150 USD minimum wage. Review before approving.
           </p>
         </div>
       )}
 
-      {/* Locked banner */}
       {isLocked && (
         <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-2xl px-5 py-3.5">
-          <Lock className="w-4 h-4 text-blue-500 flex-shrink-0" />
-          <p className="text-sm text-blue-700">
-            This pay run is <strong>{status}</strong>. All figures are locked.
-          </p>
+          <Lock className="w-4 h-4 text-blue-500 flex-shrink-0"/>
+          <p className="text-sm text-blue-700">Pay run is <strong>{status}</strong>. Figures are locked. You can still download payslips.</p>
         </div>
       )}
 
-      {/* Grid */}
-      <div className="bg-white rounded-t-2xl border border-slate-200 overflow-hidden">
-        {/* Grid header bar */}
-        <div className="flex items-center justify-between px-4 py-3 bg-[#002147] text-white">
-          <div className="flex items-center gap-3">
-            <FileText className="w-4 h-4 text-white/50" />
-            <span className="text-sm font-semibold">Review & Edit</span>
-            {!isLocked && (
-              <span className="text-[10px] font-mono text-white/40">
-                Click any cell to edit
-              </span>
-            )}
+      {lines.length > 0 && (
+        <>
+          <div className="bg-white rounded-t-2xl border border-slate-200 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 bg-[#002147] text-white">
+              <div className="flex items-center gap-3">
+                <FileText className="w-4 h-4 text-white/40"/>
+                <span className="text-sm font-semibold">Review & Edit Payroll</span>
+                {!isLocked && <span className="text-[10px] font-mono text-white/30 hidden sm:inline">Click rate or hours to edit</span>}
+              </div>
+              {warningCount > 0 && (
+                <span className="text-[10px] font-mono text-amber-300 flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3"/> {warningCount} warning{warningCount > 1 ? "s" : ""}
+                </span>
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  {table.getHeaderGroups().map((hg) => (
+                    <tr key={hg.id} className="bg-slate-50 border-b border-slate-200">
+                      {hg.headers.map((h) => (
+                        <th key={h.id} style={{ width: h.getSize() }}
+                          className="px-3 py-2.5 text-[10px] font-mono font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                          {flexRender(h.column.columnDef.header, h.getContext())}
+                        </th>
+                      ))}
+                    </tr>
+                  ))}
+                </thead>
+                <tbody>
+                  {table.getRowModel().rows.map((row, i) => (
+                    <tr key={row.id}
+                      className={`border-b border-slate-100 transition-colors
+                        ${i % 2 === 0 ? "bg-white" : "bg-slate-50/50"} hover:bg-emerald-50/20
+                        ${row.original.calc?.warnings.length ? "border-l-2 border-l-amber-400" : "border-l-2 border-l-transparent"}`}>
+                      {row.getVisibleCells().map((cell) => (
+                        <td key={cell.id} className="px-3 py-2.5" style={{ width: cell.column.getSize() }}>
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-          {warningCount > 0 && (
-            <span className="text-[10px] font-mono text-amber-300 flex items-center gap-1">
-              <AlertTriangle className="w-3 h-3" />
-              {warningCount} warning{warningCount > 1 ? "s" : ""}
-            </span>
-          )}
-        </div>
+          <RunSummary lines={lines} exchangeRate={exchangeRate}/>
+        </>
+      )}
 
-        {/* Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              {table.getHeaderGroups().map((hg) => (
-                <tr key={hg.id} className="bg-slate-50 border-b border-slate-200">
-                  {hg.headers.map((h) => (
-                    <th
-                      key={h.id}
-                      style={{ width: h.getSize() }}
-                      className="px-3 py-2.5 text-[10px] font-mono font-semibold text-slate-400
-                                 uppercase tracking-wider whitespace-nowrap"
-                    >
-                      {flexRender(h.column.columnDef.header, h.getContext())}
-                    </th>
-                  ))}
-                </tr>
-              ))}
-            </thead>
-            <tbody>
-              {table.getRowModel().rows.map((row, i) => (
-                <tr
-                  key={row.id}
-                  className={`border-b border-slate-100 transition-colors
-                    ${i % 2 === 0 ? "bg-white" : "bg-slate-50/50"}
-                    hover:bg-emerald-50/30
-                    ${row.original.calc?.warnings.length
-                      ? "border-l-2 border-l-amber-400"
-                      : "border-l-2 border-l-transparent"
-                    }`}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <td
-                      key={cell.id}
-                      className="px-3 py-2.5"
-                      style={{ width: cell.column.getSize() }}
-                    >
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <RunSummary lines={lines} />
-
-      {/* Pay run history */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-5">
-        <h2 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
-          <Clock className="w-4 h-4 text-slate-400" />
-          Pay Run History
-        </h2>
-        <div className="space-y-2">
-          {MOCK_PAY_RUNS.map((run) => (
-            <div
-              key={run.id}
-              className="flex items-center justify-between py-3 px-4 rounded-xl
-                         hover:bg-slate-50 transition-colors"
-            >
-              <div className="flex items-center gap-4">
+      {history.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-5">
+          <h2 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+            <Clock className="w-4 h-4 text-slate-400"/> Pay Run History
+          </h2>
+          <div className="space-y-1">
+            {history.map((run) => (
+              <div key={run.id} className="flex items-center justify-between py-3 px-4 rounded-xl hover:bg-slate-50">
                 <div>
                   <p className="text-sm font-medium text-slate-700">{run.periodLabel}</p>
                   <p className="text-xs text-slate-400 font-mono">
-                    {run.employeeCount} employees · ${run.totalGross.toLocaleString()}
+                    {run.employeeCount} employees · Gross ${run.totalGross.toLocaleString("en-US", { minimumFractionDigits: 2 })} · Net ${run.totalNet.toLocaleString("en-US", { minimumFractionDigits: 2 })}
                   </p>
                 </div>
+                <span className="text-[10px] font-mono uppercase px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">paid</span>
               </div>
-              <div className="flex items-center gap-3">
-                <span className={`text-[10px] font-mono uppercase px-2.5 py-1 rounded-full ${
-                  run.status === "paid"    ? "bg-emerald-100 text-emerald-700" :
-                  run.status === "draft"   ? "bg-slate-100 text-slate-500" :
-                  run.status === "review"  ? "bg-amber-100 text-amber-700" :
-                                            "bg-blue-100 text-blue-700"
-                }`}>
-                  {run.status}
-                </span>
-                {run.status === "paid" && (
-                  <button className="text-xs text-[#50C878] hover:underline flex items-center gap-1">
-                    <Download className="w-3 h-3" /> PDF
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </div>
+      )}
+
+      {showUpload && (
+        <BulkUpload
+          onClose={() => setShowUpload(false)}
+          onImport={(bulkRows) => {
+            // ── Convert BulkRow[] → PayRunLine[] before dispatching ──────────
+            const payRunLines = bulkRows.map((r) => bulkRowToPayRunLine(r, exchangeRate));
+            dispatch({ type: "IMPORT_ROWS", rows: payRunLines });
+            setShowUpload(false);
+          }}
+        />
+      )}
     </div>
   );
 }
