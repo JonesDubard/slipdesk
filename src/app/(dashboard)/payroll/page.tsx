@@ -308,6 +308,7 @@ async function generatePayslipBlob({ line, periodLabel, payDate, company }: PdfO
           <Text style={S.netLabel}>NET PAY</Text>
           <View style={{ alignItems: "flex-end" }}>
             <Text style={S.netValue}>{fmtMoney(calc.netPay, sym)}</Text>
+          </View>
         </View>
 
         <View style={S.compRow}>
