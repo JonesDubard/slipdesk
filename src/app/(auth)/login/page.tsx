@@ -1,239 +1,201 @@
 "use client";
 
 /**
- * Slipdesk — Login Page
- * Paste into: src/app/(auth)/login/page.tsx
+ * Slipdesk — Login / Signup Page
+ * Place at: src/app/(auth)/login/page.tsx
  *
- * Super Admin credentials:
- *   Email:    admin@slipdesk.lr
- *   Password: Slipdesk@2026!
+ * Also create: src/app/(auth)/layout.tsx  (see bottom of file)
  */
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, AlertCircle, Crown, CheckCircle2 } from "lucide-react";
+import Link from "next/link";
+import Image from "next/image";
+import { Eye, EyeOff, Loader, AlertCircle, CheckCircle2 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
-// ─── Super Admin account ──────────────────────────────────────────────────────
-// This is checked client-side for the demo.
-// Replace with a real Supabase signInWithPassword() call when going live.
-
-const SUPER_ADMIN = {
-  email:    "admin@slipdesk.lr",
-  password: "Slipdesk@2026!",
-  name:     "Super Admin",
-  role:     "super_admin",
-  plan:     "premium",
-};
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
+type Mode = "login" | "signup";
 
 export default function LoginPage() {
-  const router = useRouter();
+  const router   = useRouter();
+  const supabase = createClient();
 
-  const [email,    setEmail]    = useState("");
-  const [password, setPassword] = useState("");
-  const [showPw,   setShowPw]   = useState(false);
-  const [error,    setError]    = useState("");
-  const [loading,  setLoading]  = useState(false);
-  const [success,  setSuccess]  = useState(false);
+  const [mode,        setMode]        = useState<Mode>("login");
+  const [email,       setEmail]       = useState("");
+  const [password,    setPassword]    = useState("");
+  const [company,     setCompany]     = useState("");
+  const [showPass,    setShowPass]    = useState(false);
+  const [loading,     setLoading]     = useState(false);
+  const [error,       setError]       = useState<string | null>(null);
+  const [successMsg,  setSuccessMsg]  = useState<string | null>(null);
 
-  async function handleLogin() {
-    setError("");
+  async function handleSubmit() {
+    setError(null);
+    setSuccessMsg(null);
 
-    if (!email.trim())    { setError("Please enter your email.");    return; }
-    if (!password.trim()) { setError("Please enter your password."); return; }
+    if (!email.trim() || !password.trim()) {
+      setError("Email and password are required.");
+      return;
+    }
+    if (mode === "signup" && !company.trim()) {
+      setError("Company name is required.");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
 
     setLoading(true);
 
-    // Simulate a brief network delay so it feels real
-    await new Promise((r) => setTimeout(r, 800));
-
-    // Check against super admin credentials
-    if (
-      email.trim().toLowerCase() === SUPER_ADMIN.email &&
-      password === SUPER_ADMIN.password
-    ) {
-      // Store session in localStorage so other pages know who's logged in
-      localStorage.setItem("slipdesk_user", JSON.stringify({
-        email:    SUPER_ADMIN.email,
-        name:     SUPER_ADMIN.name,
-        role:     SUPER_ADMIN.role,
-        plan:     SUPER_ADMIN.plan,
-        loggedIn: true,
-      }));
-      setSuccess(true);
-      await new Promise((r) => setTimeout(r, 600));
+    if (mode === "login") {
+      const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+      if (err) { setError(err.message); setLoading(false); return; }
       router.push("/dashboard");
+      router.refresh();
     } else {
-      setError("Incorrect email or password. Try admin@slipdesk.lr / Slipdesk@2025!");
-      setLoading(false);
+      const { error: err } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { company_name: company.trim() },
+          // emailRedirectTo: `${window.location.origin}/dashboard`,
+        },
+      });
+      if (err) { setError(err.message); setLoading(false); return; }
+      // In dev with email confirmation off, log in immediately
+      const { error: loginErr } = await supabase.auth.signInWithPassword({ email, password });
+      if (loginErr) {
+        setSuccessMsg("Account created! Check your email to confirm, then log in.");
+        setLoading(false);
+        setMode("login");
+        return;
+      }
+      router.push("/dashboard");
+      router.refresh();
     }
   }
 
+  const inputClass =
+    "w-full px-4 py-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-800 " +
+    "placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-[#50C878] focus:border-transparent " +
+    "transition-all";
+
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
 
-      {/* Left panel */}
-      <div className="hidden lg:flex lg:w-1/2 bg-[#002147] flex-col justify-between p-12">
-        <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Slipdesk</h1>
-          <p className="text-white/40 text-sm mt-1 font-mono">Liberian Payroll, Simplified</p>
-        </div>
-        <div className="space-y-6">
-          {[
-            { title: "LRA Paye Compliant",          desc: "Automatic tax brackets updated for Liberia" },
-            { title: "NASSCORP Built-in",            desc: "4% employee, 6% employer — calculated instantly" },
-            { title: "Multi-currency",               desc: "USD and LRD with live exchange rate conversion" },
-            { title: "PDF Payslips in One Click",    desc: "Professional payslips for every employee" },
-          ].map((f) => (
-            <div key={f.title} className="flex items-start gap-3">
-              <div className="w-1.5 h-1.5 rounded-full bg-[#50C878] mt-2 flex-shrink-0" />
-              <div>
-                <p className="text-white text-sm font-semibold">{f.title}</p>
-                <p className="text-white/40 text-xs mt-0.5">{f.desc}</p>
-              </div>
+        {/* Logo */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center gap-2.5 mb-3">
+            <div className="w-10 h-10 rounded-xl bg-[#002147] flex items-center justify-center">
+              <Image src="/Slipdesk_Logo_.png" alt="Slipdesk" width={24} height={24}
+                className="object-contain" style={{ filter:"brightness(0) invert(1)" }}
+                onError={(e) => { (e.target as HTMLImageElement).style.display="none"; }}/>
             </div>
-          ))}
-        </div>
-        <p className="text-white/20 text-xs font-mono">© {new Date().getFullYear()} Slipdesk · slipdesk.lr</p>
-      </div>
-
-      {/* Right panel — form */}
-      <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 bg-slate-50">
-        <div className="w-full max-w-md space-y-6">
-
-          {/* Logo (mobile) */}
-          <div className="lg:hidden text-center mb-2">
-            <h1 className="text-2xl font-bold text-[#002147]">Slipdesk</h1>
+            <span className="text-2xl font-bold text-[#002147]">Slipdesk</span>
           </div>
+          <p className="text-slate-400 text-sm">Liberian payroll, simplified</p>
+        </div>
 
-          <div>
-            <h2 className="text-2xl font-bold text-slate-800">Welcome back</h2>
-            <p className="text-slate-400 text-sm mt-1">Sign in to your account</p>
-          </div>
-
-          {/* Super admin hint card */}
-          <div className="bg-[#002147] rounded-2xl p-4 space-y-2">
-            <div className="flex items-center gap-2">
-              <Crown className="w-4 h-4 text-[#50C878]" />
-              <p className="text-sm font-semibold text-white">Super Admin Test Account</p>
-              <span className="ml-auto text-[10px] font-mono bg-[#50C878] text-[#002147] px-2 py-0.5 rounded-full font-bold">
-                PREMIUM
-              </span>
-            </div>
-            <div className="bg-white/5 rounded-xl p-3 space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-white/40 text-xs font-mono">Email</span>
-                <button
-                  onClick={() => setEmail(SUPER_ADMIN.email)}
-                  className="text-[#50C878] text-xs font-mono hover:underline"
-                >
-                  admin@slipdesk.lr
-                </button>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-white/40 text-xs font-mono">Password</span>
-                <button
-                  onClick={() => setPassword(SUPER_ADMIN.password)}
-                  className="text-[#50C878] text-xs font-mono hover:underline"
-                >
-                  Slipdesk@2025!
-                </button>
-              </div>
-            </div>
-            <p className="text-white/30 text-[10px] font-mono">
-              Click the values above to auto-fill the form
-            </p>
+        {/* Card */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          {/* Tabs */}
+          <div className="flex border-b border-slate-100">
+            {(["login","signup"] as Mode[]).map((m) => (
+              <button key={m} onClick={() => { setMode(m); setError(null); setSuccessMsg(null); }}
+                className={`flex-1 py-4 text-sm font-semibold transition-all
+                  ${mode === m
+                    ? "text-[#002147] border-b-2 border-[#50C878]"
+                    : "text-slate-400 hover:text-slate-600"}`}>
+                {m === "login" ? "Sign In" : "Create Account"}
+              </button>
+            ))}
           </div>
 
           {/* Form */}
-          <div className="space-y-4">
+          <div className="p-6 space-y-4">
+            {mode === "signup" && (
+              <div>
+                <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
+                  Company Name
+                </label>
+                <input value={company} onChange={(e) => setCompany(e.target.value)}
+                  placeholder="Demo Company Ltd." className={inputClass}
+                  onKeyDown={(e) => e.key === "Enter" && handleSubmit()}/>
+              </div>
+            )}
 
-            {/* Email */}
             <div>
               <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
-                Email
+                Email Address
               </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-                placeholder="admin@slipdesk.lr"
-                className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl bg-white
-                           focus:outline-none focus:ring-2 focus:ring-[#50C878] focus:border-transparent
-                           placeholder-slate-300 text-slate-800"
-              />
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                placeholder="admin@company.lr" className={inputClass}
+                onKeyDown={(e) => e.key === "Enter" && handleSubmit()}/>
             </div>
 
-            {/* Password */}
             <div>
               <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
                 Password
               </label>
               <div className="relative">
-                <input
-                  type={showPw ? "text" : "password"}
-                  value={password}
+                <input type={showPass ? "text" : "password"} value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-                  placeholder="••••••••••••"
-                  className="w-full px-4 py-3 pr-11 text-sm border border-slate-200 rounded-xl bg-white
-                             focus:outline-none focus:ring-2 focus:ring-[#50C878] focus:border-transparent
-                             placeholder-slate-300 text-slate-800"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPw(!showPw)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                >
-                  {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  placeholder={mode === "signup" ? "Min. 8 characters" : "••••••••"}
+                  className={`${inputClass} pr-11`}
+                  onKeyDown={(e) => e.key === "Enter" && handleSubmit()}/>
+                <button type="button" onClick={() => setShowPass(!showPass)}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500">
+                  {showPass ? <EyeOff className="w-4 h-4"/> : <Eye className="w-4 h-4"/>}
                 </button>
               </div>
             </div>
 
+            {/* Forgot password — sign-in mode only */}
+            {mode === "login" && (
+              <div className="text-right -mt-1">
+                <Link href="/forgot-password"
+                  className="text-xs text-slate-400 hover:text-[#002147] transition-colors">
+                  Forgot password?
+                </Link>
+              </div>
+            )}
+
             {/* Error */}
             {error && (
-              <div className="flex items-start gap-2 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
-                <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-red-600">{error}</p>
+              <div className="flex items-start gap-2.5 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5"/>
+                <p className="text-xs text-red-600">{error}</p>
               </div>
             )}
 
             {/* Success */}
-            {success && (
-              <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                <p className="text-sm text-emerald-700 font-medium">Login successful! Redirecting…</p>
+            {successMsg && (
+              <div className="flex items-start gap-2.5 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5"/>
+                <p className="text-xs text-emerald-700">{successMsg}</p>
               </div>
             )}
 
-            {/* Submit */}
-            <button
-              onClick={handleLogin}
-              disabled={loading}
-              className="w-full py-3 text-sm font-semibold rounded-xl bg-[#50C878] text-[#002147]
-                         hover:bg-[#3aa85f] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {loading && !success ? (
-                <span className="flex items-center justify-center gap-2">
-                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                  </svg>
-                  Signing in…
-                </span>
-              ) : "Sign In"}
+            <button onClick={handleSubmit} disabled={loading}
+              className="w-full py-3 rounded-xl text-sm font-bold bg-[#50C878] text-[#002147]
+                         hover:bg-[#3aa85f] disabled:opacity-50 disabled:cursor-not-allowed
+                         transition-colors flex items-center justify-center gap-2">
+              {loading && <Loader className="w-4 h-4 animate-spin"/>}
+              {mode === "login" ? "Sign In" : "Create Account"}
             </button>
-
-            <p className="text-center text-sm text-slate-400">
-              Don&apos;t have an account?{" "}
-              <a href="/signup" className="text-[#002147] font-semibold hover:underline">
-                Sign up
-              </a>
-            </p>
           </div>
         </div>
+
+        <p className="text-center text-xs text-slate-400 mt-6">
+          LRA & NASSCORP compliant payroll for Liberian businesses
+        </p>
+        <p className="text-center text-xs text-slate-300 mt-2">
+          <Link href="/legal" className="hover:text-slate-500 transition-colors">Terms of Service</Link>
+          <span className="mx-2">·</span>
+          <Link href="/legal" className="hover:text-slate-500 transition-colors">Privacy Policy</Link>
+        </p>
       </div>
     </div>
   );

@@ -9,7 +9,7 @@ export default function TestPage() {
     regularHours: 173.33,
     overtimeHours: 10,
     holidayHours: 0,
-    exchangeRate: 193.5,
+    exchangeRate: 185.44,
   });
   return <pre className="p-8">{JSON.stringify(result, null, 2)}</pre>;
 }

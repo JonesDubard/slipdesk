@@ -6,7 +6,7 @@
  */
 
 import {
-  useReducer, useMemo, useState, useCallback,
+  useReducer, useMemo, useState, useCallback, useEffect, useRef,
 } from "react";
 import {
   createColumnHelper, flexRender,
@@ -22,6 +22,8 @@ import type { PayRunLine } from "@/lib/mock-data";
 import BulkUpload, { type BulkRow } from "@/components/BulkUpload";
 import { employeeToPayrollInput } from "@/lib/payroll-adapter";
 import { useApp } from "@/context/AppContext";
+import { createClient } from "@/lib/supabase/client";
+import { useToast } from "@/components/Toast";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +37,9 @@ interface SavedRun {
   employeeCount: number;
   totalGross:    number;
   totalNet:      number;
+  totalTax:      number;
+  totalNasscorp: number;
+  exchangeRate:  number;
   lines:         PayRunLine[];
   createdAt:     string;
 }
@@ -50,6 +55,8 @@ interface PdfCompany {
   tin:           string;
   nasscorpRegNo: string;
   address:       string;
+  phone:         string;
+  email:         string;
   logoUrl:       string | null;
 }
 
@@ -229,6 +236,8 @@ async function generatePayslipBlob({ line, periodLabel, payDate, company }: PdfO
               {company.address       && <Text style={S.coMeta}>{company.address}</Text>}
               {company.tin           && <Text style={S.coMeta}>LRA TIN: {company.tin}</Text>}
               {company.nasscorpRegNo && <Text style={S.coMeta}>NASSCORP Reg: {company.nasscorpRegNo}</Text>}
+              {company.phone         && <Text style={S.coMeta}>Tel: {company.phone}</Text>}
+              {company.email         && <Text style={S.coMeta}>{company.email}</Text>}
             </View>
           </View>
           <View style={S.badge}><Text style={S.badgeText}>PAYSLIP</Text></View>
@@ -346,6 +355,7 @@ function buildFilename(fullName: string, periodLabel: string) {
 function DownloadSlipButton({ line, periodLabel, payDate, company }: {
   line: PayRunLine; periodLabel: string; payDate: string; company: PdfCompany;
 }) {
+  const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   async function handle() {
     if (!line.calc) return;
@@ -356,7 +366,7 @@ function DownloadSlipButton({ line, periodLabel, payDate, company }: {
       const a    = document.createElement("a");
       a.href = url; a.download = buildFilename(line.fullName, periodLabel); a.click();
       URL.revokeObjectURL(url);
-    } catch (e) { console.error(e); alert("Could not generate payslip."); }
+    } catch (e) { console.error(e); toast.error("Could not generate payslip. Try again."); }
     finally { setLoading(false); }
   }
   return (
@@ -373,6 +383,7 @@ function DownloadSlipButton({ line, periodLabel, payDate, company }: {
 function BulkDownloadButton({ lines, periodLabel, payDate, company }: {
   lines: PayRunLine[]; periodLabel: string; payDate: string; company: PdfCompany;
 }) {
+  const { toast } = useToast();
   const [loading,   setLoading]   = useState(false);
   const [progress,  setProgress]  = useState({ done: 0, total: 0 });
   const valid = lines.filter((l) => l.calc !== null);
@@ -390,7 +401,7 @@ function BulkDownloadButton({ lines, periodLabel, payDate, company }: {
         setProgress({ done: i + 1, total: valid.length });
         await new Promise((r) => setTimeout(r, 350));
       }
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); toast.error("Some payslips could not be generated."); }
     finally { setLoading(false); setProgress({ done: 0, total: 0 }); }
   }
 
@@ -486,7 +497,9 @@ const STATUS_STEPS:  RunStatus[]                 = ["draft", "review", "approved
 const STATUS_LABELS: Record<RunStatus, string>   = { draft: "Draft", review: "In Review", approved: "Approved", paid: "Paid" };
 const NEXT_LABELS:   Record<RunStatus, string>   = { draft: "Submit for Review", review: "Approve Pay Run", approved: "Mark as Paid", paid: "Completed" };
 
-function StatusStepper({ current, onAdvance }: { current: RunStatus; onAdvance: () => void }) {
+function StatusStepper({ current, onAdvance, saving = false }: {
+  current: RunStatus; onAdvance: () => void; saving?: boolean;
+}) {
   const idx = STATUS_STEPS.indexOf(current);
   return (
     <div className="flex items-center gap-3 flex-wrap">
@@ -506,9 +519,12 @@ function StatusStepper({ current, onAdvance }: { current: RunStatus; onAdvance: 
         })}
       </div>
       {current !== "paid" && (
-        <button onClick={onAdvance}
-          className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold bg-[#002147] text-white hover:bg-[#002147]/80">
-          <Play className="w-3 h-3"/>{NEXT_LABELS[current]}
+        <button onClick={onAdvance} disabled={saving}
+          className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold
+                     bg-[#002147] text-white hover:bg-[#002147]/80 disabled:opacity-60 disabled:cursor-not-allowed">
+          {saving
+            ? <><Loader className="w-3 h-3 animate-spin"/>Saving…</>
+            : <><Play className="w-3 h-3"/>{NEXT_LABELS[current]}</>}
         </button>
       )}
     </div>
@@ -519,6 +535,7 @@ function StatusStepper({ current, onAdvance }: { current: RunStatus; onAdvance: 
 
 export default function PayrollPage() {
   const { employees, company } = useApp();
+  const { toast } = useToast();
 
   // company is always CompanyProfile (never null) — safe to access directly
   const pdfCompany: PdfCompany = {
@@ -526,6 +543,8 @@ export default function PayrollPage() {
     tin:           company.tin,
     nasscorpRegNo: company.nasscorpRegNo,
     address:       company.address,
+    phone:         company.phone,
+    email:         company.email,
     logoUrl:       company.logoUrl,
   };
 
@@ -538,6 +557,43 @@ export default function PayrollPage() {
   const [status,       setStatus]       = useState<RunStatus>("draft");
   const [showUpload,   setShowUpload]   = useState(false);
   const [history,      setHistory]      = useState<SavedRun[]>([]);
+  const [saving,       setSaving]       = useState(false);
+
+  // Supabase client — stable ref, never recreated
+  const sbRef = useRef<ReturnType<typeof createClient> | null>(null);
+  if (!sbRef.current) sbRef.current = createClient();
+  const supabase = sbRef.current;
+
+  // ── Load pay run history from Supabase on mount ──────────────────────
+  useEffect(() => {
+    async function loadHistory() {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await (supabase as any)
+        .from("pay_runs")
+        .select("*")
+        .eq("status", "paid")
+        .order("created_at", { ascending: false })
+        .limit(20);
+      if (!data) return;
+      setHistory(data.map((r: any) => ({
+        id:            r.id,
+        periodLabel:   r.period_label,
+        payDate:       r.pay_date,
+        status:        r.status,
+        employeeCount: r.employee_count,
+        totalGross:    r.total_gross,
+        totalNet:      r.total_net,
+        totalTax:      r.total_income_tax,
+        totalNasscorp: r.total_nasscorp,
+        exchangeRate:  r.exchange_rate,
+        lines:         [],          // lines not loaded in list view
+        createdAt:     r.created_at,
+      })));
+    }
+    loadHistory();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
 
   const isLocked        = status === "approved" || status === "paid";
   const warningCount    = lines.filter((l) => l.calc && l.calc.warnings.length > 0).length;
@@ -564,23 +620,99 @@ export default function PayrollPage() {
     setRunStarted(true);
   }
 
-  function advanceStatus() {
+  async function advanceStatus() {
     const idx = STATUS_STEPS.indexOf(status);
-    if (idx < STATUS_STEPS.length - 1) {
-      const next = STATUS_STEPS[idx + 1];
-      setStatus(next);
-      if (next === "paid") {
-        const FX     = exchangeRate;
-        const toUSD  = (n: number, ccy: string) => ccy === "USD" ? n : n / FX;
-        setHistory((prev) => [{
-          id:            `RUN-${Date.now()}`,
-          periodLabel, payDate, status: "paid",
+    if (idx >= STATUS_STEPS.length - 1) return;
+    const next = STATUS_STEPS[idx + 1];
+    setStatus(next);
+
+    if (next === "paid") {
+      setSaving(true);
+      try {
+        const FX    = exchangeRate;
+        const toUSD = (n: number, ccy: string) => ccy === "USD" ? n : n / FX;
+
+        const totalGross    = lines.reduce((s, l) => s + (l.calc ? toUSD(l.calc.grossPay,                           l.currency) : 0), 0);
+        const totalNet      = lines.reduce((s, l) => s + (l.calc ? toUSD(l.calc.netPay,                             l.currency) : 0), 0);
+        const totalTax      = lines.reduce((s, l) => s + (l.calc ? toUSD(l.calc.Paye.taxInBase,                     l.currency) : 0), 0);
+        const totalNasscorp = lines.reduce((s, l) => s + (l.calc ? toUSD(l.calc.nasscorp.employeeContribution,      l.currency) : 0), 0);
+
+        // ── Save pay_run header ─────────────────────────────────────────────
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: run, error: runErr } = await (supabase as any)
+          .from("pay_runs")
+          .insert({
+            period_label:     periodLabel,
+            pay_period_start: payDate,   // simplified — same as pay date for now
+            pay_period_end:   payDate,
+            pay_date:         payDate,
+            exchange_rate:    FX,
+            status:           "paid",
+            employee_count:   lines.length,
+            total_gross:      totalGross,
+            total_net:        totalNet,
+            total_income_tax: totalTax,
+            total_nasscorp:   totalNasscorp,
+          })
+          .select()
+          .single();
+
+        if (runErr) throw runErr;
+
+        // ── Save pay_run_lines ──────────────────────────────────────────────
+        if (run && lines.length > 0) {
+          const lineRows = lines
+            .filter((l) => l.calc !== null)
+            .map((l) => ({
+              pay_run_id:          run.id,
+              employee_id:         l.employeeId,
+              employee_number:     l.employeeNumber,
+              full_name:           l.fullName,
+              job_title:           l.jobTitle,
+              department:          l.department,
+              currency:            l.currency,
+              rate:                l.rate,
+              regular_hours:       l.regularHours,
+              overtime_hours:      l.overtimeHours,
+              holiday_hours:       l.holidayHours,
+              additional_earnings: l.additionalEarnings,
+              exchange_rate:       l.exchangeRate,
+              gross_pay:           l.calc!.grossPay,
+              income_tax:          l.calc!.Paye.taxInBase,
+              nasscorp_ee:         l.calc!.nasscorp.employeeContribution,
+              nasscorp_er:         l.calc!.nasscorp.employerContribution,
+              net_pay:             l.calc!.netPay,
+            }));
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { error: lineErr } = await (supabase as any)
+            .from("pay_run_lines")
+            .insert(lineRows);
+
+          if (lineErr) {
+            console.error("pay_run_lines insert error:", lineErr);
+            toast.error("Pay run saved but some line items failed to record. Contact support if this persists.");
+          }
+        }
+
+        // ── Update local history ────────────────────────────────────────────
+        const savedRun: SavedRun = {
+          id:            run?.id ?? `LOCAL-${Date.now()}`,
+          periodLabel,   payDate,  status: "paid",
           employeeCount: lines.length,
-          totalGross:    lines.reduce((s, l) => s + (l.calc ? toUSD(l.calc.grossPay, l.currency) : 0), 0),
-          totalNet:      lines.reduce((s, l) => s + (l.calc ? toUSD(l.calc.netPay,   l.currency) : 0), 0),
+          totalGross, totalNet, totalTax, totalNasscorp,
+          exchangeRate:  FX,
           lines:         [...lines],
           createdAt:     new Date().toISOString(),
-        }, ...prev]);
+        };
+        setHistory((prev) => [savedRun, ...prev]);
+        toast.success(`${periodLabel} pay run saved. ${lines.length} employee${lines.length !== 1 ? "s" : ""} paid.`);
+
+      } catch (err) {
+        console.error("Failed to save pay run:", err);
+        toast.error("Pay run marked as paid locally but could not be saved to Supabase. Check your connection and try again.");
+      } finally {
+        setSaving(false);
       }
     }
   }
@@ -723,13 +855,26 @@ export default function PayrollPage() {
             <div className="space-y-1">
               {history.map((run) => (
                 <div key={run.id} className="flex items-center justify-between py-3 px-4 rounded-xl hover:bg-slate-50">
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-slate-700">{run.periodLabel}</p>
                     <p className="text-xs text-slate-400 font-mono">
-                      {run.employeeCount} employees · Gross ${run.totalGross.toLocaleString("en-US", { minimumFractionDigits: 2 })} · Net ${run.totalNet.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                      {run.employeeCount} emp
+                      {" · "}Gross ${run.totalGross.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                      {" · "}Net ${run.totalNet.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                      {run.totalTax      ? ` · Tax $${run.totalTax.toLocaleString("en-US",      { minimumFractionDigits: 2 })}` : ""}
+                      {run.totalNasscorp ? ` · NASC $${run.totalNasscorp.toLocaleString("en-US", { minimumFractionDigits: 2 })}` : ""}
                     </p>
                   </div>
-                  <span className="text-[10px] font-mono uppercase px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">{run.status}</span>
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                    {run.lines.length > 0 && (
+                      <BulkDownloadButton
+                        lines={run.lines}
+                        periodLabel={run.periodLabel}
+                        payDate={run.payDate}
+                        company={pdfCompany}/>
+                    )}
+                    <span className="text-[10px] font-mono uppercase px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">paid</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -769,7 +914,7 @@ export default function PayrollPage() {
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 px-5 py-4">
-        <StatusStepper current={status} onAdvance={advanceStatus}/>
+        <StatusStepper current={status} onAdvance={advanceStatus} saving={saving}/>
       </div>
 
       <div className="flex items-start gap-3 bg-blue-50 border border-blue-100 rounded-2xl px-5 py-3.5">
@@ -811,7 +956,8 @@ export default function PayrollPage() {
                 </span>
               )}
             </div>
-            <div className="overflow-x-auto">
+            {/* ── Desktop table ──────────────────────────────────────── */}
+            <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   {table.getHeaderGroups().map((hg) => (
@@ -841,6 +987,82 @@ export default function PayrollPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* ── Mobile card stack ───────────────────────────────────────── */}
+            <div className="sm:hidden divide-y divide-slate-100">
+              {lines.map((line) => {
+                const sym      = line.currency === "USD" ? "$" : "L$";
+                const hasWarn  = (line.calc?.warnings.length ?? 0) > 0;
+                return (
+                  <div key={line.id}
+                    className={`p-4 ${hasWarn ? "border-l-2 border-l-amber-400" : ""}`}>
+                    {/* Row header */}
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-800 truncate">{line.fullName}</p>
+                        <p className="text-xs text-slate-400 truncate">{line.jobTitle} · {line.department}</p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full
+                          ${line.currency === "USD" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
+                          {line.currency}
+                        </span>
+                        {hasWarn && <AlertTriangle className="w-3.5 h-3.5 text-amber-400"/>}
+                      </div>
+                    </div>
+
+                    {/* Editable fields — 2-col grid */}
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 mb-3">
+                      <div>
+                        <p className="text-[10px] font-mono text-slate-400 uppercase mb-0.5">Rate/hr</p>
+                        <EditableCell value={line.rate} lineId={line.id} field="rate"
+                          dispatch={dispatch} isLocked={isLocked}
+                          prefix={line.currency === "USD" ? "$" : "L$"}/>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-mono text-slate-400 uppercase mb-0.5">Reg Hrs</p>
+                        <EditableCell value={line.regularHours} lineId={line.id} field="regularHours"
+                          dispatch={dispatch} isLocked={isLocked}/>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-mono text-slate-400 uppercase mb-0.5">OT Hrs</p>
+                        <EditableCell value={line.overtimeHours} lineId={line.id} field="overtimeHours"
+                          dispatch={dispatch} isLocked={isLocked}/>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-mono text-slate-400 uppercase mb-0.5">Extras</p>
+                        <EditableCell value={line.additionalEarnings} lineId={line.id} field="additionalEarnings"
+                          dispatch={dispatch} isLocked={isLocked}
+                          prefix={line.currency === "USD" ? "$" : "L$"}/>
+                      </div>
+                    </div>
+
+                    {/* Computed totals */}
+                    {line.calc && (
+                      <div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2 text-xs font-mono">
+                        <div className="text-center">
+                          <p className="text-slate-400 text-[10px] uppercase">Gross</p>
+                          <p className="font-semibold text-slate-700">{sym}{line.calc.grossPay.toFixed(2)}</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-slate-400 text-[10px] uppercase">Tax</p>
+                          <p className="text-red-500">{sym}{line.calc.Paye.taxInBase.toFixed(2)}</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-slate-400 text-[10px] uppercase">NASC</p>
+                          <p className="text-orange-500">{sym}{line.calc.nasscorp.employeeContribution.toFixed(2)}</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-slate-400 text-[10px] uppercase">Net</p>
+                          <p className="font-bold text-emerald-600">{sym}{line.calc.netPay.toFixed(2)}</p>
+                        </div>
+                        <DownloadSlipButton line={line} periodLabel={periodLabel} payDate={payDate} company={pdfCompany}/>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
           <RunSummary lines={lines} exchangeRate={exchangeRate}/>
         </>
@@ -854,13 +1076,26 @@ export default function PayrollPage() {
           <div className="space-y-1">
             {history.map((run) => (
               <div key={run.id} className="flex items-center justify-between py-3 px-4 rounded-xl hover:bg-slate-50">
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-slate-700">{run.periodLabel}</p>
                   <p className="text-xs text-slate-400 font-mono">
-                    {run.employeeCount} employees · Gross ${run.totalGross.toLocaleString("en-US", { minimumFractionDigits: 2 })} · Net ${run.totalNet.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                    {run.employeeCount} emp
+                    {" · "}Gross ${run.totalGross.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                    {" · "}Net ${run.totalNet.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                    {run.totalTax      ? ` · Tax $${run.totalTax.toLocaleString("en-US",       { minimumFractionDigits: 2 })}` : ""}
+                    {run.totalNasscorp ? ` · NASC $${run.totalNasscorp.toLocaleString("en-US", { minimumFractionDigits: 2 })}` : ""}
                   </p>
                 </div>
-                <span className="text-[10px] font-mono uppercase px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">paid</span>
+                <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                  {run.lines.length > 0 && (
+                    <BulkDownloadButton
+                      lines={run.lines}
+                      periodLabel={run.periodLabel}
+                      payDate={run.payDate}
+                      company={pdfCompany}/>
+                  )}
+                  <span className="text-[10px] font-mono uppercase px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">paid</span>
+                </div>
               </div>
             ))}
           </div>

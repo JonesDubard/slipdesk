@@ -224,7 +224,7 @@ function Hero() {
             className="text-white/60 text-base sm:text-lg leading-relaxed mb-10 max-w-xl font-light"
           >
             Slipdesk automates USD ↔ LRD payroll, calculates NASSCORP contributions and LRA
-            income tax to the last decimal.
+            income tax to the last decimal — so you never touch a manual spreadsheet again.
           </motion.p>
 
           <motion.div
@@ -365,13 +365,13 @@ const FEATURES = [
   {
     icon: RefreshCw,
     title: "Offline-First Resilience",
-    desc: "Internet blips won't cost you an hour of work. Keep working offline, data syncs automatically when you reconnect.",
+    desc: "Internet blips won't cost you an hour of work. Keep working offline — data syncs automatically when you reconnect.",
     tag: "Offline Ready",
   },
   {
     icon: BarChart3,
     title: "Instant Recalculation Grid",
-    desc: "Edit any cell, rate, hours, allowances, and watch income tax, NASSCORP, and Net Pay update in real time across the whole row.",
+    desc: "Edit any cell — rate, hours, allowances — and watch income tax, NASSCORP, and Net Pay update in real time across the whole row.",
     tag: "Live Preview",
   },
   {
@@ -392,7 +392,7 @@ function Features() {
             Everything you need,<br />nothing you don't.
           </h2>
           <p className="text-slate-500 max-w-xl mx-auto text-sm sm:text-base">
-            Slipdesk is purpose-built for how Liberian businesses actually pay people,
+            Slipdesk is purpose-built for how Liberian businesses actually pay people —
             dual currencies, complex tax rules, and patchy internet included.
           </p>
         </AnimateIn>
@@ -407,7 +407,9 @@ function Features() {
             <motion.div
               key={f.title}
               variants={fadeUp}
-            className="bg-white rounded-2xl p-6 sm:p-7 border border-slate-100 hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-50 transition-all group"
+              className="bg-white rounded-2xl p-6 sm:p-7 border border-slate-100
+                         hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-50
+                         transition-all group"
             >
               <div className="flex items-start justify-between mb-5">
                 <div className="w-10 h-10 rounded-xl bg-navy/5 flex items-center justify-center group-hover:bg-em/10 transition-colors">
@@ -448,7 +450,7 @@ function Compliance() {
             </h2>
             <p className="text-white/60 leading-relaxed mb-8 text-sm sm:text-base">
               Slipdesk implements every LRA monthly income tax bracket and NASSCORP contribution
-              rate. Each pay run is a precise, auditable record, no rounding errors, no
+              rate. Each pay run is a precise, auditable record — no rounding errors, no
               forgotten thresholds.
             </p>
             <div className="space-y-3">
@@ -555,7 +557,7 @@ function Pricing() {
             Transparent. Predictable. Fair.
           </h2>
           <p className="text-slate-500 max-w-md mx-auto text-sm sm:text-base">
-            One simple model, you pay only for the employees you actually run payroll for.
+            One simple model — you pay only for the employees you actually run payroll for.
           </p>
         </AnimateIn>
         <AnimateIn delay={1} className="max-w-lg mx-auto">

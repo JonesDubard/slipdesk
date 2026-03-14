@@ -292,8 +292,8 @@ function buildColumns(
       },
     }),
     col.display({
-      id: "paye",
-      header: "PAYE",
+      id: "Paye",
+      header: "Paye",
       size: 100,
       cell: (c) => {
         const calc = c.row.original.calc;
@@ -301,11 +301,11 @@ function buildColumns(
         return (
           <div className="text-right">
             <span className="font-mono text-sm text-red-600">
-              {calc ? `${sym}${calc.paye.taxInBase.toFixed(2)}` : "—"}
+              {calc ? `${sym}${calc.Paye.taxInBase.toFixed(2)}` : "—"}
             </span>
-            {calc && calc.paye.effectiveRate > 0 && (
+            {calc && calc.Paye.effectiveRate > 0 && (
               <span className="block text-[10px] text-slate-400">
-                ({(calc.paye.effectiveRate * 100).toFixed(1)}%)
+                ({(calc.Paye.effectiveRate * 100).toFixed(1)}%)
               </span>
             )}
           </div>
@@ -368,11 +368,11 @@ function FooterSummary({ rows }: FooterSummaryProps) {
         return {
           gross:    acc.gross    + toUSD(row.calc.grossPay),
           nasscorp: acc.nasscorp + toUSD(row.calc.nasscorp.employeeContribution),
-          paye:     acc.paye     + toUSD(row.calc.paye.taxInBase),
+          Paye:     acc.Paye     + toUSD(row.calc.Paye.taxInBase),
           net:      acc.net      + toUSD(row.calc.netPay),
         };
       },
-      { gross: 0, nasscorp: 0, paye: 0, net: 0 }
+      { gross: 0, nasscorp: 0, Paye: 0, net: 0 }
     );
   }, [rows]);
 
@@ -394,8 +394,8 @@ function FooterSummary({ rows }: FooterSummaryProps) {
         <p className="text-orange-300">{fmt(totals.nasscorp)}</p>
       </div>
       <div className="text-center">
-        <p className="text-[10px] text-red-300 uppercase">PAYE</p>
-        <p className="text-red-300">{fmt(totals.paye)}</p>
+        <p className="text-[10px] text-red-300 uppercase">Paye</p>
+        <p className="text-red-300">{fmt(totals.Paye)}</p>
       </div>
       <div className="text-center">
         <p className="text-[10px] text-emerald-300 uppercase">Net</p>
@@ -417,7 +417,7 @@ export interface PayrollGridProps {
 
 export default function PayrollGrid({
   initialRows = SAMPLE_ROWS,
-  exchangeRate = 193.5,
+  exchangeRate = 185.44,
   isLocked = false,
   onExport,
   onImport,
@@ -539,7 +539,7 @@ const SAMPLE_ROWS: GridRow[] = [
     overtimeHours: 10,
     holidayHours: 0,
     additionalEarnings: 0,
-    exchangeRate: 193.5,
+    exchangeRate: 185.44,
     calc: null,
   },
   {
@@ -552,7 +552,7 @@ const SAMPLE_ROWS: GridRow[] = [
     overtimeHours: 0,
     holidayHours: 8,
     additionalEarnings: 50,
-    exchangeRate: 193.5,
+    exchangeRate: 185.44,
     calc: null,
   },
   {
@@ -565,7 +565,7 @@ const SAMPLE_ROWS: GridRow[] = [
     overtimeHours: 5,
     holidayHours: 0,
     additionalEarnings: 0,
-    exchangeRate: 193.5,
+    exchangeRate: 185.44,
     calc: null,
   },
   {
@@ -578,7 +578,7 @@ const SAMPLE_ROWS: GridRow[] = [
     overtimeHours: 0,
     holidayHours: 0,
     additionalEarnings: 0,
-    exchangeRate: 193.5,
+    exchangeRate: 185.44,
     calc: null,
   },
 ];
