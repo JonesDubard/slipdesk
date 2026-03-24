@@ -1,14 +1,5 @@
 "use client";
 
-/**
- * Slipdesk — Dashboard Layout
- * Place at: src/app/(dashboard)/layout.tsx
- *
- * FIX: useApp() was called inside JSX (avatar initials in header) which
- * violated Rules of Hooks and caused the "change in order of Hooks" error.
- * All hook calls are now at the top of each component only.
- */
-
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
@@ -16,7 +7,7 @@ import {
   LayoutDashboard, Users, FileText, Settings,
   LogOut, ChevronRight, Bell, Menu, X, CreditCard, Loader,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useApp } from "@/context/AppContext";
 import { ToastProvider } from "@/components/Toast";
 import ErrorBoundary from "@/components/ErrorBoundary";
@@ -54,22 +45,25 @@ function initials(name: string): string {
 function SidebarContent({ onClose }: { onClose: () => void }) {
   const pathname = usePathname();
   const router   = useRouter();
-
-  // ✅ useApp called once at top of component — never inside JSX
   const { employees, company, user, signOut, loading } = useApp();
 
   const activeCount   = employees.filter((e) => e.isActive).length;
-  const companyName   = company.name  || "Your Company";
-  const userEmail     = user?.email   || "";
-  const displayName   = company.name  || userEmail.split("@")[0] || "User";
+  const companyName   = company.name || "Your Company";
+  const userEmail     = user?.email  || "";
+  const displayName   = company.name || userEmail.split("@")[0] || "User";
   const avatarLetters = initials(displayName) || "?";
 
   const [signingOut, setSigningOut] = useState(false);
 
+  // ✅ Fix: wait for signOut to complete, then use window.location for a hard
+  // redirect that fully clears React state instead of router.push
   async function handleSignOut() {
     setSigningOut(true);
-    await signOut();
-    router.push("/login");
+    try {
+      await signOut();
+    } finally {
+      window.location.href = "/login";
+    }
   }
 
   return (
@@ -138,24 +132,142 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
         <button onClick={handleSignOut} disabled={signingOut}
           className="flex items-center gap-3 px-3 py-2 rounded-xl text-sm text-white/40
                      hover:text-white/70 hover:bg-white/5 transition-all w-full">
-          {signingOut ? <Loader className="w-4 h-4 animate-spin"/> : <LogOut className="w-4 h-4"/>}
-          Sign out
+          {signingOut
+            ? <Loader className="w-4 h-4 animate-spin"/>
+            : <LogOut className="w-4 h-4"/>}
+          {signingOut ? "Signing out…" : "Sign out"}
         </button>
       </div>
     </div>
   );
 }
 
-// ── Top bar avatar — separate component so hooks stay clean ──────────────────
+// ── Top bar avatar dropdown ───────────────────────────────────────────────────
 function TopBarAvatar() {
-  // ✅ useApp called once at top of component
-  const { company, user } = useApp();
+  const router = useRouter();
+  const { company, user, signOut } = useApp();
   const displayName = company.name || user?.email?.split("@")[0] || "?";
+  const userEmail   = user?.email || "";
   const letters     = initials(displayName) || "?";
 
+  const [open,       setOpen]       = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  async function handleSignOut() {
+    setSigningOut(true);
+    try {
+      await signOut();
+    } finally {
+      window.location.href = "/login";
+    }
+  }
+
   return (
-    <div className="w-8 h-8 rounded-full bg-[#002147] flex items-center justify-center">
-      <span className="text-white text-xs font-bold">{letters}</span>
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-8 h-8 rounded-full bg-[#002147] flex items-center justify-center
+                   hover:ring-2 hover:ring-[#50C878] transition-all">
+        <span className="text-white text-xs font-bold">{letters}</span>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-10 w-56 bg-white rounded-2xl shadow-lg
+                        border border-slate-100 z-50 overflow-hidden">
+          {/* User info */}
+          <div className="px-4 py-3 border-b border-slate-100">
+            <p className="text-sm font-semibold text-slate-800 truncate">{displayName}</p>
+            <p className="text-xs text-slate-400 font-mono truncate">{userEmail}</p>
+          </div>
+
+          {/* Menu items */}
+          <div className="py-1">
+            <Link href="/settings"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-slate-600
+                         hover:bg-slate-50 transition-colors">
+              <Settings className="w-4 h-4 text-slate-400"/>
+              Settings
+            </Link>
+            <Link href="/billing"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-slate-600
+                         hover:bg-slate-50 transition-colors">
+              <CreditCard className="w-4 h-4 text-slate-400"/>
+              Billing
+            </Link>
+          </div>
+
+          {/* Sign out */}
+          <div className="border-t border-slate-100 py-1">
+            <button
+              onClick={handleSignOut}
+              disabled={signingOut}
+              className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-500
+                         hover:bg-red-50 transition-colors w-full disabled:opacity-50">
+              {signingOut
+                ? <Loader className="w-4 h-4 animate-spin"/>
+                : <LogOut className="w-4 h-4"/>}
+              {signingOut ? "Signing out…" : "Sign out"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Bell with simple dropdown ─────────────────────────────────────────────────
+function BellButton() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="relative text-slate-400 hover:text-slate-600 transition-colors">
+        <Bell className="w-5 h-5"/>
+        <span className="absolute -top-1 -right-1 w-2 h-2 bg-[#50C878] rounded-full"/>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-10 w-72 bg-white rounded-2xl shadow-lg
+                        border border-slate-100 z-50 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100">
+            <p className="text-sm font-semibold text-slate-800">Notifications</p>
+          </div>
+          <div className="px-4 py-8 text-center">
+            <Bell className="w-8 h-8 text-slate-200 mx-auto mb-2"/>
+            <p className="text-sm text-slate-400">No notifications yet</p>
+            <p className="text-xs text-slate-300 mt-1">
+              We'll notify you about payroll and billing updates
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -163,8 +275,6 @@ function TopBarAvatar() {
 // ── Main layout ────────────────────────────────────────────────────────────────
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-
-  // ✅ useApp called once at top of component
   const { user, loading } = useApp();
 
   if (loading) {
@@ -217,11 +327,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </button>
             <div className="hidden md:block"/>
             <div className="flex items-center gap-3">
-              <button className="relative text-slate-400 hover:text-slate-600 transition-colors">
-                <Bell className="w-5 h-5"/>
-                <span className="absolute -top-1 -right-1 w-2 h-2 bg-[#50C878] rounded-full"/>
-              </button>
-              {/* ✅ Avatar in its own component — no inline useApp() in JSX */}
+              <BellButton/>
               <TopBarAvatar/>
             </div>
           </header>
