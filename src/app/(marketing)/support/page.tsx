@@ -407,12 +407,12 @@ export default function SupportPage() {
                   </p>
                 </div>
                 <a
-                  href="https://wa.me/231777744331"
+                  href="https://wa.me/4915231657334"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="mt-auto text-[#50C878] text-sm font-semibold hover:underline flex items-center gap-1"
                 >
-                  +231 777 744 331 <ArrowRight className="w-3.5 h-3.5" />
+                  +49 1523 1657 334 <ArrowRight className="w-3.5 h-3.5" />
                 </a>
                 <p className="text-xs text-slate-300 font-mono">Mon – Fri, 8am – 6pm WAT</p>
               </div>

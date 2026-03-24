@@ -10,21 +10,22 @@
 --     Then copy the UUID it generates and paste it below as CLIENT_UUID
 
 -- 2. Create their company (paste the UUID from step 1)
-INSERT INTO companies (id, name, billing_bypass, created_at)
+INSERT INTO companies (id, owner_id, name, billing_bypass, created_at)
 VALUES (
   gen_random_uuid(),
-  '[CLIENT_COMPANY_NAME]',   -- e.g. 'Acme Liberia Ltd'
-  true,                       -- billing bypassed ✅
+  '7d32a501-e9cf-4840-9fde-dd84a7679ec1',   
+  'Complete Human Resources Solutions (CHRES)',   
+  true,                       
   now()
 )
-RETURNING id;                 -- copy this company_id for step 3
+RETURNING id;                 
 
 -- 3. Link their profile to the company (paste both UUIDs)
 UPDATE profiles
 SET 
-  company_id    = '[COMPANY_ID_FROM_STEP_2]',
+  company_id    = '4f439685-00ea-4f87-8000-7209e9cfd734',
   billing_bypass = true
-WHERE id = '[CLIENT_UUID_FROM_STEP_1]';
+WHERE id = '7d32a501-e9cf-4840-9fde-dd84a7679ec1';
 
 -- 4. Verify everything looks right
 SELECT 
@@ -32,4 +33,4 @@ SELECT
   c.name, c.billing_bypass as company_bypass
 FROM profiles p
 JOIN companies c ON c.id = p.company_id
-WHERE p.id = '[CLIENT_UUID_FROM_STEP_1]';
+WHERE p.id = '7d32a501-e9cf-4840-9fde-dd84a7679ec1';
