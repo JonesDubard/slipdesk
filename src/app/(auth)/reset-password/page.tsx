@@ -1,19 +1,6 @@
 "use client";
 
-/**
- * Slipdesk — Reset Password Page
- * Place at: src/app/(auth)/reset-password/page.tsx
- *
- * Supabase redirects here after the user clicks the email link.
- * The URL will contain a `code` query param which we exchange for a session,
- * then call updateUser() to set the new password.
- *
- * Next.js App Router note:
- *   Supabase appends ?code=xxx to the redirect URL.
- *   We exchange it via exchangeCodeForSession() before allowing the form.
- */
-
-import { useState, useEffect } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -28,7 +15,7 @@ const RULES = [
   { label: "One number",                  test: (p: string) => /[0-9]/.test(p) },
 ];
 
-export default function ResetPasswordPage() {
+function ResetPasswordContent() {
   const router       = useRouter();
   const searchParams = useSearchParams();
   const supabase     = createClient();
@@ -40,24 +27,13 @@ export default function ResetPasswordPage() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [error,       setError]       = useState("");
 
-  // ── Exchange the code from the URL for a live session ──────────────────────
   useEffect(() => {
     async function exchangeCode() {
       const code = searchParams.get("code");
-
-      if (!code) {
-        // Maybe the user landed here without a valid link
-        setPageState("invalid");
-        return;
-      }
-
+      if (!code) { setPageState("invalid"); return; }
       const { error: err } = await supabase.auth.exchangeCodeForSession(code);
-      if (err) {
-        console.error("Code exchange error:", err);
-        setPageState("invalid");
-      } else {
-        setPageState("ready");
-      }
+      if (err) { console.error("Code exchange error:", err); setPageState("invalid"); }
+      else { setPageState("ready"); }
     }
     exchangeCode();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -70,23 +46,13 @@ export default function ResetPasswordPage() {
     e.preventDefault();
     if (!allRulesPassed) { setError("Please satisfy all password requirements."); return; }
     if (!passwordsMatch) { setError("Passwords do not match."); return; }
-
     setError("");
     setPageState("saving");
-
     const { error: err } = await supabase.auth.updateUser({ password });
-
-    if (err) {
-      setError(err.message);
-      setPageState("ready");
-    } else {
-      setPageState("success");
-      // Redirect to dashboard after short delay
-      setTimeout(() => router.replace("/dashboard"), 2500);
-    }
+    if (err) { setError(err.message); setPageState("ready"); }
+    else { setPageState("success"); setTimeout(() => router.replace("/dashboard"), 2500); }
   }
 
-  // ── Shared chrome ──────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <style>{`
@@ -109,7 +75,6 @@ export default function ResetPasswordPage() {
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8">
 
-          {/* ── Loading — exchanging code ──────────────────────────────────── */}
           {pageState === "loading" && (
             <div className="flex flex-col items-center justify-center py-8 gap-3">
               <Loader className="w-6 h-6 animate-spin text-[#50C878]"/>
@@ -117,7 +82,6 @@ export default function ResetPasswordPage() {
             </div>
           )}
 
-          {/* ── Invalid / expired link ─────────────────────────────────────── */}
           {pageState === "invalid" && (
             <div className="text-center py-4 space-y-4">
               <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto">
@@ -138,7 +102,6 @@ export default function ResetPasswordPage() {
             </div>
           )}
 
-          {/* ── Password form ──────────────────────────────────────────────── */}
           {(pageState === "ready" || pageState === "saving") && (
             <>
               <div className="mb-6">
@@ -149,8 +112,6 @@ export default function ResetPasswordPage() {
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-4">
-
-                {/* New password */}
                 <div>
                   <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
                     New Password
@@ -172,8 +133,6 @@ export default function ResetPasswordPage() {
                       {showPw ? <EyeOff className="w-4 h-4"/> : <Eye className="w-4 h-4"/>}
                     </button>
                   </div>
-
-                  {/* Password strength rules */}
                   {password.length > 0 && (
                     <ul className="mt-2 space-y-1">
                       {RULES.map((r) => (
@@ -189,7 +148,6 @@ export default function ResetPasswordPage() {
                   )}
                 </div>
 
-                {/* Confirm password */}
                 <div>
                   <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
                     Confirm Password
@@ -205,9 +163,7 @@ export default function ResetPasswordPage() {
                                   focus:outline-none focus:ring-2 focus:ring-[#50C878] bg-white
                                   text-slate-800 placeholder-slate-300 transition-colors
                                   ${confirm.length > 0
-                                    ? passwordsMatch
-                                      ? "border-emerald-300"
-                                      : "border-red-300"
+                                    ? passwordsMatch ? "border-emerald-300" : "border-red-300"
                                     : "border-slate-200"}`}/>
                     <button type="button" tabIndex={-1}
                       onClick={() => setShowConfirm((v) => !v)}
@@ -220,7 +176,6 @@ export default function ResetPasswordPage() {
                   )}
                 </div>
 
-                {/* Error banner */}
                 {error && (
                   <div className="flex items-start gap-2.5 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
                     <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5"/>
@@ -241,7 +196,6 @@ export default function ResetPasswordPage() {
             </>
           )}
 
-          {/* ── Success ────────────────────────────────────────────────────── */}
           {pageState === "success" && (
             <div className="text-center py-4 space-y-4">
               <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto">
@@ -262,7 +216,6 @@ export default function ResetPasswordPage() {
 
         </div>
 
-        {/* Footer link */}
         {(pageState === "ready" || pageState === "saving") && (
           <div className="text-center mt-5">
             <Link href="/login"
@@ -274,5 +227,17 @@ export default function ResetPasswordPage() {
 
       </div>
     </div>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <Loader className="w-6 h-6 animate-spin text-[#50C878]"/>
+      </div>
+    }>
+      <ResetPasswordContent />
+    </Suspense>
   );
 }

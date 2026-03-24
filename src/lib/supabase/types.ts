@@ -22,6 +22,7 @@ type CompanyRow = {
   phone:           string;
   email:           string;
   logo_url:        string | null;
+  billing_bypass:  boolean;
   created_at:      string;
   updated_at:      string;
 };

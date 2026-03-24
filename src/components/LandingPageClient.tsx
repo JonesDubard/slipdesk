@@ -3,9 +3,6 @@
 /**
  * Slipdesk — Landing Page
  * Place at: src/app/(marketing)/page-client.tsx
- * (imported by src/app/page.tsx — see landing-page-root.tsx)
- *
- * Requires: npm install framer-motion
  */
 
 import { motion, useInView, useScroll, useTransform, type Variants } from "framer-motion";
@@ -57,7 +54,7 @@ function AnimateIn({
   className?: string;
   delay?: number;
 }) {
-  const ref = useRef(null);
+  const ref    = useRef(null);
   const inView = useInView(ref, { once: true, margin: "-80px" });
   return (
     <motion.div
@@ -73,41 +70,36 @@ function AnimateIn({
   );
 }
 
-// ─── Fonts + CSS vars ─────────────────────────────────────────────────────────
+// ─── CSS vars + fonts ─────────────────────────────────────────────────────────
 
 const FONT_LINK = (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=DM+Mono:opsz,wght@9..40,400;9..40,500&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap');
-    :root {
-      --navy:   #002147;
-      --emerald:#50C878;
-      --em-dark:#3aa85f;
-    }
-    .font-serif  { font-family: 'Libre Baskerville', Georgia, serif; }
-    .font-mono   { font-family: 'DM Mono', monospace; }
-    .text-navy   { color: var(--navy); }
-    .bg-navy     { background-color: var(--navy); }
-    .text-em     { color: var(--emerald); }
-    .bg-em       { background-color: var(--emerald); }
-    .hover-em:hover { background-color: var(--em-dark); }
-
+    :root { --navy:#002147; --emerald:#50C878; --em-dark:#3aa85f; }
+    .font-serif  { font-family:'Libre Baskerville',Georgia,serif; }
+    .font-mono   { font-family:'DM Mono',monospace; }
+    .text-navy   { color:var(--navy); }
+    .bg-navy     { background-color:var(--navy); }
+    .text-em     { color:var(--emerald); }
+    .bg-em       { background-color:var(--emerald); }
+    .hover-em:hover { background-color:var(--em-dark); }
     @keyframes shimmer {
-      0%   { background-position: 200% center }
-      100% { background-position: -200% center }
+      0%   { background-position:200% center }
+      100% { background-position:-200% center }
     }
     .shimmer-text {
-      background: linear-gradient(90deg, var(--emerald) 25%, #a7f3c4 50%, var(--emerald) 75%);
-      background-size: 200% auto;
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      animation: shimmer 3s linear infinite;
+      background:linear-gradient(90deg,var(--emerald) 25%,#a7f3c4 50%,var(--emerald) 75%);
+      background-size:200% auto;
+      -webkit-background-clip:text;
+      -webkit-text-fill-color:transparent;
+      animation:shimmer 3s linear infinite;
     }
     .noise::before {
-      content:''; position:absolute; inset:0; pointer-events:none;
-      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
-      opacity:0.3; z-index:1;
+      content:'';position:absolute;inset:0;pointer-events:none;
+      background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+      opacity:0.3;z-index:1;
     }
-    .noise > * { position:relative; z-index:2; }
+    .noise > * { position:relative;z-index:2; }
   `}</style>
 );
 
@@ -129,28 +121,19 @@ function Nav() {
             className="rounded-md object-contain"
             style={{ background: "white", padding: "2px" }}
           />
-          <span className="text-white font-semibold text-base tracking-tight">
-            Slipdesk
-          </span>
+          <span className="text-white font-semibold text-base tracking-tight">Slipdesk</span>
         </Link>
 
         <nav className="hidden md:flex items-center gap-8 text-sm text-white/70">
           {["Features", "Compliance", "Pricing"].map((n) => (
-            <a
-              key={n}
-              href={`#${n.toLowerCase()}`}
-              className="hover:text-white transition-colors"
-            >
+            <a key={n} href={`#${n.toLowerCase()}`} className="hover:text-white transition-colors">
               {n}
             </a>
           ))}
         </nav>
 
         <div className="flex items-center gap-3">
-          <Link
-            href="/login"
-            className="text-sm text-white/70 hover:text-white transition-colors hidden md:inline"
-          >
+          <Link href="/login" className="text-sm text-white/70 hover:text-white transition-colors hidden md:inline">
             Sign in
           </Link>
           <Link
@@ -169,23 +152,15 @@ function Nav() {
 
 function Hero() {
   const ref = useRef(null);
-  const { scrollYProgress } = useScroll({
-    target: ref,
-    offset: ["start start", "end start"],
-  });
+  const { scrollYProgress } = useScroll({ target: ref, offset: ["start start", "end start"] });
   const yParallax = useTransform(scrollYProgress, [0, 1], [0, 120]);
 
   return (
-    <section
-      ref={ref}
-      className="relative min-h-screen bg-navy noise overflow-hidden flex items-center pt-16"
-    >
+    <section ref={ref} className="relative min-h-screen bg-navy noise overflow-hidden flex items-center pt-16">
       <motion.div style={{ y: yParallax }} className="absolute inset-0 pointer-events-none">
         <div
           className="absolute -right-64 -top-64 w-[700px] h-[700px] rounded-full border border-emerald-500/10"
-          style={{
-            background: "radial-gradient(circle, rgba(80,200,120,0.06) 0%, transparent 70%)",
-          }}
+          style={{ background: "radial-gradient(circle, rgba(80,200,120,0.06) 0%, transparent 70%)" }}
         />
         <svg className="absolute inset-0 w-full h-full opacity-[0.04]" xmlns="http://www.w3.org/2000/svg">
           <defs>
@@ -227,11 +202,7 @@ function Hero() {
             income tax to the last decimal.
           </motion.p>
 
-          <motion.div
-            variants={fadeUp}
-            custom={3}
-            className="flex flex-col sm:flex-row gap-4"
-          >
+          <motion.div variants={fadeUp} custom={3} className="flex flex-col sm:flex-row gap-4">
             <Link
               href="/login"
               className="inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-em text-navy font-semibold rounded-xl hover-em transition-colors text-base"
@@ -248,12 +219,12 @@ function Hero() {
             </a>
           </motion.div>
 
+          {/* ✅ Updated: $0.75/employee */}
           <motion.p variants={fadeUp} custom={4} className="mt-8 text-white/35 text-sm font-mono">
-            No setup fees · Cancel anytime · $1.50 per employee/month
+            No setup fees · Cancel anytime · $0.75 per employee/month
           </motion.p>
         </motion.div>
 
-        {/* Floating card — only on very wide screens to prevent overlap */}
         <motion.div
           initial={{ opacity: 0, x: 80 }}
           animate={{ opacity: 1, x: 0 }}
@@ -269,10 +240,10 @@ function Hero() {
 
 function PayslipCard() {
   const lines = [
-    { label: "Regular Salary",         value: "$1,472.31", color: "text-white/70" },
-    { label: "Overtime (10 hrs)",       value: "$127.50",   color: "text-white/70" },
-    { label: "NASSCORP (EE 4%)",        value: "–$63.97",  color: "text-orange-400" },
-    { label: "Income Tax (LRA)",        value: "–$73.22",  color: "text-red-400" },
+    { label: "Regular Salary",   value: "$1,472.31", color: "text-white/70"  },
+    { label: "Overtime (10 hrs)", value: "$127.50",  color: "text-white/70"  },
+    { label: "NASSCORP (EE 4%)", value: "–$63.97",  color: "text-orange-400" },
+    { label: "Income Tax (LRA)", value: "–$73.22",  color: "text-red-400"    },
   ];
   return (
     <div
@@ -389,10 +360,10 @@ function Features() {
         <AnimateIn className="text-center mb-16">
           <p className="text-em font-mono text-xs uppercase tracking-widest mb-3">Features</p>
           <h2 className="font-serif text-navy text-3xl sm:text-4xl leading-tight mb-4">
-            Everything you need,<br />nothing you don't.
+            Everything you need,<br />nothing you don&apos;t.
           </h2>
           <p className="text-slate-500 max-w-xl mx-auto text-sm sm:text-base">
-            Slipdesk is purpose-built for how Liberian businesses actually pay people,
+            Slipdesk is purpose-built for how Liberian businesses actually pay people
             dual currencies, complex tax rules, and patchy internet included.
           </p>
         </AnimateIn>
@@ -407,7 +378,7 @@ function Features() {
             <motion.div
               key={f.title}
               variants={fadeUp}
-            className="bg-white rounded-2xl p-6 sm:p-7 border border-slate-100 hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-50 transition-all group"
+              className="bg-white rounded-2xl p-6 sm:p-7 border border-slate-100 hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-50 transition-all group"
             >
               <div className="flex items-start justify-between mb-5">
                 <div className="w-10 h-10 rounded-xl bg-navy/5 flex items-center justify-center group-hover:bg-em/10 transition-colors">
@@ -431,9 +402,9 @@ function Features() {
 
 function Compliance() {
   const brackets = [
-    { range: "L$0 – L$70,000",        rate: "0%",  tax: "L$0",       bg: "bg-slate-100" },
-    { range: "L$70,001 – L$200,000",  rate: "5%",  tax: "Excess",    bg: "bg-emerald-50" },
-    { range: "L$200,001 – L$800,000", rate: "15%", tax: "+ L$6,500",  bg: "bg-emerald-100" },
+    { range: "L$0 – L$70,000",        rate: "0%",  tax: "L$0",       bg: "bg-slate-100"    },
+    { range: "L$70,001 – L$200,000",  rate: "5%",  tax: "Excess",    bg: "bg-emerald-50"   },
+    { range: "L$200,001 – L$800,000", rate: "15%", tax: "+ L$6,500", bg: "bg-emerald-100"  },
     { range: "Over L$800,000",        rate: "25%", tax: "+ L$96,500", bg: "bg-emerald-200" },
   ];
   return (
@@ -498,11 +469,12 @@ function Compliance() {
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
+// ✅ Updated: $0.75/emp/mo
 const STATS = [
-  { value: "2",     unit: "currencies",       label: "USD & LRD, always in sync"              },
-  { value: "4",     unit: "tax brackets",     label: "LRA income tax brackets, applied right" },
-  { value: "<1s",   unit: "recalc",           label: "Real-time grid recalculation"           },
-  { value: "$1.50", unit: "/ emp / mo",       label: "No hidden fees. Ever."                  },
+  { value: "2",     unit: "currencies",   label: "USD & LRD, always in sync"              },
+  { value: "4",     unit: "tax brackets", label: "LRA income tax brackets, applied right" },
+  { value: "<1s",   unit: "recalc",       label: "Real-time grid recalculation"           },
+  { value: "$0.75", unit: "/ emp / mo",   label: "No hidden fees. Ever."                  },
 ];
 
 function Stats() {
@@ -546,6 +518,14 @@ function Pricing() {
     "Offline-resilient data persistence",
     "Priority email support",
   ];
+
+  // ✅ Updated: $0.75 examples
+  const examples = [
+    { label: "10 employees",  cost: "$7.50 / mo"  },
+    { label: "25 employees",  cost: "$18.75 / mo" },
+    { label: "100 employees", cost: "$75.00 / mo" },
+  ];
+
   return (
     <section id="pricing" className="py-20 sm:py-28 bg-slate-50">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
@@ -561,28 +541,32 @@ function Pricing() {
         <AnimateIn delay={1} className="max-w-lg mx-auto">
           <div className="bg-navy rounded-3xl overflow-hidden shadow-2xl border border-white/5">
             <div className="px-6 sm:px-8 pt-10 pb-8 text-white">
+              {/* ✅ Updated: $0.75 */}
               <div className="flex items-end gap-2 mb-1">
-                <span className="font-serif text-5xl sm:text-6xl font-bold">$1.50</span>
+                <span className="font-serif text-5xl sm:text-6xl font-bold">$0.75</span>
                 <div className="mb-2 text-white/50 font-mono text-xs sm:text-sm">
                   <p>per employee</p>
                   <p>per month</p>
                 </div>
               </div>
-              <p className="text-em font-mono text-sm">No setup fees. No annual lock-in.</p>
+              <p className="text-em font-mono text-sm">
+                Early adopter rate · No setup fees · No minimum
+              </p>
             </div>
+
             <div className="mx-6 sm:mx-8 mb-8 bg-white/5 rounded-2xl p-4 sm:p-5 font-mono text-sm text-white/70">
               <p className="text-white/40 text-[10px] uppercase tracking-widest mb-3">Example</p>
-              {[
-                { label: "10 employees",  cost: "$15.00 / mo"  },
-                { label: "25 employees",  cost: "$37.50 / mo"  },
-                { label: "100 employees", cost: "$150.00 / mo" },
-              ].map((e) => (
-                <div key={e.label} className="flex justify-between py-1.5 border-b border-white/10 last:border-0">
+              {examples.map((e) => (
+                <div
+                  key={e.label}
+                  className="flex justify-between py-1.5 border-b border-white/10 last:border-0"
+                >
                   <span>{e.label}</span>
                   <span className="text-em font-semibold">{e.cost}</span>
                 </div>
               ))}
             </div>
+
             <div className="px-6 sm:px-8 pb-10">
               <p className="text-white/40 text-[10px] font-mono uppercase tracking-widest mb-4">
                 Everything included
@@ -664,15 +648,12 @@ function Footer() {
             LRA & NASSCORP Compliant Payroll
           </span>
         </Link>
-
-        {/* ── Footer nav — Privacy + Terms link to /legal ── */}
         <div className="flex gap-4 sm:gap-6 text-white/30 text-xs font-mono">
           <Link href="/legal?tab=privacy" className="hover:text-white/60 transition-colors">Privacy</Link>
           <Link href="/legal"             className="hover:text-white/60 transition-colors">Terms</Link>
           <a    href="#features"          className="hover:text-white/60 transition-colors">Features</a>
-          <a    href="mailto:hello@slipdesk.lr" className="hover:text-white/60 transition-colors">Support</a>
+          <a    href="mailto:hello@slipdesk@gmail.com" className="hover:text-white/60 transition-colors">Support</a>
         </div>
-
         <p className="text-white/20 text-xs font-mono">
           © {new Date().getFullYear()} Slipdesk · Monrovia, Liberia
         </p>

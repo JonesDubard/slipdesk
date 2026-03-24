@@ -6,7 +6,8 @@
  */
 
 import { useState, useEffect } from "react";
-import { Save, AlertTriangle, CheckCircle2, Building2, RotateCcw } from "lucide-react";
+import { Save, AlertTriangle, CheckCircle2, Building2, RotateCcw, Lock, Eye, EyeOff, Loader } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 import { useApp, type CompanyProfile, EMPTY_COMPANY } from "@/context/AppContext";
 import LogoUploader from "@/components/LogoUploader";
 
@@ -19,6 +20,33 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [dirty,  setDirty]  = useState(false);
   const [error,  setError]  = useState<string | null>(null);
+
+
+  // Password change state
+const supabase = createClient();
+const [newPassword,     setNewPassword]     = useState("");
+const [confirmPassword, setConfirmPassword] = useState("");
+const [showNewPw,       setShowNewPw]       = useState(false);
+const [showConfirmPw,   setShowConfirmPw]   = useState(false);
+const [pwSaving,        setPwSaving]        = useState(false);
+const [pwSaved,         setPwSaved]         = useState(false);
+const [pwError,         setPwError]         = useState<string | null>(null);
+
+const PW_RULES = [
+  { label: "At least 8 characters", test: (p: string) => p.length >= 8 },
+  { label: "One uppercase letter",  test: (p: string) => /[A-Z]/.test(p) },
+  { label: "One number",            test: (p: string) => /[0-9]/.test(p) },
+];
+
+async function handlePasswordChange() {
+  if (newPassword !== confirmPassword) { setPwError("Passwords don't match."); return; }
+  setPwSaving(true);
+  setPwError(null);
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  setPwSaving(false);
+  if (error) { setPwError(error.message); }
+  else { setPwSaved(true); setNewPassword(""); setConfirmPassword(""); }
+}
 
   // Re-sync when real data loads from Supabase (id changes from "" to a UUID)
   useEffect(() => {
@@ -158,6 +186,90 @@ export default function SettingsPage() {
           </button>
         </div>
       )}
+
+      {/* Change Password */}
+<div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+  <h2 className="font-semibold text-slate-800 flex items-center gap-2">
+    <Lock className="w-4 h-4 text-slate-400"/> Change Password
+  </h2>
+
+  {pwSaved && (
+    <div className="flex items-center gap-2.5 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+      <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0"/>
+      <p className="text-sm text-emerald-700">Password updated successfully.</p>
+    </div>
+  )}
+  {pwError && (
+    <div className="flex items-center gap-2.5 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+      <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0"/>
+      <p className="text-sm text-red-600">{pwError}</p>
+    </div>
+  )}
+
+  <div>
+    <label className={labelClass}>New Password</label>
+    <div className="relative">
+      <input
+        type={showNewPw ? "text" : "password"}
+        value={newPassword}
+        onChange={(e) => { setNewPassword(e.target.value); setPwError(null); setPwSaved(false); }}
+        placeholder="Min. 8 characters"
+        className={inputClass}/>
+      <button type="button" tabIndex={-1}
+        onClick={() => setShowNewPw(v => !v)}
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500">
+        {showNewPw ? <EyeOff className="w-4 h-4"/> : <Eye className="w-4 h-4"/>}
+      </button>
+    </div>
+    {newPassword.length > 0 && (
+      <ul className="mt-2 space-y-1">
+        {PW_RULES.map((r) => (
+          <li key={r.label} className={`flex items-center gap-1.5 text-xs transition-colors
+            ${r.test(newPassword) ? "text-emerald-600" : "text-slate-400"}`}>
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0
+              ${r.test(newPassword) ? "bg-emerald-400" : "bg-slate-300"}`}/>
+            {r.label}
+          </li>
+        ))}
+      </ul>
+    )}
+  </div>
+
+  <div>
+    <label className={labelClass}>Confirm New Password</label>
+    <div className="relative">
+      <input
+        type={showConfirmPw ? "text" : "password"}
+        value={confirmPassword}
+        onChange={(e) => { setConfirmPassword(e.target.value); setPwError(null); }}
+        placeholder="Repeat your new password"
+        className={`${inputClass} ${
+          confirmPassword.length > 0
+            ? newPassword === confirmPassword ? "border-emerald-300" : "border-red-300"
+            : ""
+        }`}/>
+      <button type="button" tabIndex={-1}
+        onClick={() => setShowConfirmPw(v => !v)}
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500">
+        {showConfirmPw ? <EyeOff className="w-4 h-4"/> : <Eye className="w-4 h-4"/>}
+      </button>
+    </div>
+    {confirmPassword.length > 0 && newPassword !== confirmPassword && (
+      <p className="text-xs text-red-500 mt-1">Passwords don't match.</p>
+    )}
+  </div>
+
+  <button
+    onClick={handlePasswordChange}
+    disabled={pwSaving || newPassword.length < 8 || newPassword !== confirmPassword}
+    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold
+               bg-[#50C878] text-[#002147] hover:bg-[#3aa85f]
+               disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+    {pwSaving
+      ? <><Loader className="w-4 h-4 animate-spin"/>Updating…</>
+      : <><Save className="w-4 h-4"/>Update Password</>}
+  </button>
+</div>
 
       {/* Danger zone */}
       <div className="bg-white rounded-2xl border border-red-100 p-6 space-y-3">

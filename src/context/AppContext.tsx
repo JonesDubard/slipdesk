@@ -63,11 +63,12 @@ export interface CompanyProfile {
   phone:         string;
   email:         string;
   logoUrl:       string | null;
+  billingBypass: boolean;
 }
 
 export const EMPTY_COMPANY: CompanyProfile = {
   id: "", name: "", tin: "", nasscorpRegNo: "",
-  address: "", phone: "", email: "", logoUrl: null,
+  address: "", phone: "", email: "", logoUrl: null, billingBypass: false,
 };
 
 // ─── DB ↔ UI converters ───────────────────────────────────────────────────────
@@ -110,6 +111,7 @@ function dbToCompany(row: DbCompany): CompanyProfile {
     phone:         row.phone,
     email:         row.email,
     logoUrl:       row.logo_url,
+    billingBypass: row.billing_bypass ?? false,
   };
 }
 

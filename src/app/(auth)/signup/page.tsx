@@ -6,12 +6,13 @@ import Image from "next/image";
 import { Eye, EyeOff, ArrowRight, CheckCircle2 } from "lucide-react";
 
 export default function SignupPage() {
-  const [show, setShow] = useState(false);
+  const [show,    setShow]    = useState(false);
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({
+  const [form,    setForm]    = useState({
     companyName: "",
-    email: "",
-    password: "",
+    lraTin:      "",   // ← added: collect TIN now, enforce uniqueness later
+    email:       "",
+    password:    "",
   });
 
   const set = (field: string, value: string) =>
@@ -20,16 +21,18 @@ export default function SignupPage() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+    // ── TODO (going live): replace this with real Supabase signup + TIN uniqueness check
+    // For now: straight to dashboard for testing
     setTimeout(() => {
       window.location.href = "/dashboard";
     }, 1000);
   }
 
   const perks = [
-    "First pay run completely free",
-    "No credit card required",
     "LRA & NASSCORP compliant from day one",
-    "$1.50 per employee/month after trial",
+    "Dual-currency USD & LRD payroll",
+    "PDF payslips in one click",
+    "$0.75 per employee/month",
   ];
 
   return (
@@ -39,8 +42,10 @@ export default function SignupPage() {
         * { font-family: 'DM Sans', system-ui, sans-serif; }
         .font-mono { font-family: 'DM Mono', monospace; }
       `}</style>
+
       <div className="min-h-screen bg-slate-50 flex">
-        {/* Left panel */}
+
+        {/* ── Left panel ── */}
         <div className="hidden lg:flex flex-col justify-between w-[420px] flex-shrink-0 bg-[#002147] p-10">
           <Link href="/" className="flex items-center gap-2.5">
             <Image
@@ -53,12 +58,13 @@ export default function SignupPage() {
             />
             <span className="text-white font-semibold text-base">Slipdesk</span>
           </Link>
+
           <div>
             <p className="text-[#50C878] font-mono text-xs uppercase tracking-widest mb-3">
-              Start for free today
+              Built for Liberian SMEs
             </p>
             <h2 className="text-white text-2xl font-semibold leading-snug mb-6">
-              Liberia's smartest payroll platform
+              Liberia&apos;s smartest payroll platform
             </h2>
             {perks.map((p) => (
               <div key={p} className="flex items-start gap-3 mb-3">
@@ -67,14 +73,17 @@ export default function SignupPage() {
               </div>
             ))}
           </div>
+
           <p className="text-white/20 text-xs font-mono">
             © {new Date().getFullYear()} Slipdesk · Monrovia, Liberia
           </p>
         </div>
 
-        {/* Right panel */}
+        {/* ── Right panel ── */}
         <div className="flex-1 flex items-center justify-center px-6 py-12">
           <div className="w-full max-w-sm">
+
+            {/* Mobile logo */}
             <Link href="/" className="flex items-center gap-2.5 mb-8 lg:hidden">
               <Image
                 src="/Slipdesk_Logo_.png"
@@ -93,6 +102,8 @@ export default function SignupPage() {
             </p>
 
             <form onSubmit={handleSubmit} className="space-y-4">
+
+              {/* Company Name */}
               <div>
                 <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
                   Company Name
@@ -108,6 +119,31 @@ export default function SignupPage() {
                              bg-white text-slate-800 placeholder-slate-300"
                 />
               </div>
+
+              {/* LRA TIN — new field */}
+              <div>
+                <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
+                  LRA TIN{" "}
+                  <span className="normal-case text-slate-300 font-normal tracking-normal">
+                    (Liberia Revenue Authority Tax ID)
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  value={form.lraTin}
+                  onChange={(e) => set("lraTin", e.target.value.toUpperCase())}
+                  placeholder="e.g. LR-1234567"
+                  required
+                  className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl
+                             focus:outline-none focus:ring-2 focus:ring-[#50C878] focus:border-transparent
+                             bg-white text-slate-800 placeholder-slate-300 font-mono tracking-wider"
+                />
+                <p className="text-[10px] text-slate-300 mt-1 font-mono">
+                  Used for LRA compliance. One account per TIN.
+                </p>
+              </div>
+
+              {/* Work Email */}
               <div>
                 <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
                   Work Email
@@ -123,6 +159,8 @@ export default function SignupPage() {
                              bg-white text-slate-800 placeholder-slate-300"
                 />
               </div>
+
+              {/* Password */}
               <div>
                 <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
                   Password
@@ -149,6 +187,7 @@ export default function SignupPage() {
                 </div>
               </div>
 
+              {/* Submit */}
               <button
                 type="submit"
                 disabled={loading}
@@ -166,9 +205,9 @@ export default function SignupPage() {
 
             <p className="text-center text-xs text-slate-400 mt-4 leading-relaxed">
               By creating an account you agree to our{" "}
-              <a href="#" className="text-[#50C878] hover:underline">Terms of Service</a>
+              <a href="/legal" className="text-[#50C878] hover:underline">Terms of Service</a>
               {" "}and{" "}
-              <a href="#" className="text-[#50C878] hover:underline">Privacy Policy</a>
+              <a href="/legal?tab=privacy" className="text-[#50C878] hover:underline">Privacy Policy</a>
             </p>
 
             <p className="text-center text-sm text-slate-400 mt-5">
@@ -177,6 +216,7 @@ export default function SignupPage() {
                 Sign in
               </Link>
             </p>
+
           </div>
         </div>
       </div>

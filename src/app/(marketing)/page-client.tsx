@@ -134,16 +134,15 @@ function Nav() {
           </span>
         </Link>
 
-        <nav className="hidden md:flex items-center gap-8 text-sm text-white/70">
-          {["Features", "Compliance", "Pricing"].map((n) => (
-            <a
-              key={n}
-              href={`#${n.toLowerCase()}`}
-              className="hover:text-white transition-colors"
-            >
-              {n}
-            </a>
+         <nav className="hidden md:flex items-center gap-8 text-sm text-white/70">
+              {["Features", "Compliance", "Pricing"].map((n) => (
+                <a key={n} href={`#${n.toLowerCase()}`} className="hover:text-white transition-colors">
+                  {n}
+                </a>
           ))}
+            <Link href="/support" className="hover:text-white transition-colors">
+              Support
+            </Link>
         </nav>
 
         <div className="flex items-center gap-3">
@@ -224,7 +223,7 @@ function Hero() {
             className="text-white/60 text-base sm:text-lg leading-relaxed mb-10 max-w-xl font-light"
           >
             Slipdesk automates USD ↔ LRD payroll, calculates NASSCORP contributions and LRA
-            income tax to the last decimal — so you never touch a manual spreadsheet again.
+            income tax to the last decimal, minimazing spreadsheet work and compliance overhead.
           </motion.p>
 
           <motion.div
@@ -249,7 +248,7 @@ function Hero() {
           </motion.div>
 
           <motion.p variants={fadeUp} custom={4} className="mt-8 text-white/35 text-sm font-mono">
-            No setup fees · Cancel anytime · $1.50 per employee/month
+            No setup fees · Cancel anytime · $0.75 per employee/month
           </motion.p>
         </motion.div>
 
@@ -365,13 +364,13 @@ const FEATURES = [
   {
     icon: RefreshCw,
     title: "Offline-First Resilience",
-    desc: "Internet blips won't cost you an hour of work. Keep working offline — data syncs automatically when you reconnect.",
+    desc: "Internet blips won't cost you an hour of work. Keep working offline data syncs automatically when you reconnect.",
     tag: "Offline Ready",
   },
   {
     icon: BarChart3,
     title: "Instant Recalculation Grid",
-    desc: "Edit any cell — rate, hours, allowances — and watch income tax, NASSCORP, and Net Pay update in real time across the whole row.",
+    desc: "Edit any cell rate, hours, allowances, and watch income tax, NASSCORP, and Net Pay update in real time across the whole row.",
     tag: "Live Preview",
   },
   {
@@ -392,7 +391,7 @@ function Features() {
             Everything you need,<br />nothing you don't.
           </h2>
           <p className="text-slate-500 max-w-xl mx-auto text-sm sm:text-base">
-            Slipdesk is purpose-built for how Liberian businesses actually pay people —
+            Slipdesk is purpose-built for how Liberian businesses actually pay people,
             dual currencies, complex tax rules, and patchy internet included.
           </p>
         </AnimateIn>
@@ -433,10 +432,10 @@ function Features() {
 
 function Compliance() {
   const brackets = [
-    { range: "L$0 – L$70,000",        rate: "0%",  tax: "L$0",       bg: "bg-slate-100" },
-    { range: "L$70,001 – L$200,000",  rate: "5%",  tax: "Excess",    bg: "bg-emerald-50" },
-    { range: "L$200,001 – L$800,000", rate: "15%", tax: "+ L$6,500",  bg: "bg-emerald-100" },
-    { range: "Over L$800,000",        rate: "25%", tax: "+ L$96,500", bg: "bg-emerald-200" },
+    { range: "LRD$0 – LRD$70,000",        rate: "0%",  tax: "LRD$0",       bg: "bg-slate-100" },
+    { range: "LRD$70,001 – LRD$200,000",  rate: "5%",  tax: "Excess",    bg: "bg-emerald-50" },
+    { range: "LRD$200,001 – LRD$800,000", rate: "15%", tax: "+ LRD$6,500",  bg: "bg-emerald-100" },
+    { range: "Over LRD$800,000",        rate: "25%", tax: "+ LRD$96,500", bg: "bg-emerald-200" },
   ];
   return (
     <section id="compliance" className="py-20 sm:py-28 bg-navy noise">
@@ -450,7 +449,7 @@ function Compliance() {
             </h2>
             <p className="text-white/60 leading-relaxed mb-8 text-sm sm:text-base">
               Slipdesk implements every LRA monthly income tax bracket and NASSCORP contribution
-              rate. Each pay run is a precise, auditable record — no rounding errors, no
+              rate. Each pay run is a precise, auditable record, no rounding errors, no
               forgotten thresholds.
             </p>
             <div className="space-y-3">
@@ -504,7 +503,7 @@ const STATS = [
   { value: "2",     unit: "currencies",       label: "USD & LRD, always in sync"              },
   { value: "4",     unit: "tax brackets",     label: "LRA income tax brackets, applied right" },
   { value: "<1s",   unit: "recalc",           label: "Real-time grid recalculation"           },
-  { value: "$1.50", unit: "/ emp / mo",       label: "No hidden fees. Ever."                  },
+  { value: "$0.75", unit: "/ emp / mo",       label: "No hidden fees."                  },
 ];
 
 function Stats() {
@@ -557,14 +556,14 @@ function Pricing() {
             Transparent. Predictable. Fair.
           </h2>
           <p className="text-slate-500 max-w-md mx-auto text-sm sm:text-base">
-            One simple model — you pay only for the employees you actually run payroll for.
+            One simple model, you pay only for the employees you actually run payroll for.
           </p>
         </AnimateIn>
         <AnimateIn delay={1} className="max-w-lg mx-auto">
           <div className="bg-navy rounded-3xl overflow-hidden shadow-2xl border border-white/5">
             <div className="px-6 sm:px-8 pt-10 pb-8 text-white">
               <div className="flex items-end gap-2 mb-1">
-                <span className="font-serif text-5xl sm:text-6xl font-bold">$1.50</span>
+                <span className="font-serif text-5xl sm:text-6xl font-bold">$0.75</span>
                 <div className="mb-2 text-white/50 font-mono text-xs sm:text-sm">
                   <p>per employee</p>
                   <p>per month</p>
@@ -575,9 +574,9 @@ function Pricing() {
             <div className="mx-6 sm:mx-8 mb-8 bg-white/5 rounded-2xl p-4 sm:p-5 font-mono text-sm text-white/70">
               <p className="text-white/40 text-[10px] uppercase tracking-widest mb-3">Example</p>
               {[
-                { label: "10 employees",  cost: "$15.00 / mo"  },
-                { label: "25 employees",  cost: "$37.50 / mo"  },
-                { label: "100 employees", cost: "$150.00 / mo" },
+                { label: "10 employees",  cost: "$7.50 / mo"  },
+                { label: "25 employees",  cost: "$18.75 / mo"  },
+                { label: "100 employees", cost: "$75.00 / mo" },
               ].map((e) => (
                 <div key={e.label} className="flex justify-between py-1.5 border-b border-white/10 last:border-0">
                   <span>{e.label}</span>
@@ -672,7 +671,7 @@ function Footer() {
           <Link href="/legal?tab=privacy" className="hover:text-white/60 transition-colors">Privacy</Link>
           <Link href="/legal"             className="hover:text-white/60 transition-colors">Terms</Link>
           <a    href="#features"          className="hover:text-white/60 transition-colors">Features</a>
-          <a    href="mailto:hello@slipdesk.lr" className="hover:text-white/60 transition-colors">Support</a>
+          <Link href="/support" className="hover:text-white/60 transition-colors">Support</Link>
         </div>
 
         <p className="text-white/20 text-xs font-mono">
