@@ -190,20 +190,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function loadData(retries = 3) {
-    const [{ data: co }, { data: emps }] = await Promise.all([
-      db(supabase).from("companies").select("*").maybeSingle(),
-      db(supabase).from("employees").select("*").order("employee_number"),
-    ]);
+  const [{ data: companies }, { data: emps }] = await Promise.all([
+    db(supabase).from("companies").select("*").order("created_at", { ascending: false }),
+    db(supabase).from("employees").select("*").order("employee_number"),
+  ]);
 
-    // On fresh signup the trigger may not have fired yet — retry a few times
-    if (!co && retries > 0) {
-      await new Promise((r) => setTimeout(r, 800));
-      return loadData(retries - 1);
-    }
+  // Pick the company with a name, fallback to most recent
+  const co = (companies as any[])?.find((c: any) => c.name) ?? companies?.[0] ?? null;
 
-    if (co)   setCompanyState(dbToCompany(co as DbCompany));
-    if (emps) setAllEmployees((emps as DbEmployee[]).map(dbToEmployee));
+  if (!co && retries > 0) {
+    await new Promise((r) => setTimeout(r, 800));
+    return loadData(retries - 1);
   }
+
+  if (co)   setCompanyState(dbToCompany(co as DbCompany));
+  if (emps) setAllEmployees((emps as DbEmployee[]).map(dbToEmployee));
+}
 
   // ── Derived slices ───────────────────────────────────────────────────────
   const employees:         Employee[] = allEmployees.filter((e) => !e.isArchived);
@@ -254,7 +256,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const { data: row } = await db(supabase)
       .from("employees")
-      .insert({
+      .upsert({
         company_id:      co.id,
         employee_number: data.employeeNumber || nextEmpNumber(),
         first_name:      data.firstName,
@@ -277,7 +279,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         momo_number:     data.momoNumber,
         is_active:       data.isActive,
         is_archived:     false,
-      })
+      },{ onConflict: "company_id,employee_number" })
       .select()
       .single();
 
