@@ -591,27 +591,33 @@ export default function EmployeesPage() {
   const failures: string[] = [];
 
   try {
-    for (const data of rows) {
-      try {
-        await addEmployee({
-          ...(data as Omit<Employee, "id" | "fullName" | "isArchived">),
-          isActive: true,
-        });
-        successCount++;
-      } catch (err) {
-        const name = `${data.firstName ?? ""} ${data.lastName ?? ""}`.trim();
-        const msg  = err instanceof Error ? err.message : "Unknown error";
-        failures.push(`${name}: ${msg}`);
-      }
+    // Process in batches of 50 instead of one by one
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      const batch = rows.slice(i, i + BATCH_SIZE);
+      
+      await Promise.all(
+        batch.map(async (data) => {
+          try {
+            await addEmployee({
+              ...(data as Omit<Employee, "id" | "fullName" | "isArchived">),
+              isActive: true,
+            });
+            successCount++;
+          } catch (err) {
+            const name = `${data.firstName ?? ""} ${data.lastName ?? ""}`.trim();
+            failures.push(`${name}: ${err instanceof Error ? err.message : "Unknown error"}`);
+          }
+        })
+      );
     }
 
     if (successCount > 0) {
-      toast.success(`${successCount} employee${successCount !== 1 ? "s" : ""} imported successfully.`);
+      toast.success(`${successCount} employee${successCount !== 1 ? "s" : ""} imported.`);
     }
     if (failures.length > 0) {
-      toast.error(`${failures.length} employee${failures.length !== 1 ? "s" : ""} failed to import.`);
-      console.error("Import failures:", failures);
-      throw new Error(failures.join("\n")); // CSVUploadModal shows inline error
+      toast.error(`${failures.length} failed to import.`);
+      throw new Error(failures.join("\n"));
     }
   } finally {
     setSaving(false);
