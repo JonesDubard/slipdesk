@@ -586,23 +586,37 @@ export default function EmployeesPage() {
 
   // ── Bulk import — each row persisted via addEmployee ─────────────────────
   async function handleBulkImport(rows: Partial<Employee>[]) {
-    setSaving(true);
-    try {
-      for (const data of rows) {
+  setSaving(true);
+  let successCount = 0;
+  const failures: string[] = [];
+
+  try {
+    for (const data of rows) {
+      try {
         await addEmployee({
           ...(data as Omit<Employee, "id" | "fullName" | "isArchived">),
           isActive: true,
         });
+        successCount++;
+      } catch (err) {
+        const name = `${data.firstName ?? ""} ${data.lastName ?? ""}`.trim();
+        const msg  = err instanceof Error ? err.message : "Unknown error";
+        failures.push(`${name}: ${msg}`);
       }
-      toast.success(`${rows.length} employee${rows.length !== 1 ? "s" : ""} imported.`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      toast.error(`Bulk import failed: ${msg}`);
-      throw err; // CSVUploadModal still catches this to show inline error
-    } finally {
-      setSaving(false);
     }
+
+    if (successCount > 0) {
+      toast.success(`${successCount} employee${successCount !== 1 ? "s" : ""} imported successfully.`);
+    }
+    if (failures.length > 0) {
+      toast.error(`${failures.length} employee${failures.length !== 1 ? "s" : ""} failed to import.`);
+      console.error("Import failures:", failures);
+      throw new Error(failures.join("\n")); // CSVUploadModal shows inline error
+    }
+  } finally {
+    setSaving(false);
   }
+}
 
   // ── Toggle active status — persisted to Supabase ─────────────────────────
   async function toggleActive(id: string) {
