@@ -191,7 +191,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   async function loadData(retries = 3) {
     const [{ data: co }, { data: emps }] = await Promise.all([
-      db(supabase).from("companies").select("*").single(),
+      db(supabase).from("companies").select("*").maybeSingle(),
       db(supabase).from("employees").select("*").order("employee_number"),
     ]);
 

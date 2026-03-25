@@ -248,7 +248,9 @@ function BellButton() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
-        className="relative text-slate-400 hover:text-slate-600 transition-colors">
+        className="relative text-slate-400 hover:text-slate-600 transition-colors"
+        aria-label="Notifications"
+        >
         <Bell className="w-5 h-5"/>
         <span className="absolute -top-1 -right-1 w-2 h-2 bg-[#50C878] rounded-full"/>
       </button>
@@ -322,7 +324,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <header className="flex-shrink-0 h-14 bg-white border-b border-slate-200
                              flex items-center justify-between px-4 sm:px-6">
             <button className="md:hidden text-slate-500 hover:text-slate-700"
-              onClick={() => setMobileOpen(true)}>
+              onClick={() => setMobileOpen(true)}
+              aria-label="Open menu"
+              >
               <Menu className="w-5 h-5"/>
             </button>
             <div className="hidden md:block"/>
