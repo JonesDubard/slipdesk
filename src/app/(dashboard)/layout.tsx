@@ -280,18 +280,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { user, loading } = useApp();
 
   if (loading) {
-    return (
-      <>
-        {STYLES}
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-          <div className="text-center">
-            <Loader className="w-8 h-8 animate-spin text-[#50C878] mx-auto mb-3"/>
-            <p className="text-slate-400 text-sm font-mono">Loading Slipdesk…</p>
+  return (
+    <>
+      {STYLES}
+      <div className="flex h-screen bg-slate-50 overflow-hidden">
+        <aside className="hidden md:flex flex-col flex-shrink-0 w-60 bg-[#002147]"/>
+        <div className="flex-1 flex flex-col">
+          <div className="h-14 bg-white border-b border-slate-200"/>
+          <div className="flex-1 p-8 space-y-4">
+            <div className="h-8 w-48 bg-slate-200 rounded-xl animate-pulse"/>
+            <div className="h-32 bg-slate-200 rounded-2xl animate-pulse"/>
+            <div className="h-48 bg-slate-200 rounded-2xl animate-pulse"/>
           </div>
         </div>
-      </>
-    );
-  }
+      </div>
+    </>
+  );
+}
 
   if (!user) return null;
 
