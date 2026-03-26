@@ -321,26 +321,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [supabase]);
 
   // ── Archive / Restore / Delete ───────────────────────────────────────────
-  const archiveEmployee = useCallback(async (id: string) => {
-    await db(supabase).from("employees")
-      .update({ is_archived: true, is_active: false }).eq("id", id);
-    setAllEmployees((prev) =>
-      prev.map((e) => e.id === id ? { ...e, isArchived: true, isActive: false } : e),
-    );
-  }, [supabase]);
+ const archiveEmployee = useCallback(async (id: string) => {
+  if (!id) return; // guard against undefined
+  const { data: co } = await db(supabase).from("companies").select("id").single();
+  if (!co) return;
+  await db(supabase).from("employees")
+    .update({ is_archived: true, is_active: false })
+    .eq("id", id)
+    .eq("company_id", co.id); // ← double lock
+  setAllEmployees((prev) =>
+    prev.map((e) => e.id === id ? { ...e, isArchived: true, isActive: false } : e),
+  );
+}, [supabase]);
 
-  const restoreEmployee = useCallback(async (id: string) => {
-    await db(supabase).from("employees")
-      .update({ is_archived: false, is_active: true }).eq("id", id);
-    setAllEmployees((prev) =>
-      prev.map((e) => e.id === id ? { ...e, isArchived: false, isActive: true } : e),
-    );
-  }, [supabase]);
+const restoreEmployee = useCallback(async (id: string) => {
+  if (!id) return;
+  const { data: co } = await db(supabase).from("companies").select("id").single();
+  if (!co) return;
+  await db(supabase).from("employees")
+    .update({ is_archived: false, is_active: true })
+    .eq("id", id)
+    .eq("company_id", co.id);
+  setAllEmployees((prev) =>
+    prev.map((e) => e.id === id ? { ...e, isArchived: false, isActive: true } : e),
+  );
+}, [supabase]);
 
-  const hardDeleteEmployee = useCallback(async (id: string) => {
-    await db(supabase).from("employees").delete().eq("id", id);
-    setAllEmployees((prev) => prev.filter((e) => e.id !== id));
-  }, [supabase]);
+const hardDeleteEmployee = useCallback(async (id: string) => {
+  if (!id) return;
+  const { data: co } = await db(supabase).from("companies").select("id").single();
+  if (!co) return;
+  await db(supabase).from("employees")
+    .delete()
+    .eq("id", id)
+    .eq("company_id", co.id);
+  setAllEmployees((prev) => prev.filter((e) => e.id !== id));
+}, [supabase]);
 
   // ── Sign out ─────────────────────────────────────────────────────────────
   const signOut = useCallback(async () => {
