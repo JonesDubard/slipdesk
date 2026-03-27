@@ -449,7 +449,7 @@ async function generatePayslipBlob({ line, periodLabel, payDate, company }: PdfO
 
         <View style={S.footer}>
           <Text style={S.footerTxt}>This payslip is computer-generated and is valid without a physical signature.</Text>
-          <Text style={S.footerBrand}>Slipdesk · slipdesk.lr</Text>
+          <Text style={S.footerBrand}>Slipdesk · slipdesk.com</Text>
         </View>
       </Page>
     </Document>

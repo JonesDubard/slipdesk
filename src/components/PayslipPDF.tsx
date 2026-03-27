@@ -691,7 +691,7 @@ function PayslipDocument({ line, company, payDate, periodLabel, payment }: Paysl
           <Text style={styles.footerText}>
             This payslip is computer-generated and is valid without a physical signature.
           </Text>
-          <Text style={styles.footerBrand}>Slipdesk - slipdesk.lr</Text>
+          <Text style={styles.footerBrand}>Slipdesk - slipdesk.com</Text>
         </View>
 
       </Page>
