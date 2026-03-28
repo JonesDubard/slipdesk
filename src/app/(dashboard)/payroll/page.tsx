@@ -872,8 +872,8 @@ export default function PayrollPage() {
     col.accessor("fullName", { header: "Name", size: 148,
       cell: (c) => (
         <div>
-          <p className="text-xs font-medium text-slate-700 leading-tight truncate max-w-[130px]">{c.getValue()}</p>
-          <p className="text-[10px] text-slate-400 truncate max-w-[130px]">{c.row.original.department}</p>
+          <p className="text-xs font-medium text-slate-700 leading-tight truncate max-w-32.5">{c.getValue()}</p>
+          <p className="text-[10px] text-slate-400 truncate max-w-32.5">{c.row.original.department}</p>
         </div>
       ) }),
     col.accessor("currency", { header: "CCY", size: 48,
@@ -938,7 +938,7 @@ export default function PayrollPage() {
 
         {activeEmployees.length === 0 && (
           <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4">
-            <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+            <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-semibold text-amber-800">No active employees</p>
               <p className="text-xs text-amber-600 mt-0.5">Add employees on the <strong>Employees</strong> page first.</p>
@@ -948,7 +948,7 @@ export default function PayrollPage() {
 
         {activeEmployees.length > 0 && (
           <div className="bg-white rounded-2xl border border-slate-200 px-5 py-4 flex items-center gap-3">
-            <Users className="w-4 h-4 text-[#50C878] flex-shrink-0" />
+            <Users className="w-4 h-4 text-[#50C878] shrink-0" />
             <p className="text-sm text-slate-600">
               <span className="font-semibold text-slate-800">{activeEmployees.length} active employee{activeEmployees.length !== 1 ? "s" : ""}</span>
               {" "}will be loaded. Recurring allowances pre-fill in the Extras column.
@@ -1019,7 +1019,7 @@ export default function PayrollPage() {
                       {run.totalNasscorp ? ` · NASC $${run.totalNasscorp.toLocaleString("en-US", { minimumFractionDigits: 2 })}` : ""}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                  <div className="flex items-center gap-2 shrink-0 ml-3">
                     {run.lines.length > 0 && (
                       <BulkDownloadButton lines={run.lines} periodLabel={run.periodLabel} payDate={run.payDate} company={pdfCompany} />
                     )}
@@ -1072,7 +1072,7 @@ export default function PayrollPage() {
       </div>
 
       <div className="flex items-start gap-3 bg-blue-50 border border-blue-100 rounded-2xl px-5 py-3.5">
-        <FileDown className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
+        <FileDown className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
         <p className="text-xs text-blue-600 leading-relaxed">
           Employees loaded from your registry · allowances pre-filled in Extras. Click any cell to edit —
           NASSCORP, Income Tax (LRA) and Net Pay recalculate instantly. Use <strong>Import CSV</strong> to add extra rows with hours pre-filled.
@@ -1081,7 +1081,7 @@ export default function PayrollPage() {
 
       {warningCount > 0 && (
         <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3.5">
-          <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
+          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
           <p className="text-sm text-amber-700">
             <strong>{warningCount} employee{warningCount > 1 ? "s" : ""}</strong> have gross pay below the $150 USD minimum wage. Review before approving.
           </p>
@@ -1090,7 +1090,7 @@ export default function PayrollPage() {
 
       {isLocked && (
         <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-2xl px-5 py-3.5">
-          <Lock className="w-4 h-4 text-blue-500 flex-shrink-0" />
+          <Lock className="w-4 h-4 text-blue-500 shrink-0" />
           <p className="text-sm text-blue-700">Pay run is <strong>{status}</strong>. Figures are locked. You can still download payslips.</p>
         </div>
       )}
@@ -1155,7 +1155,7 @@ export default function PayrollPage() {
                         <p className="text-sm font-semibold text-slate-800 truncate">{line.fullName}</p>
                         <p className="text-xs text-slate-400 truncate">{line.jobTitle} · {line.department}</p>
                       </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className="flex items-center gap-2 shrink-0">
                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${line.currency === "USD" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
                           {line.currency}
                         </span>
@@ -1228,7 +1228,7 @@ export default function PayrollPage() {
                     {run.totalNasscorp ? ` · NASC $${run.totalNasscorp.toLocaleString("en-US", { minimumFractionDigits: 2 })}` : ""}
                   </p>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                <div className="flex items-center gap-2 shrink-0 ml-3">
                   {run.lines.length > 0 && (
                     <BulkDownloadButton lines={run.lines} periodLabel={run.periodLabel} payDate={run.payDate} company={pdfCompany} />
                   )}
