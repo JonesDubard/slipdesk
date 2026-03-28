@@ -751,98 +751,112 @@ export default function PayrollPage() {
 }
 
   async function advanceStatus() {
-    const idx  = STATUS_STEPS.indexOf(status);
-    if (idx >= STATUS_STEPS.length - 1) return;
-    const next = STATUS_STEPS[idx + 1];
-    setStatus(next);
-
-    if (next === "paid") {
-      setSaving(true);
-      try {
-        const FX    = exchangeRate;
-        const toUSD = (n: number, ccy: string) => ccy === "USD" ? n : n / FX;
-
-        const totalGross    = lines.reduce((s, l) => s + (l.calc ? toUSD(l.calc.grossPay,                       l.currency) : 0), 0);
-        const totalNet      = lines.reduce((s, l) => s + (l.calc ? toUSD(l.calc.netPay,                         l.currency) : 0), 0);
-        const totalTax      = lines.reduce((s, l) => s + (l.calc ? toUSD(l.calc.Paye.taxInBase,                 l.currency) : 0), 0);
-        const totalNasscorp = lines.reduce((s, l) => s + (l.calc ? toUSD(l.calc.nasscorp.employeeContribution,  l.currency) : 0), 0);
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: run, error: runErr } = await (supabase as any)
-          .from("pay_runs")
-          .insert({
-            period_label:     periodLabel,
-            pay_period_start: payDate,
-            pay_period_end:   payDate,
-            pay_date:         payDate,
-            exchange_rate:    FX,
-            status:           "paid",
-            employee_count:   lines.length,
-            total_gross:      totalGross,
-            total_net:        totalNet,
-            total_income_tax: totalTax,
-            total_nasscorp:   totalNasscorp,
-          })
-          .select()
-          .single();
-
-        if (runErr) throw runErr;
-
-        if (run && lines.length > 0) {
-          const lineRows = lines
-            .filter((l) => l.calc !== null)
-            .map((l) => ({
-              pay_run_id:          run.id,
-              employee_id:         l.employeeId,
-              employee_number:     l.employeeNumber,
-              full_name:           l.fullName,
-              job_title:           l.jobTitle,
-              department:          l.department,
-              currency:            l.currency,
-              rate:                l.rate,
-              regular_hours:       l.regularHours,
-              overtime_hours:      l.overtimeHours,
-              holiday_hours:       l.holidayHours,
-              additional_earnings: l.additionalEarnings,
-              exchange_rate:       l.exchangeRate,
-              gross_pay:           l.calc!.grossPay,
-              income_tax:          l.calc!.Paye.taxInBase,
-              nasscorp_ee:         l.calc!.nasscorp.employeeContribution,
-              nasscorp_er:         l.calc!.nasscorp.employerContribution,
-              net_pay:             l.calc!.netPay,
-            }));
-
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { error: lineErr } = await (supabase as any)
-            .from("pay_run_lines")
-            .insert(lineRows);
-
-          if (lineErr) {
-            console.error("pay_run_lines insert error:", lineErr);
-            toast.error("Pay run saved but some line items failed to record.");
-          }
+  const idx  = STATUS_STEPS.indexOf(status);
+  if (idx >= STATUS_STEPS.length - 1) return;
+  const next = STATUS_STEPS[idx + 1];
+  setStatus(next);
+ 
+  if (next === "paid") {
+    setSaving(true);
+    try {
+      const FX    = exchangeRate;
+      const toUSD = (n: number, ccy: string) => ccy === "USD" ? n : n / FX;
+ 
+      const totalGross    = lines.reduce((s, l) => s + (l.calc ? toUSD(l.calc.grossPay,                      l.currency) : 0), 0);
+      const totalNet      = lines.reduce((s, l) => s + (l.calc ? toUSD(l.calc.netPay,                        l.currency) : 0), 0);
+      const totalTax      = lines.reduce((s, l) => s + (l.calc ? toUSD(l.calc.Paye.taxInBase,                l.currency) : 0), 0);
+      const totalNasscorp = lines.reduce((s, l) => s + (l.calc ? toUSD(l.calc.nasscorp.employeeContribution, l.currency) : 0), 0);
+ 
+      // ── 1. Fetch company_id up-front ──────────────────────────────────────
+      // Required by RLS on pay_runs AND pay_run_lines. Without this the
+      // server rejects the insert with a policy violation.
+      const { data: coRow } = await (supabase as any)
+        .from("companies")
+        .select("id")
+        .single();
+ 
+      const companyId: string | null = coRow?.id ?? null;
+ 
+      // ── 2. Insert the pay_run header ──────────────────────────────────────
+      const { data: run, error: runErr } = await (supabase as any)
+        .from("pay_runs")
+        .insert({
+          ...(companyId ? { company_id: companyId } : {}),
+          period_label:     periodLabel,
+          pay_period_start: payDate,
+          pay_period_end:   payDate,
+          pay_date:         payDate,
+          exchange_rate:    FX,
+          status:           "paid",
+          employee_count:   lines.length,
+          total_gross:      totalGross,
+          total_net:        totalNet,
+          total_income_tax: totalTax,
+          total_nasscorp:   totalNasscorp,
+        })
+        .select()
+        .single();
+ 
+      if (runErr) throw runErr;
+ 
+      // ── 3. Insert pay_run_lines with company_id ───────────────────────────
+      if (run && lines.length > 0) {
+        const lineRows = lines
+          .filter((l) => l.calc !== null)
+          .map((l) => ({
+            pay_run_id:          run.id,
+            // FIX: company_id was missing — Supabase RLS requires it and
+            // silently dropped every line row without returning an error.
+            ...(companyId ? { company_id: companyId } : {}),
+            employee_id:         l.employeeId,
+            employee_number:     l.employeeNumber,
+            full_name:           l.fullName,
+            job_title:           l.jobTitle,
+            department:          l.department,
+            currency:            l.currency,
+            rate:                l.rate,
+            regular_hours:       l.regularHours,
+            overtime_hours:      l.overtimeHours,
+            holiday_hours:       l.holidayHours,
+            additional_earnings: l.additionalEarnings,
+            exchange_rate:       l.exchangeRate,
+            gross_pay:           l.calc!.grossPay,
+            income_tax:          l.calc!.Paye.taxInBase,
+            nasscorp_ee:         l.calc!.nasscorp.employeeContribution,
+            nasscorp_er:         l.calc!.nasscorp.employerContribution,
+            net_pay:             l.calc!.netPay,
+          }));
+ 
+        const { error: lineErr } = await (supabase as any)
+          .from("pay_run_lines")
+          .insert(lineRows);
+ 
+        if (lineErr) {
+          console.error("pay_run_lines insert error:", lineErr);
+          toast.error("Pay run saved but some line items failed to record.");
         }
-
-        const savedRun: SavedRun = {
-          id:            run?.id ?? `LOCAL-${Date.now()}`,
-          periodLabel,   payDate,  status: "paid",
-          employeeCount: lines.length,
-          totalGross, totalNet, totalTax, totalNasscorp,
-          exchangeRate:  FX,
-          lines:         [...lines],
-          createdAt:     new Date().toISOString(),
-        };
-        setHistory((prev) => [savedRun, ...prev]);
-        toast.success(`${periodLabel} pay run saved. ${lines.length} employee${lines.length !== 1 ? "s" : ""} paid.`);
-
-      } catch (err) {
-        console.error("Failed to save pay run:", err);
-        toast.error("Pay run marked as paid locally but could not be saved to Supabase.");
-      } finally {
-        setSaving(false);
       }
+ 
+      const savedRun: SavedRun = {
+        id:            run?.id ?? `LOCAL-${Date.now()}`,
+        periodLabel,   payDate,  status: "paid",
+        employeeCount: lines.length,
+        totalGross, totalNet, totalTax, totalNasscorp,
+        exchangeRate:  FX,
+        lines:         [...lines],
+        createdAt:     new Date().toISOString(),
+      };
+      setHistory((prev) => [savedRun, ...prev]);
+      toast.success(`${periodLabel} pay run saved. ${lines.length} employee${lines.length !== 1 ? "s" : ""} paid.`);
+ 
+    } catch (err) {
+      console.error("Failed to save pay run:", err);
+      toast.error("Pay run marked as paid locally but could not be saved to Supabase.");
+    } finally {
+      setSaving(false);
     }
   }
+}
 
   function startNewRun() {
     dispatch({ type: "CLEAR" }); setStatus("draft");
