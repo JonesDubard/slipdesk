@@ -599,7 +599,7 @@ export default function BulkUpload({ onImport, onClose }: Props) {
 
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
           <div className="flex items-start gap-3 bg-blue-50 border border-blue-100 rounded-xl p-4">
-            <Info className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5"/>
+            <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5"/>
             <div className="flex-1">
               <p className="text-sm text-blue-700 font-medium mb-1">CSV includes overtime &amp; holiday hours</p>
               <p className="text-xs text-blue-500 mb-3">
