@@ -4,10 +4,12 @@
  * Slipdesk — BulkUpload Component (FIXED)
  * Place at: src/components/BulkUpload.tsx
  *
- * Fixes:
- *  1. Added `deductions` column to CSV template and BulkRow type.
- *     Deductions are a flat amount deducted from net pay only (not from gross/taxable base).
- *  2. Preview table now shows Deductions column.
+ * Notes:
+ *  - deductions field exists on BulkRow and is parsed if present in uploaded CSV,
+ *    but is intentionally excluded from the downloadable template. Admins set
+ *    deductions manually in the pay run grid after import.
+ *  - regular_hours, overtime_hours, holiday_hours are all read from the CSV.
+ *    Leaving regular_hours blank defaults to each employee's standard_hours.
  */
 
 import { useRef, useState } from "react";
@@ -43,9 +45,10 @@ const COLUMNS = [
   "nasscorp_number",
   // Payment
   "payment_method", "bank_name", "account_number", "momo_number",
-  // This-period hours
+  // This-period hours — leave blank to default to standard_hours / 0
   "regular_hours", "overtime_hours", "holiday_hours",
-  // Deductions (deducted from net pay only — not from taxable gross)
+  // Deductions — flat amount subtracted from net pay only (not gross/tax base)
+  // e.g. salary advance, loan repayment. Leave blank or 0 if none.
   "deductions",
 ] as const;
 
@@ -56,8 +59,7 @@ const EXAMPLE_ROWS = [
     "full_time","USD","15.00","173.33","50.00",
     "NASC-001",
     "bank_transfer","Ecobank Liberia","1234567890","",
-    "173.33","8","0",
-    "0",
+    "173.33","8","0","0",
   ],
   [
     "EMP-002","Grace","Tamba","HR Officer","HR",
@@ -65,8 +67,7 @@ const EXAMPLE_ROWS = [
     "full_time","LRD","2500","173.33","0",
     "NASC-002",
     "mtn_momo","","","0771234567",
-    "160","0","8",
-    "500",
+    "160","0","8","500",
   ],
   [
     "EMP-003","James","Freeman","Driver","Operations",
@@ -74,8 +75,7 @@ const EXAMPLE_ROWS = [
     "casual","USD","8.50","0","0",
     "",
     "cash","","","",
-    "120","16","0",
-    "0",
+    "120","16","0","0",
   ],
 ];
 
@@ -159,12 +159,51 @@ function parseRow(raw: Record<string, string>, lineNum: number): { row: BulkRow 
   return { row: { employee, regularHours, overtimeHours, holidayHours, deductions }, error: null };
 }
 
+// Parses one CSV line using RFC-4180 rules:
+//   - fields may be wrapped in double-quotes
+//   - a double-quote inside a quoted field is escaped as ""
+//   - commas inside quoted fields are NOT treated as delimiters
+// This is the same logic used for both the header row AND data rows,
+// so column positions always align correctly regardless of quoting.
+function parseCSVLine(line: string): string[] {
+  const values: string[] = [];
+  let cur = "", inQuote = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuote) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; } // escaped ""
+        else { inQuote = false; }                      // closing quote
+      } else {
+        cur += ch;
+      }
+    } else {
+      if      (ch === '"') { inQuote = true; }
+      else if (ch === ",") { values.push(cur.trim()); cur = ""; }
+      else                 { cur += ch; }
+    }
+  }
+  values.push(cur.trim());
+  return values;
+}
+
 function parseCSV(text: string): { rows: BulkRow[]; errors: string[] } {
-  const lines = text.trim().split(/\r?\n/);
+  // Normalise all line endings (Windows CRLF \r\n, old Mac \r, Unix \n)
+  const lines = text.trim().split(/\r\n|\r|\n/);
   if (lines.length < 2)
     return { rows: [], errors: ["CSV must have a header row and at least one data row."] };
 
-  const headers = lines[0].split(",").map((h) => stripQuotes(h).toLowerCase());
+  // FIX: use parseCSVLine (RFC-4180) for the header row — not a plain split(",").
+  // Excel wraps every header cell in double-quotes when it saves a CSV, e.g.:
+  //   "employee_number","first_name",...,"overtime_hours","holiday_hours"
+  // A plain split(",") on that produces:
+  //   ['"employee_number"', '"first_name"', ..., '"overtime_hours"', '"holiday_hours"']
+  // stripQuotes() cleaned the quotes but the REAL problem is that if ANY value
+  // in the header or a data row contains a comma inside quotes (e.g. a bank name
+  // like "First Bank, Liberia") the column count shifts — and overtime_hours /
+  // holiday_hours end up mapped to the wrong index or come back as undefined.
+  // Using the same RFC-4180 parser for headers and rows fixes this completely.
+  const headers = parseCSVLine(lines[0]).map((h) => h.toLowerCase());
 
   const rows:   BulkRow[] = [];
   const errors: string[]  = [];
@@ -173,18 +212,10 @@ function parseCSV(text: string): { rows: BulkRow[]; errors: string[] } {
     const line = lines[i].trim();
     if (!line) continue;
 
-    const values: string[] = [];
-    let cur = "", inQuote = false;
-    for (const ch of line) {
-      if (ch === '"') { inQuote = !inQuote; }
-      else if (ch === "," && !inQuote) { values.push(cur); cur = ""; }
-      else { cur += ch; }
-    }
-    values.push(cur);
+    const values = parseCSVLine(line);
 
-    const cleanValues = values.map(stripQuotes);
     const raw: Record<string, string> = {};
-    headers.forEach((h, idx) => { raw[h] = cleanValues[idx]?.trim() ?? ""; });
+    headers.forEach((h, idx) => { raw[h] = values[idx] ?? ""; });
 
     const { row, error } = parseRow(raw, i + 1);
     if (error) errors.push(error);
@@ -259,12 +290,14 @@ export default function BulkUpload({ onImport, onClose }: Props) {
           <div className="flex items-start gap-3 bg-blue-50 border border-blue-100 rounded-xl p-4">
             <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5"/>
             <div className="flex-1">
-              <p className="text-sm text-blue-700 font-medium mb-1">CSV includes overtime, holiday hours &amp; deductions</p>
+              <p className="text-sm text-blue-700 font-medium mb-1">CSV template — hours &amp; deductions</p>
               <p className="text-xs text-blue-500 mb-3">
-                <code className="font-mono bg-blue-100 px-1 rounded">regular_hours</code>,{" "}
+                Fill in <code className="font-mono bg-blue-100 px-1 rounded">regular_hours</code>,{" "}
                 <code className="font-mono bg-blue-100 px-1 rounded">overtime_hours</code>,{" "}
-                <code className="font-mono bg-blue-100 px-1 rounded">holiday_hours</code> pre-fill this month's pay run.{" "}
-                <code className="font-mono bg-blue-100 px-1 rounded">deductions</code> is subtracted from net pay only (not from taxable gross).
+                <code className="font-mono bg-blue-100 px-1 rounded">holiday_hours</code>, and{" "}
+                <code className="font-mono bg-blue-100 px-1 rounded">deductions</code> per employee.
+                Leave <code className="font-mono bg-blue-100 px-1 rounded">regular_hours</code> blank to use standard hours.
+                Leave <code className="font-mono bg-blue-100 px-1 rounded">deductions</code> blank or <code className="font-mono bg-blue-100 px-1 rounded">0</code> if none.
               </p>
               <button onClick={downloadTemplate}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors">
@@ -333,7 +366,7 @@ export default function BulkUpload({ onImport, onClose }: Props) {
                           <td className={`px-3 py-2 font-mono ${r.overtimeHours > 0 ? "text-amber-600 font-semibold" : "text-slate-400"}`}>{r.overtimeHours}</td>
                           <td className={`px-3 py-2 font-mono ${r.holidayHours > 0 ? "text-purple-600 font-semibold" : "text-slate-400"}`}>{r.holidayHours}</td>
                           <td className="px-3 py-2 font-mono text-slate-500">{r.employee.allowances || "—"}</td>
-                          <td className={`px-3 py-2 font-mono ${r.deductions > 0 ? "text-red-600 font-semibold" : "text-slate-400"}`}>
+                          <td className={`px-3 py-2 font-mono text-xs ${r.deductions > 0 ? "text-red-600 font-semibold" : "text-slate-400"}`}>
                             {r.deductions > 0 ? `-${r.deductions.toFixed(2)}` : "—"}
                           </td>
                           <td className="px-3 py-2 text-slate-500 capitalize">{r.employee.paymentMethod.replace(/_/g, " ")}</td>
