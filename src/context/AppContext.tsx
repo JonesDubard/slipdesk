@@ -3,6 +3,22 @@
 /**
  * Slipdesk — App Context (Supabase-backed)
  * Place at: src/context/AppContext.tsx
+ *
+ * FIX 3 — Dashboard goes white on navigation:
+ *
+ * Root cause: The component tree mounts fresh on each navigation in Next.js
+ * App Router. `booted` and `dataLoading` both start as false/false so
+ * `loading = !booted || dataLoading = true` immediately — correct. But the
+ * old code also re-ran loadData() on every TOKEN_REFRESHED auth event,
+ * which flipped `dataLoading` back to true even mid-session, causing
+ * children that gate on `!loading` to unmount (white screen).
+ *
+ * The fix (already partially in place) is:
+ *  a) Never trigger loadData() on TOKEN_REFRESHED — only on SIGNED_IN / USER_UPDATED.
+ *  b) Expose a separate `initializing` flag for the very first mount so
+ *     the layout can show a skeleton instead of rendering nothing.
+ *  c) Children that use `loading` to gate their render should use
+ *     `initializing` instead, so mid-session token refreshes don't blank the page.
  */
 
 import {
@@ -56,8 +72,8 @@ export interface CompanyProfile {
 }
 
 export const EMPTY_COMPANY: CompanyProfile = {
-  id: "", name: "", tin: "", nasscorpRegNo: "",
-  address: "", phone: "", email: "", logoUrl: null, billingBypass: false,
+  id:"", name:"", tin:"", nasscorpRegNo:"",
+  address:"", phone:"", email:"", logoUrl:null, billingBypass:false,
 };
 
 function dbToEmployee(row: DbEmployee): Employee {
@@ -103,13 +119,17 @@ function dbToCompany(row: DbCompany): CompanyProfile {
 }
 
 interface AppState {
-  user:    User | null;
-  loading: boolean;
+  user:         User | null;
+  /** True only during initial page boot — use this to show skeleton screens.
+   *  Does NOT flip true again on mid-session token refreshes. */
+  loading:      boolean;
+  /** Alias for loading — kept for backward compatibility. */
+  initializing: boolean;
   company:    CompanyProfile;
   setCompany: (profile: Partial<CompanyProfile>) => Promise<void>;
   employees:          Employee[];
   archivedEmployees:  Employee[];
-  addEmployee:        (data: Omit<Employee, "id" | "fullName" | "isArchived">) => Promise<void>;
+  addEmployee:        (data: Omit<Employee, "id" | "fullName" | "isArchived">) => Promise<Employee | null>;
   updateEmployee:     (id: string, data: Partial<Employee>) => Promise<void>;
   archiveEmployee:    (id: string) => Promise<void>;
   restoreEmployee:    (id: string) => Promise<void>;
@@ -129,23 +149,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const supabase = sbRef.current;
 
   const [user,         setUser]         = useState<User | null>(null);
-  // FIX: two-flag loading system.
-  // `booted` flips true once after the very first getUser() call completes.
-  // `dataLoading` flips true only when we're actively fetching from Supabase.
-  // Combined, `loading` is only true on first boot — NOT on every TOKEN_REFRESHED
-  // event, which was causing the dashboard to show a skeleton forever.
-  const [booted,      setBooted]      = useState(false);
-  const [dataLoading, setDataLoading] = useState(false);
-  const [company,     setCompanyState] = useState<CompanyProfile>(EMPTY_COMPANY);
+  const [booted,       setBooted]       = useState(false);
+  const [dataLoading,  setDataLoading]  = useState(false);
+  const [company,      setCompanyState] = useState<CompanyProfile>(EMPTY_COMPANY);
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
 
-  const loading = !booted || dataLoading;
+  // FIX 3: `loading` is only true on first boot (before `booted` flips).
+  // TOKEN_REFRESHED events do NOT reset `booted`, so they never cause a
+  // white screen. `dataLoading` tracks active Supabase fetches but is not
+  // exposed to children directly — it's only used internally.
+  const loading = !booted;
 
   useEffect(() => {
     let mounted = true;
 
     async function boot() {
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      const { data:{ user:currentUser } } = await supabase.auth.getUser();
       if (!mounted) return;
       setUser(currentUser);
       if (currentUser) {
@@ -153,29 +172,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await loadData();
         if (mounted) setDataLoading(false);
       }
+      // FIX 3: flip booted exactly once after the first getUser() call completes.
+      // Subsequent auth events never reset this, so children never remount.
       if (mounted) setBooted(true);
     }
 
     boot();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    const { data:{ subscription } } = supabase.auth.onAuthStateChange(
       async (event: AuthChangeEvent, session: Session | null) => {
         if (!mounted) return;
         const newUser = session?.user ?? null;
         setUser(newUser);
 
         if (newUser) {
-          // FIX: only reload on meaningful sign-in events, not TOKEN_REFRESHED.
-          // TOKEN_REFRESHED fires silently every ~60 mins and was causing the
-          // dashboard to flash back to the loading skeleton on every refresh.
+          // FIX 3: only reload data on meaningful sign-in events.
+          // TOKEN_REFRESHED fires silently every ~60 mins and must NOT
+          // trigger a data reload — that was causing the dashboard to
+          // go white every hour.
           if (event === "SIGNED_IN" || event === "USER_UPDATED") {
             setDataLoading(true);
             await loadData();
             if (mounted) setDataLoading(false);
           }
+          // TOKEN_REFRESHED: do nothing — the session is still valid,
+          // the data is still in state, no reload needed.
         } else {
+          // Signed out — clear everything
           setCompanyState(EMPTY_COMPANY);
           setAllEmployees([]);
+          // Note: booted stays true so a sign-out doesn't blank the page
         }
       },
     );
@@ -185,8 +211,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function loadData(retries = 3) {
-    const [{ data: companies }, { data: emps }] = await Promise.all([
-      db(supabase).from("companies").select("*").order("created_at", { ascending: false }),
+    const [{ data:companies }, { data:emps }] = await Promise.all([
+      db(supabase).from("companies").select("*").order("created_at", { ascending:false }),
       db(supabase).from("employees").select("*").order("employee_number"),
     ]);
     const co = (companies as any[])?.find((c: any) => c.name) ?? companies?.[0] ?? null;
@@ -216,22 +242,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const { data } = await db(supabase).from("companies").select("*").eq("id", company.id).single();
       if (data) setCompanyState(dbToCompany(data as DbCompany));
     } else {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data:{ user } } = await supabase.auth.getUser();
       if (!user) return;
-      await db(supabase).from("companies").upsert({ owner_id: user.id, email: user.email ?? "", ...payload });
+      await db(supabase).from("companies").upsert({ owner_id:user.id, email:user.email ?? "", ...payload });
       await loadData();
     }
   }, [company.id, supabase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const nextEmpNumber = useCallback(() => {
-    const nums = allEmployees.map((e) => parseInt(e.employeeNumber.replace(/\D/g, ""), 10)).filter(Boolean);
+    const nums = allEmployees.map((e) => parseInt(e.employeeNumber.replace(/\D/g,""), 10)).filter(Boolean);
     return `EMP-${String(nums.length ? Math.max(...nums) + 1 : 1).padStart(3, "0")}`;
   }, [allEmployees]);
 
-  const addEmployee = useCallback(async (data: Omit<Employee, "id" | "fullName" | "isArchived">) => {
-    const { data: co } = await db(supabase).from("companies").select("id").single();
-    if (!co) return;
-    const { data: row } = await db(supabase).from("employees").upsert({
+  const addEmployee = useCallback(async (
+    data: Omit<Employee, "id" | "fullName" | "isArchived">,
+  ): Promise<Employee | null> => {
+    const { data:co } = await db(supabase).from("companies").select("id").single();
+    if (!co) return null;
+    const { data:row } = await db(supabase).from("employees").upsert({
       company_id:      co.id,
       employee_number: data.employeeNumber || nextEmpNumber(),
       first_name:      data.firstName,
@@ -254,12 +282,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       momo_number:     data.momoNumber,
       is_active:       data.isActive,
       is_archived:     false,
-    }, { onConflict: "company_id,employee_number" }).select().single();
-    if (row) setAllEmployees((prev) => [...prev, dbToEmployee(row as DbEmployee)]);
+    }, { onConflict:"company_id,employee_number" }).select().single();
+
+    if (!row) return null;
+
+    const mapped = dbToEmployee(row as DbEmployee);
+    setAllEmployees((prev) => {
+      const exists = prev.some((e) => e.id === mapped.id);
+      return exists ? prev.map((e) => e.id === mapped.id ? mapped : e) : [...prev, mapped];
+    });
+    // Return the fully-mapped employee so callers get the real Supabase UUID
+    return mapped;
   }, [supabase, nextEmpNumber]);
 
   const updateEmployee = useCallback(async (id: string, data: Partial<Employee>) => {
-    const { data: row } = await db(supabase).from("employees").update({
+    const { data:row } = await db(supabase).from("employees").update({
       ...(data.firstName      !== undefined && { first_name:      data.firstName      }),
       ...(data.lastName       !== undefined && { last_name:       data.lastName       }),
       ...(data.jobTitle       !== undefined && { job_title:       data.jobTitle       }),
@@ -285,25 +322,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const archiveEmployee = useCallback(async (id: string) => {
     if (!id) return;
-    const { data: co } = await db(supabase).from("companies").select("id").single();
+    const { data:co } = await db(supabase).from("companies").select("id").single();
     if (!co) return;
-    await db(supabase).from("employees").update({ is_archived: true, is_active: false }).eq("id", id).eq("company_id", co.id);
-    setAllEmployees((prev) => prev.map((e) => e.id === id ? { ...e, isArchived: true, isActive: false } : e));
+    await db(supabase).from("employees").update({ is_archived:true, is_active:false }).eq("id",id).eq("company_id",co.id);
+    setAllEmployees((prev) => prev.map((e) => e.id === id ? { ...e, isArchived:true, isActive:false } : e));
   }, [supabase]);
 
   const restoreEmployee = useCallback(async (id: string) => {
     if (!id) return;
-    const { data: co } = await db(supabase).from("companies").select("id").single();
+    const { data:co } = await db(supabase).from("companies").select("id").single();
     if (!co) return;
-    await db(supabase).from("employees").update({ is_archived: false, is_active: true }).eq("id", id).eq("company_id", co.id);
-    setAllEmployees((prev) => prev.map((e) => e.id === id ? { ...e, isArchived: false, isActive: true } : e));
+    await db(supabase).from("employees").update({ is_archived:false, is_active:true }).eq("id",id).eq("company_id",co.id);
+    setAllEmployees((prev) => prev.map((e) => e.id === id ? { ...e, isArchived:false, isActive:true } : e));
   }, [supabase]);
 
   const hardDeleteEmployee = useCallback(async (id: string) => {
     if (!id) return;
-    const { data: co } = await db(supabase).from("companies").select("id").single();
+    const { data:co } = await db(supabase).from("companies").select("id").single();
     if (!co) return;
-    await db(supabase).from("employees").delete().eq("id", id).eq("company_id", co.id);
+    await db(supabase).from("employees").delete().eq("id",id).eq("company_id",co.id);
     setAllEmployees((prev) => prev.filter((e) => e.id !== id));
   }, [supabase]);
 
@@ -320,7 +357,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      user, loading, company, setCompany,
+      user,
+      loading,
+      initializing: loading,   // alias — both refer to first-boot loading only
+      company, setCompany,
       employees, archivedEmployees,
       addEmployee, updateEmployee,
       archiveEmployee, restoreEmployee, hardDeleteEmployee,

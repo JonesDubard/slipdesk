@@ -69,8 +69,24 @@ export interface PayRunLine {
   overtimeHours:      number;
   holidayHours:       number;
   additionalEarnings: number;  // one-off extras on top of recurring allowances
+
+  /**
+   * Flat deduction (salary advance, loan repayment, etc.).
+   * Applied AFTER tax + NASSCORP — reduces netPay only.
+   * Does not affect grossPay or the taxable base.
+   */
+  deductions:         number;
+
   exchangeRate:       number;
   calc:               PayrollResult | null;
+
+  // ── Payment details (copied from Employee; shown on payslip PDF) ──────────
+  paymentMethod?:  PaymentMethod;
+  bankName?:       string;
+  accountNumber?:  string;
+  /** MTN MoMo / Orange Money number (from Employee.momoNumber) */
+  mobileNumber?:   string;
+  mobileProvider?: string;
 }
 
 // ─── PayRun ───────────────────────────────────────────────────────────────────
