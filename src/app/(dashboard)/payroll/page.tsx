@@ -773,18 +773,20 @@ export default function PayrollPage() {
       department:         emp.department,
       currency:           emp.currency,
       rate:               emp.rate,
-      regularHours:       emp.standardHours,
-      overtimeHours:      0,
-      holidayHours:       0,
+      // Pre-fill hours from pending overrides if the admin imported them via CSV.
+      // Falls back to standardHours / 0 if no override was set.
+      regularHours:       emp.pendingRegularHours  ?? emp.standardHours,
+      overtimeHours:      emp.pendingOvertimeHours ?? 0,
+      holidayHours:       emp.pendingHolidayHours  ?? 0,
       additionalEarnings: emp.allowances ?? 0,
-      deductions:         0,                          // FIX 2
+      deductions:         emp.pendingDeductions    ?? 0,
       exchangeRate,
       calc:               null,
       paymentMethod:      emp.paymentMethod,
       bankName:           emp.bankName,
       accountNumber:      emp.accountNumber,
-      mobileNumber:       emp.momoNumber,       // momoNumber on Employee → mobileNumber on PayRunLine
-      mobileProvider:     undefined,            // not stored on Employee — can be set manually if needed
+      mobileNumber:       emp.momoNumber,
+      mobileProvider:     undefined,
     }));
     dispatch({ type:"SET_ROWS", rows });
     setRunStarted(true);
@@ -1014,15 +1016,25 @@ export default function PayrollPage() {
           </div>
         )}
 
-        {activeEmployees.length > 0 && (
-          <div className="bg-white rounded-2xl border border-slate-200 px-5 py-4 flex items-center gap-3">
-            <Users className="w-4 h-4 text-[#50C878] shrink-0"/>
-            <p className="text-sm text-slate-600">
-              <span className="font-semibold text-slate-800">{activeEmployees.length} active employee{activeEmployees.length !== 1 ? "s" : ""}</span>
-              {" "}will be loaded. Recurring allowances pre-fill in the Extras column.
-            </p>
-          </div>
-        )}
+        {activeEmployees.length > 0 && (() => {
+          const withHours = activeEmployees.filter(
+            (e) => (e.pendingOvertimeHours ?? 0) > 0 || (e.pendingHolidayHours ?? 0) > 0
+          ).length;
+          return (
+            <div className="bg-white rounded-2xl border border-slate-200 px-5 py-4 flex items-center gap-3">
+              <Users className="w-4 h-4 text-[#50C878] shrink-0"/>
+              <p className="text-sm text-slate-600">
+                <span className="font-semibold text-slate-800">{activeEmployees.length} active employee{activeEmployees.length !== 1 ? "s" : ""}</span>
+                {" "}will be loaded. Recurring allowances pre-fill in the Extras column.
+                {withHours > 0 && (
+                  <span className="ml-1 text-[#50C878] font-semibold">
+                    · {withHours} employee{withHours !== 1 ? "s" : ""} have CSV-imported hours ready.
+                  </span>
+                )}
+              </p>
+            </div>
+          );
+        })()}
 
         <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-5 max-w-lg">
           <h2 className="font-semibold text-slate-800">New Pay Run</h2>

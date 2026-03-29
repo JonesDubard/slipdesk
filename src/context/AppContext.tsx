@@ -57,6 +57,11 @@ export interface Employee {
   momoNumber:     string;
   isActive:       boolean;
   isArchived:     boolean;
+  // Pending payroll overrides — set via CSV import, consumed on pay run start
+  pendingRegularHours?:  number | null;
+  pendingOvertimeHours?: number | null;
+  pendingHolidayHours?:  number | null;
+  pendingDeductions?:    number | null;
 }
 
 export interface CompanyProfile {
@@ -101,6 +106,11 @@ function dbToEmployee(row: DbEmployee): Employee {
     momoNumber:     row.momo_number,
     isActive:       row.is_active,
     isArchived:     row.is_archived,
+    // Pending payroll overrides — stored in DB columns if present, otherwise null
+    pendingRegularHours:  row.pending_regular_hours  ?? null,
+    pendingOvertimeHours: row.pending_overtime_hours ?? null,
+    pendingHolidayHours:  row.pending_holiday_hours  ?? null,
+    pendingDeductions:    row.pending_deductions     ?? null,
   };
 }
 
@@ -288,8 +298,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       bank_name:       data.bankName,
       account_number:  data.accountNumber,
       momo_number:     data.momoNumber,
-      is_active:       data.isActive,
-      is_archived:     false,
+      is_active:            data.isActive,
+      is_archived:          false,
+      // Write pending hour overrides if provided — null means "use default"
+      ...(data.pendingRegularHours  !== undefined && { pending_regular_hours:  data.pendingRegularHours  }),
+      ...(data.pendingOvertimeHours !== undefined && { pending_overtime_hours: data.pendingOvertimeHours }),
+      ...(data.pendingHolidayHours  !== undefined && { pending_holiday_hours:  data.pendingHolidayHours  }),
+      ...(data.pendingDeductions    !== undefined && { pending_deductions:     data.pendingDeductions    }),
     }, { onConflict:"company_id,employee_number" }).select().single();
 
     if (!row) return null;
@@ -322,8 +337,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...(data.paymentMethod  !== undefined && { payment_method:  data.paymentMethod  }),
       ...(data.bankName       !== undefined && { bank_name:       data.bankName       }),
       ...(data.accountNumber  !== undefined && { account_number:  data.accountNumber  }),
-      ...(data.momoNumber     !== undefined && { momo_number:     data.momoNumber     }),
-      ...(data.isActive       !== undefined && { is_active:       data.isActive       }),
+      ...(data.momoNumber          !== undefined && { momo_number:           data.momoNumber          }),
+      ...(data.isActive            !== undefined && { is_active:             data.isActive            }),
+      ...(data.pendingRegularHours  !== undefined && { pending_regular_hours:  data.pendingRegularHours  }),
+      ...(data.pendingOvertimeHours !== undefined && { pending_overtime_hours: data.pendingOvertimeHours }),
+      ...(data.pendingHolidayHours  !== undefined && { pending_holiday_hours:  data.pendingHolidayHours  }),
+      ...(data.pendingDeductions    !== undefined && { pending_deductions:     data.pendingDeductions    }),
     }).eq("id", id).select().single();
     if (row) setAllEmployees((prev) => prev.map((e) => e.id === id ? dbToEmployee(row as DbEmployee) : e));
   }, [supabase]);

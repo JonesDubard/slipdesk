@@ -116,16 +116,24 @@ function parseEmployeeCSV(text: string): ParsedRow[] {
     const acctNum   = raw.account_number   || raw.accountnumber   || "";
     const momoNum   = raw.momo_number      || raw.momonumber      || "";
     const stdHours  = raw.standard_hours   || raw.standardhours   || "";
+    const regHours  = raw.regular_hours    || raw.regularhours    || "";
+    const otHours   = raw.overtime_hours   || raw.overtimehours   || "";
+    const holHours  = raw.holiday_hours    || raw.holidayhours    || "";
+    const dedAmt    = raw.deductions       || "";
 
     if (!firstName) errors.push("First name required");
     if (!lastName)  errors.push("Last name required");
     if (!raw.currency) errors.push("Currency required");
     if (!raw.rate)     errors.push("Rate required");
 
-    const rate       = parseFloat(raw.rate);
-    const hours      = parseFloat(stdHours);
-    const allowances = parseFloat(raw.allowances ?? "0");
-    const currency   = (raw.currency ?? "USD").toUpperCase();
+    const rate           = parseFloat(raw.rate);
+    const hours          = parseFloat(stdHours);
+    const allowances     = parseFloat(raw.allowances ?? "0");
+    const currency       = (raw.currency ?? "USD").toUpperCase();
+    const parsedRegHours = regHours ? parseFloat(regHours) : null;
+    const parsedOtHours  = otHours  ? parseFloat(otHours)  : null;
+    const parsedHolHours = holHours ? parseFloat(holHours) : null;
+    const parsedDed      = dedAmt   ? parseFloat(dedAmt)   : null;
 
     if (raw.rate && isNaN(rate))           errors.push("Rate must be a number");
     if (!["USD","LRD"].includes(currency)) errors.push("Currency must be USD or LRD");
@@ -155,6 +163,12 @@ function parseEmployeeCSV(text: string): ParsedRow[] {
       momoNumber:     momoNum,
       isActive:       true,
       isArchived:     false,
+      // Pending payroll overrides — pre-fill the pay run grid when a run starts.
+      // null means "use default" (standardHours for regular, 0 for OT/holiday/deductions).
+      pendingRegularHours:  (!parsedRegHours  || isNaN(parsedRegHours))  ? null : parsedRegHours,
+      pendingOvertimeHours: (!parsedOtHours   || isNaN(parsedOtHours))   ? null : parsedOtHours,
+      pendingHolidayHours:  (!parsedHolHours  || isNaN(parsedHolHours))  ? null : parsedHolHours,
+      pendingDeductions:    (!parsedDed       || isNaN(parsedDed))       ? null : parsedDed,
     };
 
     results.push({ data, errors, warnings });
@@ -291,7 +305,7 @@ function CSVUploadModal({ onClose, onImport }: {
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b border-slate-100 bg-slate-50">
-                        {["Name","Title","Type","Rate","Allowances","Payment","Status"].map((h) => (
+                        {["Name","Title","Type","Rate","Allowances","OT Hrs","Hol. Hrs","Payment","Status"].map((h) => (
                           <th key={h} className="text-left px-3 py-2 font-mono text-slate-400">{h}</th>
                         ))}
                       </tr>
@@ -307,6 +321,12 @@ function CSVUploadModal({ onClose, onImport }: {
                           </td>
                           <td className="px-3 py-2 font-mono text-slate-600">
                             {row.data.currency === "USD" ? "$" : "L$"}{(row.data.allowances ?? 0).toFixed(2)}
+                          </td>
+                          <td className={`px-3 py-2 font-mono text-xs ${(row.data.pendingOvertimeHours ?? 0) > 0 ? "text-amber-600 font-semibold" : "text-slate-400"}`}>
+                            {(row.data.pendingOvertimeHours ?? 0) > 0 ? row.data.pendingOvertimeHours : "—"}
+                          </td>
+                          <td className={`px-3 py-2 font-mono text-xs ${(row.data.pendingHolidayHours ?? 0) > 0 ? "text-purple-600 font-semibold" : "text-slate-400"}`}>
+                            {(row.data.pendingHolidayHours ?? 0) > 0 ? row.data.pendingHolidayHours : "—"}
                           </td>
                           <td className="px-3 py-2 text-slate-500 capitalize">
                             {row.data.paymentMethod?.replace(/_/g, " ") ?? "—"}

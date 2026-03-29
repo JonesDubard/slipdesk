@@ -43,6 +43,19 @@ export interface Employee {
   /** Recurring monthly allowances (transport, housing, etc.) added to gross */
   allowances:    number;
 
+  // ── Pending payroll overrides (set via CSV import, consumed when pay run starts) ──
+  // These are NOT stored permanently — they pre-fill the pay run grid for the
+  // current period so the client doesn't have to type them manually.
+  // Once the pay run is started these values are used and can then be cleared.
+  /** Pre-filled regular hours for next pay run (null = use standardHours) */
+  pendingRegularHours?:  number | null;
+  /** Pre-filled overtime hours for next pay run (null = 0) */
+  pendingOvertimeHours?: number | null;
+  /** Pre-filled holiday hours for next pay run (null = 0) */
+  pendingHolidayHours?:  number | null;
+  /** Pre-filled deduction for next pay run (null = 0) */
+  pendingDeductions?:    number | null;
+
   // ── Payment / Disbursement ──
   paymentMethod: PaymentMethod;
 
