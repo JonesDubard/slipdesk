@@ -130,6 +130,7 @@ interface AppState {
   employees:          Employee[];
   archivedEmployees:  Employee[];
   addEmployee:        (data: Omit<Employee, "id" | "fullName" | "isArchived">) => Promise<Employee | null>;
+  refreshEmployees:   () => Promise<void>;
   updateEmployee:     (id: string, data: Partial<Employee>) => Promise<void>;
   archiveEmployee:    (id: string) => Promise<void>;
   restoreEmployee:    (id: string) => Promise<void>;
@@ -351,6 +352,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAllEmployees((prev) => prev.filter((e) => e.id !== id));
   }, [supabase]);
 
+  // Reload employees from Supabase — used after bulk import to ensure
+  // all concurrently-saved employees are reflected in state accurately.
+  const refreshEmployees = useCallback(async () => {
+    const { data: emps } = await db(supabase).from("employees").select("*").order("employee_number");
+    if (emps) setAllEmployees((emps as DbEmployee[]).map(dbToEmployee));
+  }, [supabase]);
+
   const signOut = useCallback(async () => { await supabase.auth.signOut(); }, [supabase]);
 
   const setEmployees: React.Dispatch<React.SetStateAction<Employee[]>> = useCallback((action) => {
@@ -369,7 +377,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       initializing: loading,   // alias — both refer to first-boot loading only
       company, setCompany,
       employees, archivedEmployees,
-      addEmployee, updateEmployee,
+      addEmployee, refreshEmployees, updateEmployee,
       archiveEmployee, restoreEmployee, hardDeleteEmployee,
       setEmployees, signOut,
     }}>

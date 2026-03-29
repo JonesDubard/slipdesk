@@ -21,7 +21,7 @@ import PageSkeleton from "@/components/PageSkeleton";
 
 const DEPARTMENTS   = ["All","Operations","Finance","Engineering","Sales","Human Resources"];
 const EMP_TYPES     = ["full_time","part_time","contractor","casual"] as const;
-const COUNTIES      = ["Montserrado","Margibi","Bong","Nimba","Lofa","Grand Bassa","Sinoe","River Cess","Bomi","Grand Cape Mount","Grand Gedeh","Maryland"];
+const COUNTIES      = ["Montserrado","Margibi","Bong","Nimba","Lofa","Grand Bassa","Sinoe"];
 const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "bank_transfer", label: "Bank Transfer"    },
   { value: "mtn_momo",      label: "MTN Mobile Money" },
@@ -44,7 +44,7 @@ const CSV_HEADERS = [
   "employment_type", "currency",    "rate",            "standard_hours", "allowances",
   "nasscorp_number",
   "payment_method",  "bank_name",   "account_number",  "momo_number",
-  "regular_hours",   "overtime_hours", "holiday_hours","deductions",
+  "regular_hours",   "overtime_hours", "holiday_hours",
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -66,11 +66,11 @@ function TypeBadge({ type }: { type: string }) {
 function downloadTemplate() {
   const rows = [
     CSV_HEADERS.join(","),
-    "EMP-001,Moses,Kollie,Operations Manager,Operations,m.kollie@co.lr,+231770000001,Montserrado,2023-01-15,full_time,USD,8.50,173.33,0,NSC-001-2024,bank_transfer,Ecobank Liberia,1234567890,,173.33,0,0,0",
-    "EMP-002,Fanta,Kamara,Finance Officer,Finance,f.kamara@co.lr,+231770000002,Montserrado,2023-03-01,full_time,LRD,1500,173.33,50000,NSC-002-2024,mtn_momo,,,0770000002,173.33,0,0,0",
-    "EMP-003,James,Pewee,Field Supervisor,Operations,j.pewee@co.lr,+231555000003,Margibi,2024-06-01,part_time,USD,6.00,86.67,0,NSC-003-2024,orange_money,,,0550000003,86.67,0,0,0",
-    "EMP-004,Korto,Freeman,General Assistant,Operations,,,Bong,2025-01-10,casual,LRD,800,173.33,0,,cash,,,,173.33,0,0,0",
-    "EMP-005,David,Sumo,IT Consultant,Engineering,d.sumo@co.lr,+231770000005,Montserrado,2024-09-15,contractor,USD,12.00,173.33,100,NSC-005-2024,bank_transfer,GTBank Liberia,9876543210,,173.33,0,0,0",
+    "EMP-001,Moses,Kollie,Operations Manager,Operations,m.kollie@co.lr,+231770000001,Montserrado,2023-01-15,full_time,USD,8.50,173.33,0,NSC-001-2024,bank_transfer,Ecobank Liberia,1234567890,,173.33,0,0",
+    "EMP-002,Fanta,Kamara,Finance Officer,Finance,f.kamara@co.lr,+231770000002,Montserrado,2023-03-01,full_time,LRD,1500,173.33,50000,NSC-002-2024,mtn_momo,,,0770000002,173.33,0,8",
+    "EMP-003,James,Pewee,Field Supervisor,Operations,j.pewee@co.lr,+231555000003,Margibi,2024-06-01,part_time,USD,6.00,86.67,0,NSC-003-2024,orange_money,,,0550000003,86.67,10,0",
+    "EMP-004,Korto,Freeman,General Assistant,Operations,,,Bong,2025-01-10,casual,LRD,800,173.33,0,,cash,,,,173.33,0,0",
+    "EMP-005,David,Sumo,IT Consultant,Engineering,d.sumo@co.lr,+231770000005,Montserrado,2024-09-15,contractor,USD,12.00,173.33,100,NSC-005-2024,bank_transfer,GTBank Liberia,9876543210,,173.33,0,5",
   ];
   const blob = new Blob([rows.join("\n")], { type: "text/csv" });
   const url  = URL.createObjectURL(blob);
@@ -245,7 +245,7 @@ function CSVUploadModal({ onClose, onImport }: {
           <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
             <div>
               <p className="text-sm font-medium text-blue-800">Need a template?</p>
-              <p className="text-xs text-blue-500 mt-0.5">Includes OT hours, holiday hours, allowances & payment columns</p>
+              <p className="text-xs text-blue-500 mt-0.5">Adds employees to your registry. To import with OT &amp; holiday hours, use <strong>Import CSV</strong> on the Payroll page.</p>
             </div>
             <button onClick={downloadTemplate}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border border-blue-200 text-blue-700 rounded-xl hover:bg-blue-50">
@@ -525,7 +525,7 @@ type PageView    = "active" | "archived";
 export default function EmployeesPage() {
   const {
     employees, archivedEmployees,
-    addEmployee, updateEmployee,
+    addEmployee, refreshEmployees, updateEmployee,
     archiveEmployee, restoreEmployee, hardDeleteEmployee,
     loading,
   } = useApp();
@@ -582,26 +582,32 @@ export default function EmployeesPage() {
     let successCount = 0;
     const failures: string[] = [];
     try {
-      const BATCH_SIZE = 50;
-      for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-        const batch = rows.slice(i, i + BATCH_SIZE);
-        await Promise.all(
-          batch.map(async (data) => {
-            try {
-              await addEmployee({
-                ...(data as Omit<Employee, "id" | "fullName" | "isArchived">),
-                isActive: true,
-              });
-              successCount++;
-            } catch (err) {
-              const name = `${data.firstName ?? ""} ${data.lastName ?? ""}`.trim();
-              failures.push(`${name}: ${err instanceof Error ? err.message : "Unknown error"}`);
-            }
-          })
-        );
+      // FIX: Process sequentially, NOT with Promise.all.
+      // Concurrent addEmployee calls each call setAllEmployees(prev => [...prev, emp])
+      // but React batches state updates — each closure captures the same stale `prev`,
+      // so only the last employee ends up in state. Sequential processing avoids this.
+      // After all inserts, refreshEmployees() does a single fresh Supabase fetch
+      // so state is guaranteed to reflect everything that was saved.
+      for (const data of rows) {
+        try {
+          await addEmployee({
+            ...(data as Omit<Employee, "id" | "fullName" | "isArchived">),
+            isActive: true,
+          });
+          successCount++;
+        } catch (err) {
+          const name = `${data.firstName ?? ""} ${data.lastName ?? ""}`.trim();
+          failures.push(`${name}: ${err instanceof Error ? err.message : "Unknown error"}`);
+        }
       }
-      if (successCount > 0) toast.success(`${successCount} employee${successCount !== 1 ? "s" : ""} imported.`);
-      if (failures.length > 0) { toast.error(`${failures.length} failed to import.`); throw new Error(failures.join("\n")); }
+      // Single atomic refresh after all DB writes complete — guarantees UI shows
+      // every employee that was saved, regardless of any state batching issues.
+      await refreshEmployees();
+      if (successCount > 0) toast.success(`${successCount} employee${successCount !== 1 ? "s" : ""} imported successfully.`);
+      if (failures.length > 0) {
+        toast.error(`${failures.length} employee${failures.length !== 1 ? "s" : ""} failed to import.`);
+        throw new Error(failures.join("\n"));
+      }
     } finally {
       setSaving(false);
     }

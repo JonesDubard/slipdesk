@@ -699,10 +699,10 @@ function StatusStepper({ current, onAdvance, saving=false }: {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PayrollPage() {
-  const { employees, company, addEmployee, loading } = useApp();
+  const { employees, company, addEmployee, refreshEmployees, loading } = useApp();
   const { toast } = useToast();
 
-  // FIX 3: show skeleton while AppContext is booting on page load/reload.
+  // Guard: show skeleton while AppContext is booting on page load/reload.
   // Without this the page renders with empty data and appears white.
   if (loading) return <PageSkeleton />;
 
@@ -917,6 +917,9 @@ export default function PayrollPage() {
       }
     }
 
+    // Refresh employees in context so the new employees appear on the
+    // Employees page without needing a full page reload.
+    await refreshEmployees();
     dispatch({ type:"IMPORT_ROWS", rows:payRunLines });
     setShowUpload(false);
     toast.success(`${payRunLines.length} employee${payRunLines.length !== 1 ? "s" : ""} imported and saved.`);

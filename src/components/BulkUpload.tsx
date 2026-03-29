@@ -146,10 +146,12 @@ function parseRow(raw: Record<string, string>, lineNum: number): { row: BulkRow 
     isArchived:     false,
   };
 
-  const regularRaw  = raw.regular_hours?.trim();
-  const overtimeRaw = raw.overtime_hours?.trim();
-  const holidayRaw  = raw.holiday_hours?.trim();
-  const deductRaw   = raw.deductions?.trim();
+  // Use ?? "" so missing columns (undefined) are treated the same as blank cells.
+  // This handles CSVs where the client deleted a column entirely.
+  const regularRaw  = (raw.regular_hours  ?? "").trim();
+  const overtimeRaw = (raw.overtime_hours ?? "").trim();
+  const holidayRaw  = (raw.holiday_hours  ?? "").trim();
+  const deductRaw   = (raw.deductions     ?? "").trim();
 
   const regularHours  = regularRaw  ? parseNum(regularRaw,  standardHours) : standardHours;
   const overtimeHours = overtimeRaw ? parseNum(overtimeRaw, 0)             : 0;
@@ -188,13 +190,11 @@ function parseCSVLine(line: string): string[] {
 }
 
 function parseCSV(text: string): { rows: BulkRow[]; errors: string[] } {
-  // Remove UTF‑8 BOM if present (U+FEFF)
-  if (text.charCodeAt(0) === 0xFEFF) {
-    text = text.slice(1);
-  }
-
-  // Normalise line endings
+  // Normalise all line endings (Windows CRLF \r\n, old Mac \r, Unix \n)
   const lines = text.trim().split(/\r\n|\r|\n/);
+  if (lines.length < 2)
+    return { rows: [], errors: ["CSV must have a header row and at least one data row."] };
+
   // FIX: use parseCSVLine (RFC-4180) for the header row — not a plain split(",").
   // Excel wraps every header cell in double-quotes when it saves a CSV, e.g.:
   //   "employee_number","first_name",...,"overtime_hours","holiday_hours"
@@ -205,7 +205,11 @@ function parseCSV(text: string): { rows: BulkRow[]; errors: string[] } {
   // like "First Bank, Liberia") the column count shifts — and overtime_hours /
   // holiday_hours end up mapped to the wrong index or come back as undefined.
   // Using the same RFC-4180 parser for headers and rows fixes this completely.
-  const headers = parseCSVLine(lines[0]).map((h) => h.toLowerCase());
+  // Normalize headers: lowercase, strip all whitespace, remove any
+  // residual quotes (safety net for edge-case Excel exports).
+  const headers = parseCSVLine(lines[0]).map((h) =>
+    h.toLowerCase().trim().replace(/^"+|"+$/g, "").replace(/\s+/g, "_")
+  );
 
   const rows:   BulkRow[] = [];
   const errors: string[]  = [];
