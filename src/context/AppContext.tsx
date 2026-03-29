@@ -143,21 +143,28 @@ const AppContext = createContext<AppState | null>(null);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(supabase: ReturnType<typeof createClient>): any { return supabase as any; }
 
+// ─── Module-level boot flag ───────────────────────────────────────────────────
+// Using a module-level variable (not React state) means this survives
+// Next.js App Router navigations, which remount the component tree but do NOT
+// reload the JS module. Without this, `booted` reset to false on every page
+// navigation → every page went white until Supabase responded again.
+let _hasBooted = false;
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const sbRef = useRef<ReturnType<typeof createClient> | null>(null);
   if (!sbRef.current) sbRef.current = createClient();
   const supabase = sbRef.current;
 
   const [user,         setUser]         = useState<User | null>(null);
-  const [booted,       setBooted]       = useState(false);
+  // Initialise from the module flag so navigating back to a page never
+  // shows a white screen — if we've already booted once, start as true.
+  const [booted,       setBooted]       = useState(_hasBooted);
   const [dataLoading,  setDataLoading]  = useState(false);
   const [company,      setCompanyState] = useState<CompanyProfile>(EMPTY_COMPANY);
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
 
-  // FIX 3: `loading` is only true on first boot (before `booted` flips).
-  // TOKEN_REFRESHED events do NOT reset `booted`, so they never cause a
-  // white screen. `dataLoading` tracks active Supabase fetches but is not
-  // exposed to children directly — it's only used internally.
+  // `loading` is true only on the very first boot across the entire session.
+  // TOKEN_REFRESHED events and page navigations do NOT flip it back to true.
   const loading = !booted;
 
   useEffect(() => {
@@ -172,9 +179,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await loadData();
         if (mounted) setDataLoading(false);
       }
-      // FIX 3: flip booted exactly once after the first getUser() call completes.
-      // Subsequent auth events never reset this, so children never remount.
-      if (mounted) setBooted(true);
+      // Flip both the module-level flag and React state. The module flag
+      // persists across navigations; the React state drives re-renders.
+      if (mounted) { _hasBooted = true; setBooted(true); }
     }
 
     boot();

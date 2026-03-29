@@ -3,9 +3,6 @@
 /**
  * Slipdesk — Employees Page
  * Place at: src/app/(dashboard)/employees/page.tsx
- *
- * Phase 1: All mutations (add, update, toggle, bulk import) now persist
- * to Supabase via AppContext. No more local-state-only setEmployees shim.
  */
 
 import { useState, useRef, useCallback } from "react";
@@ -18,6 +15,7 @@ import {
 import type { Employee, PaymentMethod } from "@/context/AppContext";
 import { useApp } from "@/context/AppContext";
 import { useToast } from "@/components/Toast";
+import PageSkeleton from "@/components/PageSkeleton";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -40,8 +38,6 @@ const EMPTY: Omit<Employee, "id" | "employeeNumber" | "fullName" | "isArchived">
   bankName: "", accountNumber: "", momoNumber: "",
 };
 
-// CSV columns — employee registry fields + payroll hour columns so the
-// same file works for both employee import AND payroll bulk upload.
 const CSV_HEADERS = [
   "employee_number", "first_name",  "last_name",      "job_title",      "department",
   "email",           "phone",       "county",          "start_date",
@@ -70,15 +66,10 @@ function TypeBadge({ type }: { type: string }) {
 function downloadTemplate() {
   const rows = [
     CSV_HEADERS.join(","),
-    // Bank Transfer — USD full-time, standard hours only
     "EMP-001,Moses,Kollie,Operations Manager,Operations,m.kollie@co.lr,+231770000001,Montserrado,2023-01-15,full_time,USD,8.50,173.33,0,NSC-001-2024,bank_transfer,Ecobank Liberia,1234567890,,173.33,0,0",
-    // MTN MoMo — LRD full-time, housing allowance + 8 holiday hours
     "EMP-002,Fanta,Kamara,Finance Officer,Finance,f.kamara@co.lr,+231770000002,Montserrado,2023-03-01,full_time,LRD,1500,173.33,50000,NSC-002-2024,mtn_momo,,,0770000002,173.33,0,8",
-    // Orange Money — USD part-time + 10 overtime hours
     "EMP-003,James,Pewee,Field Supervisor,Operations,j.pewee@co.lr,+231555000003,Margibi,2024-06-01,part_time,USD,6.00,86.67,0,NSC-003-2024,orange_money,,,0550000003,86.67,10,0",
-    // Cash — casual LRD worker, no email or NASSCORP yet
     "EMP-004,Korto,Freeman,General Assistant,Operations,,,Bong,2025-01-10,casual,LRD,800,173.33,0,,cash,,,,173.33,0,0",
-    // Bank Transfer — USD contractor, transport allowance + 5 holiday hours
     "EMP-005,David,Sumo,IT Consultant,Engineering,d.sumo@co.lr,+231770000005,Montserrado,2024-09-15,contractor,USD,12.00,173.33,100,NSC-005-2024,bank_transfer,GTBank Liberia,9876543210,,173.33,0,5",
   ];
   const blob = new Blob([rows.join("\n")], { type: "text/csv" });
@@ -114,7 +105,6 @@ function parseEmployeeCSV(text: string): ParsedRow[] {
     const errors: string[]   = [];
     const warnings: string[] = [];
 
-    // Support both snake_case (template) and camelCase headers
     const firstName = raw.first_name  || raw.firstname  || "";
     const lastName  = raw.last_name   || raw.lastname   || "";
     const jobTitle  = raw.job_title   || raw.jobtitle   || "";
@@ -252,7 +242,6 @@ function CSVUploadModal({ onClose, onImport }: {
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-
           <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
             <div>
               <p className="text-sm font-medium text-blue-800">Need a template?</p>
@@ -428,7 +417,6 @@ function EmployeeDrawer({ employee, onClose, onSave }: {
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-
           <p className="text-[10px] font-mono text-slate-400 uppercase tracking-widest">Personal</p>
           <div className="grid grid-cols-2 gap-4">
             <Field label="First Name" value={form.firstName ?? ""} onChange={(v) => set("firstName", v)} placeholder="Moses"/>
@@ -539,10 +527,12 @@ export default function EmployeesPage() {
     employees, archivedEmployees,
     addEmployee, updateEmployee,
     archiveEmployee, restoreEmployee, hardDeleteEmployee,
+    loading,
   } = useApp();
 
   const { toast } = useToast();
 
+  // All hooks must be declared before any conditional return (React rules)
   const [view,       setView]       = useState<PageView>("active");
   const [search,     setSearch]     = useState("");
   const [deptFilter, setDeptFilter] = useState("All");
@@ -550,6 +540,10 @@ export default function EmployeesPage() {
   const [showUpload, setShowUpload] = useState(false);
   const [dialog,     setDialog]     = useState<DialogState>(null);
   const [saving,     setSaving]     = useState(false);
+
+  // ── Loading guard — prevents white screen on reload ──────────────────────
+  // Placed after all hooks so React rules are satisfied.
+  if (loading) return <PageSkeleton />;
 
   const sourceList = view === "active" ? employees : archivedEmployees;
   const filtered   = sourceList.filter((e) => {
@@ -562,7 +556,6 @@ export default function EmployeesPage() {
   });
   const activeCount = employees.filter((e) => e.isActive).length;
 
-  // ── Save (add or update) persisted to Supabase ───────────────────────────
   async function handleSave(data: Partial<Employee>) {
     setSaving(true);
     try {
@@ -584,47 +577,36 @@ export default function EmployeesPage() {
     }
   }
 
-  // ── Bulk import — each row persisted via addEmployee ─────────────────────
   async function handleBulkImport(rows: Partial<Employee>[]) {
-  setSaving(true);
-  let successCount = 0;
-  const failures: string[] = [];
-
-  try {
-    // Process in batches of 50 instead of one by one
-    const BATCH_SIZE = 50;
-    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-      const batch = rows.slice(i, i + BATCH_SIZE);
-      
-      await Promise.all(
-        batch.map(async (data) => {
-          try {
-            await addEmployee({
-              ...(data as Omit<Employee, "id" | "fullName" | "isArchived">),
-              isActive: true,
-            });
-            successCount++;
-          } catch (err) {
-            const name = `${data.firstName ?? ""} ${data.lastName ?? ""}`.trim();
-            failures.push(`${name}: ${err instanceof Error ? err.message : "Unknown error"}`);
-          }
-        })
-      );
+    setSaving(true);
+    let successCount = 0;
+    const failures: string[] = [];
+    try {
+      const BATCH_SIZE = 50;
+      for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+        const batch = rows.slice(i, i + BATCH_SIZE);
+        await Promise.all(
+          batch.map(async (data) => {
+            try {
+              await addEmployee({
+                ...(data as Omit<Employee, "id" | "fullName" | "isArchived">),
+                isActive: true,
+              });
+              successCount++;
+            } catch (err) {
+              const name = `${data.firstName ?? ""} ${data.lastName ?? ""}`.trim();
+              failures.push(`${name}: ${err instanceof Error ? err.message : "Unknown error"}`);
+            }
+          })
+        );
+      }
+      if (successCount > 0) toast.success(`${successCount} employee${successCount !== 1 ? "s" : ""} imported.`);
+      if (failures.length > 0) { toast.error(`${failures.length} failed to import.`); throw new Error(failures.join("\n")); }
+    } finally {
+      setSaving(false);
     }
-
-    if (successCount > 0) {
-      toast.success(`${successCount} employee${successCount !== 1 ? "s" : ""} imported.`);
-    }
-    if (failures.length > 0) {
-      toast.error(`${failures.length} failed to import.`);
-      throw new Error(failures.join("\n"));
-    }
-  } finally {
-    setSaving(false);
   }
-}
 
-  // ── Toggle active status — persisted to Supabase ─────────────────────────
   async function toggleActive(id: string) {
     const emp = employees.find((e) => e.id === id);
     if (!emp) return;
@@ -644,7 +626,6 @@ export default function EmployeesPage() {
   return (
     <div className="max-w-6xl mx-auto space-y-5">
 
-      {/* Admin banner */}
       <div className="flex items-center gap-3 bg-[#002147] rounded-2xl px-5 py-3.5">
         <Crown className="w-4 h-4 text-[#50C878] flex-shrink-0"/>
         <div className="flex-1 min-w-0">
@@ -654,7 +635,6 @@ export default function EmployeesPage() {
         <span className="text-[10px] font-mono bg-[#50C878] text-[#002147] px-2.5 py-1 rounded-full font-bold">PREMIUM</span>
       </div>
 
-      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Employees</h1>
@@ -675,7 +655,6 @@ export default function EmployeesPage() {
         </div>
       </div>
 
-      {/* View tabs */}
       <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit">
         {(["active", "archived"] as PageView[]).map((v) => (
           <button key={v} onClick={() => setView(v)}
@@ -686,7 +665,6 @@ export default function EmployeesPage() {
         ))}
       </div>
 
-      {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300"/>
@@ -698,16 +676,13 @@ export default function EmployeesPage() {
           {DEPARTMENTS.map((d) => (
             <button key={d} onClick={() => setDeptFilter(d)}
               className={`px-3 py-2 text-xs font-mono rounded-xl border transition-all
-                ${deptFilter === d
-                  ? "bg-[#002147] text-white border-[#002147]"
-                  : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"}`}>
+                ${deptFilter === d ? "bg-[#002147] text-white border-[#002147]" : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"}`}>
               {d}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Stats */}
       {view === "active" && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
@@ -724,7 +699,6 @@ export default function EmployeesPage() {
         </div>
       )}
 
-      {/* Empty states */}
       {sourceList.length === 0 && view === "active" && (
         <div className="bg-white rounded-2xl border border-dashed border-slate-200 py-16 text-center">
           <Users className="w-10 h-10 mx-auto mb-3 text-slate-200"/>
@@ -750,7 +724,6 @@ export default function EmployeesPage() {
         </div>
       )}
 
-      {/* Table */}
       {filtered.length > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
           <div className="overflow-x-auto">
@@ -849,7 +822,6 @@ export default function EmployeesPage() {
         All employees enrolled in NASSCORP · Employer 6% · Employee 4% of base salary
       </p>
 
-      {/* Global saving overlay — shown during bulk import */}
       {saving && (
         <div className="fixed inset-0 z-[70] bg-black/30 flex items-center justify-center">
           <div className="bg-white rounded-2xl px-8 py-6 flex items-center gap-4 shadow-2xl">
@@ -859,14 +831,12 @@ export default function EmployeesPage() {
         </div>
       )}
 
-      {/* Modals */}
       {drawer !== undefined && (
         <EmployeeDrawer employee={drawer} onClose={() => setDrawer(undefined)} onSave={handleSave}/>
       )}
       {showUpload && (
         <CSVUploadModal onClose={() => setShowUpload(false)} onImport={handleBulkImport}/>
       )}
-
       {dialog?.kind === "archive" && (
         <ConfirmDialog
           title="Archive Employee"

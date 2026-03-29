@@ -44,6 +44,7 @@ import { calculatePayroll } from "@/lib/slipdesk-payroll-engine";
 import type { PayRunLine } from "@/lib/mock-data";
 import BulkUpload, { type BulkRow } from "@/components/BulkUpload";
 import { useApp } from "@/context/AppContext";
+import PageSkeleton from "@/components/PageSkeleton";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 
@@ -698,8 +699,12 @@ function StatusStepper({ current, onAdvance, saving=false }: {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PayrollPage() {
-  const { employees, company, addEmployee } = useApp();
+  const { employees, company, addEmployee, loading } = useApp();
   const { toast } = useToast();
+
+  // Guard: show skeleton while AppContext is booting on page load/reload.
+  // Without this the page renders with empty data and appears white.
+  if (loading) return <PageSkeleton />;
 
   const pdfCompany: PdfCompany = {
     name:          company.name,
