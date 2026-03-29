@@ -702,7 +702,7 @@ export default function PayrollPage() {
   const { employees, company, addEmployee, loading } = useApp();
   const { toast } = useToast();
 
-  // Guard: show skeleton while AppContext is booting on page load/reload.
+  // FIX 3: show skeleton while AppContext is booting on page load/reload.
   // Without this the page renders with empty data and appears white.
   if (loading) return <PageSkeleton />;
 
