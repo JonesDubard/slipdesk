@@ -188,11 +188,13 @@ function parseCSVLine(line: string): string[] {
 }
 
 function parseCSV(text: string): { rows: BulkRow[]; errors: string[] } {
-  // Normalise all line endings (Windows CRLF \r\n, old Mac \r, Unix \n)
-  const lines = text.trim().split(/\r\n|\r|\n/);
-  if (lines.length < 2)
-    return { rows: [], errors: ["CSV must have a header row and at least one data row."] };
+  // Remove UTF‑8 BOM if present (U+FEFF)
+  if (text.charCodeAt(0) === 0xFEFF) {
+    text = text.slice(1);
+  }
 
+  // Normalise line endings
+  const lines = text.trim().split(/\r\n|\r|\n/);
   // FIX: use parseCSVLine (RFC-4180) for the header row — not a plain split(",").
   // Excel wraps every header cell in double-quotes when it saves a CSV, e.g.:
   //   "employee_number","first_name",...,"overtime_hours","holiday_hours"

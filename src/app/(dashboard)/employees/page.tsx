@@ -44,7 +44,7 @@ const CSV_HEADERS = [
   "employment_type", "currency",    "rate",            "standard_hours", "allowances",
   "nasscorp_number",
   "payment_method",  "bank_name",   "account_number",  "momo_number",
-  "regular_hours",   "overtime_hours", "holiday_hours",
+  "regular_hours",   "overtime_hours", "holiday_hours","deductions",
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -66,11 +66,11 @@ function TypeBadge({ type }: { type: string }) {
 function downloadTemplate() {
   const rows = [
     CSV_HEADERS.join(","),
-    "EMP-001,Moses,Kollie,Operations Manager,Operations,m.kollie@co.lr,+231770000001,Montserrado,2023-01-15,full_time,USD,8.50,173.33,0,NSC-001-2024,bank_transfer,Ecobank Liberia,1234567890,,173.33,0,0",
-    "EMP-002,Fanta,Kamara,Finance Officer,Finance,f.kamara@co.lr,+231770000002,Montserrado,2023-03-01,full_time,LRD,1500,173.33,50000,NSC-002-2024,mtn_momo,,,0770000002,173.33,0,8",
-    "EMP-003,James,Pewee,Field Supervisor,Operations,j.pewee@co.lr,+231555000003,Margibi,2024-06-01,part_time,USD,6.00,86.67,0,NSC-003-2024,orange_money,,,0550000003,86.67,10,0",
-    "EMP-004,Korto,Freeman,General Assistant,Operations,,,Bong,2025-01-10,casual,LRD,800,173.33,0,,cash,,,,173.33,0,0",
-    "EMP-005,David,Sumo,IT Consultant,Engineering,d.sumo@co.lr,+231770000005,Montserrado,2024-09-15,contractor,USD,12.00,173.33,100,NSC-005-2024,bank_transfer,GTBank Liberia,9876543210,,173.33,0,5",
+    "EMP-001,Moses,Kollie,Operations Manager,Operations,m.kollie@co.lr,+231770000001,Montserrado,2023-01-15,full_time,USD,8.50,173.33,0,NSC-001-2024,bank_transfer,Ecobank Liberia,1234567890,,173.33,0,0,0",
+    "EMP-002,Fanta,Kamara,Finance Officer,Finance,f.kamara@co.lr,+231770000002,Montserrado,2023-03-01,full_time,LRD,1500,173.33,50000,NSC-002-2024,mtn_momo,,,0770000002,173.33,0,8,0",
+    "EMP-003,James,Pewee,Field Supervisor,Operations,j.pewee@co.lr,+231555000003,Margibi,2024-06-01,part_time,USD,6.00,86.67,0,NSC-003-2024,orange_money,,,0550000003,86.67,10,0,0",
+    "EMP-004,Korto,Freeman,General Assistant,Operations,,,Bong,2025-01-10,casual,LRD,800,173.33,0,,cash,,,,173.33,0,0,0",
+    "EMP-005,David,Sumo,IT Consultant,Engineering,d.sumo@co.lr,+231770000005,Montserrado,2024-09-15,contractor,USD,12.00,173.33,100,NSC-005-2024,bank_transfer,GTBank Liberia,9876543210,,173.33,0,5,0",
   ];
   const blob = new Blob([rows.join("\n")], { type: "text/csv" });
   const url  = URL.createObjectURL(blob);
