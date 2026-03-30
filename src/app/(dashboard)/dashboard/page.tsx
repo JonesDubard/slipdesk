@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Slipdesk — Dashboard Page
+ * Slipdesk — Dashboard Page (Dark Theme)
  * Place at: src/app/(dashboard)/dashboard/page.tsx
  */
 
@@ -10,6 +10,7 @@ import Link from "next/link";
 import {
   Users, TrendingUp, AlertTriangle, CheckCircle2,
   ArrowRight, Play, FileText, Building2, X, Sparkles,
+  DollarSign, ShieldCheck, Zap,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { calculatePayroll } from "@/lib/slipdesk-payroll-engine";
@@ -17,14 +18,13 @@ import { calculatePayroll } from "@/lib/slipdesk-payroll-engine";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const EXCHANGE_RATE     = 185.44;
-const RATE_PER_EMPLOYEE = 0.75;  // ✅ updated from 0.50
+const RATE_PER_EMPLOYEE = 0.75;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const fmt = (n: number, sym = "$") =>
-  `${sym}${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmt = (n: number) =>
+  `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-// ✅ No minimum floor — pure PEPM
 function calcFee(count: number) {
   return Math.round(count * RATE_PER_EMPLOYEE * 100) / 100;
 }
@@ -32,27 +32,47 @@ function calcFee(count: number) {
 // ─── Stat Card ────────────────────────────────────────────────────────────────
 
 function StatCard({
-  label, value, sub, accent = false, warning = false,
+  label, value, sub, accent = false, warning = false, icon,
 }: {
-  label: string; value: string | number; sub?: string; accent?: boolean; warning?: boolean;
+  label: string; value: string | number; sub?: string;
+  accent?: boolean; warning?: boolean; icon?: React.ReactNode;
 }) {
   return (
-    <div className={`rounded-2xl border p-5 flex flex-col gap-2
-      ${accent
-        ? "bg-[#002147] border-[#002147]"
-        : warning
-          ? "bg-amber-50 border-amber-200"
-          : "bg-white border-slate-200"}`}>
-      <p className={`text-xs font-mono uppercase tracking-wider
-        ${accent ? "text-white/40" : warning ? "text-amber-500" : "text-slate-400"}`}>
-        {label}
-      </p>
-      <p className={`text-2xl font-bold font-mono leading-none
-        ${accent ? "text-[#50C878]" : warning ? "text-amber-700" : "text-slate-800"}`}>
+    <div style={{
+      background: accent ? "#002147" : warning ? "#fb923c12" : "#0d1f35",
+      border: `1px solid ${accent ? "#1e3a5f" : warning ? "#fb923c40" : "#1e3a5f"}`,
+      borderRadius: 16, padding: "20px",
+      display: "flex", flexDirection: "column", gap: 12,
+      transition: "border-color 0.2s",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <p style={{
+          fontSize: 10, fontWeight: 600, color: accent ? "#ffffff40" : warning ? "#fb923c" : "#334155",
+          letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'DM Mono',monospace",
+        }}>
+          {label}
+        </p>
+        {icon && (
+          <div style={{
+            width: 28, height: 28, borderRadius: 8,
+            background: accent ? "#ffffff10" : warning ? "#fb923c20" : "#50C87815",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            {icon}
+          </div>
+        )}
+      </div>
+      <p style={{
+        fontSize: 22, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1,
+        color: accent ? "#50C878" : warning ? "#fb923c" : "#f1f5f9",
+      }}>
         {value}
       </p>
       {sub && (
-        <p className={`text-xs ${accent ? "text-white/30" : warning ? "text-amber-500" : "text-slate-400"} font-mono`}>
+        <p style={{
+          fontSize: 11, color: accent ? "#ffffff30" : warning ? "#fb923c80" : "#334155",
+          fontFamily: "'DM Mono',monospace",
+        }}>
           {sub}
         </p>
       )}
@@ -65,13 +85,13 @@ function StatCard({
 export default function DashboardPage() {
   const { employees, company, loading } = useApp();
 
-  // ── Onboarding checklist dismissed state ──────────────────────────────
   const [checklistDismissed, setChecklistDismissed] = useState(false);
   useEffect(() => {
     try {
       setChecklistDismissed(localStorage.getItem("slipdesk_checklist_dismissed") === "1");
     } catch { /* private browsing */ }
   }, []);
+
   function dismissChecklist() {
     try { localStorage.setItem("slipdesk_checklist_dismissed", "1"); } catch { /* ignore */ }
     setChecklistDismissed(true);
@@ -79,7 +99,6 @@ export default function DashboardPage() {
 
   const monthLabel = new Date().toLocaleString("default", { month: "long", year: "numeric" });
 
-  // Payroll preview for all active employees
   const preview = useMemo(() => {
     const active = employees.filter((e) => e.isActive);
     const results = active.map((emp) =>
@@ -109,67 +128,85 @@ export default function DashboardPage() {
     return { results, active, gross, net, incomeTax, nasscorp, warnings };
   }, [employees]);
 
-  const platformFee      = calcFee(preview.active.length);
+  const platformFee       = calcFee(preview.active.length);
   const isSetupIncomplete = !company?.name || !company?.tin;
 
-  // ── Setup nudge ────────────────────────────────────────────────────────────
+  // ── Empty state ────────────────────────────────────────────────────────────
   if (!loading && employees.length === 0) {
     return (
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">Dashboard</h1>
-          <p className="text-slate-400 text-sm mt-0.5">{monthLabel}</p>
+      <div style={{ padding: "32px", minHeight: "100vh", background: "#071525", fontFamily: "'DM Sans',sans-serif" }}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500;600&display=swap');`}</style>
+
+        <div style={{ marginBottom: 28 }}>
+          <h1 style={{ color: "#f1f5f9", fontSize: 26, fontWeight: 800, margin: 0, letterSpacing: "-0.02em" }}>Dashboard</h1>
+          <p style={{ color: "#334155", fontSize: 13, marginTop: 5, fontFamily: "'DM Mono',monospace" }}>{monthLabel}</p>
         </div>
 
-        <div className="bg-[#002147] rounded-2xl p-8 text-center">
-          <div className="w-16 h-16 rounded-full bg-[#50C878]/20 flex items-center justify-center mx-auto mb-4">
-            <Building2 className="w-8 h-8 text-[#50C878]" />
+        <div style={{
+          background: "#0d1f35", border: "1px solid #1e3a5f", borderRadius: 20,
+          padding: "60px 40px", textAlign: "center", maxWidth: 520,
+        }}>
+          <div style={{
+            width: 64, height: 64, borderRadius: 18,
+            background: "#50C87820", border: "1px solid #50C87840",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            margin: "0 auto 20px",
+          }}>
+            <Building2 size={28} color="#50C878"/>
           </div>
-          <h2 className="text-xl font-bold text-white mb-2">
+          <h2 style={{ color: "#f1f5f9", fontSize: 20, fontWeight: 800, margin: "0 0 8px" }}>
             Welcome to Slipdesk{company?.name ? `, ${company.name}` : ""}
           </h2>
-          <p className="text-white/50 text-sm mb-8 max-w-sm mx-auto">
-            You're all set up. Add your first employee to start running payroll.
+          <p style={{ color: "#334155", fontSize: 13, marginBottom: 28 }}>
+            Add your first employee to start running payroll.
           </p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Link href="/employees"
-              className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl
-                         bg-[#50C878] text-[#002147] font-semibold text-sm hover:bg-[#3aa85f]">
-              <Users className="w-4 h-4" /> Add Employees
+          <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
+            <Link href="/employees" style={{
+              display: "flex", alignItems: "center", gap: 7,
+              padding: "11px 20px", borderRadius: 11, background: "#50C878",
+              color: "#002147", fontWeight: 700, fontSize: 13, textDecoration: "none",
+            }}>
+              <Users size={15}/> Add Employees
             </Link>
             {isSetupIncomplete && (
-              <Link href="/settings"
-                className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl
-                           border border-white/20 text-white text-sm hover:bg-white/5">
-                <Building2 className="w-4 h-4" /> Complete Company Profile
+              <Link href="/settings" style={{
+                display: "flex", alignItems: "center", gap: 7,
+                padding: "11px 20px", borderRadius: 11,
+                border: "1px solid #1e3a5f", color: "#94a3b8",
+                fontSize: 13, fontWeight: 600, textDecoration: "none",
+              }}>
+                <Building2 size={15}/> Complete Profile
               </Link>
             )}
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-200 p-6">
-          <h3 className="font-semibold text-slate-800 mb-4">Getting started</h3>
-          <div className="space-y-3">
-            {[
-              { done: !!company?.name,      label: "Set up company profile",  href: "/settings"  },
-              { done: !!company?.tin,        label: "Add LRA Tax ID (TIN)",    href: "/settings"  },
-              { done: employees.length > 0,  label: "Add your first employee", href: "/employees" },
-              { done: false,                 label: "Run your first payroll",  href: "/payroll"   },
-            ].map((step) => (
-              <Link key={step.label} href={step.href}
-                className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-colors group">
-                {step.done
-                  ? <CheckCircle2 className="w-5 h-5 text-[#50C878] flex-shrink-0" />
-                  : <div className="w-5 h-5 rounded-full border-2 border-slate-300 flex-shrink-0" />}
-                <span className={`text-sm ${step.done ? "text-slate-400 line-through" : "text-slate-700"}`}>
-                  {step.label}
-                </span>
-                {!step.done && (
-                  <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-[#50C878] ml-auto transition-colors" />
-                )}
-              </Link>
-            ))}
-          </div>
+        {/* Getting started checklist */}
+        <div style={{ background: "#0d1f35", border: "1px solid #1e3a5f", borderRadius: 16, padding: "24px", marginTop: 16, maxWidth: 520 }}>
+          <h3 style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 14, margin: "0 0 16px", display: "flex", alignItems: "center", gap: 8 }}>
+            <Sparkles size={14} color="#50C878"/> Getting started
+          </h3>
+          {[
+            { done: !!company?.name && !!company?.tin, label: "Complete company profile", href: "/settings"  },
+            { done: employees.length > 0,              label: "Add your first employee",  href: "/employees" },
+            { done: false,                             label: "Run your first payroll",   href: "/payroll"   },
+          ].map((step) => (
+            <Link key={step.label} href={step.href} style={{
+              display: "flex", alignItems: "center", gap: 12, padding: "10px 12px",
+              borderRadius: 10, marginBottom: 6, textDecoration: "none",
+              background: step.done ? "#50C87808" : "transparent",
+              border: `1px solid ${step.done ? "#50C87825" : "#1e3a5f"}`,
+            }}>
+              {step.done
+                ? <CheckCircle2 size={16} color="#50C878"/>
+                : <div style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid #334155", flexShrink: 0 }}/>
+              }
+              <span style={{ color: step.done ? "#334155" : "#94a3b8", fontSize: 13, textDecoration: step.done ? "line-through" : "none", flex: 1 }}>
+                {step.label}
+              </span>
+              {!step.done && <ArrowRight size={14} color="#334155"/>}
+            </Link>
+          ))}
         </div>
       </div>
     );
@@ -177,208 +214,232 @@ export default function DashboardPage() {
 
   // ── Main dashboard ─────────────────────────────────────────────────────────
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div style={{ padding: "32px", minHeight: "100vh", background: "#071525", fontFamily: "'DM Sans',sans-serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500;600&display=swap');
+        @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+        .dash-link:hover { border-color: #50C87850 !important; }
+        .dash-link:hover .dash-link-icon { background: #50C87820 !important; }
+        .dash-link:hover .dash-link-arrow { color: #50C878 !important; }
+        .emp-row:hover td { background: #0d213750 !important; }
+        .checklist-item:hover { border-color: #50C87840 !important; background: #50C8780A !important; }
+      `}</style>
 
       {/* Header */}
-      <div className="flex items-start justify-between flex-wrap gap-3">
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 28, flexWrap: "wrap", gap: 12, animation: "fadeUp 0.3s ease" }}>
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Dashboard</h1>
-          <p className="text-slate-400 text-sm mt-0.5">{monthLabel} · Payroll preview</p>
+          <h1 style={{ color: "#f1f5f9", fontSize: 26, fontWeight: 800, margin: 0, letterSpacing: "-0.02em" }}>Dashboard</h1>
+          <p style={{ color: "#334155", fontSize: 13, marginTop: 5, fontFamily: "'DM Mono',monospace" }}>
+            {monthLabel} · payroll preview
+          </p>
         </div>
-        <Link href="/payroll"
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold
-                     bg-[#50C878] text-[#002147] hover:bg-[#3aa85f] transition-colors">
-          <Play className="w-4 h-4" /> Start Pay Run
+        <Link href="/payroll" style={{
+          display: "flex", alignItems: "center", gap: 7,
+          padding: "10px 18px", borderRadius: 11, background: "#50C878",
+          color: "#002147", fontWeight: 700, fontSize: 13, textDecoration: "none",
+          transition: "opacity 0.15s",
+        }}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = "0.88"}
+          onMouseLeave={(e) => e.currentTarget.style.opacity = "1"}
+        >
+          <Play size={14}/> Start Pay Run
         </Link>
       </div>
 
-      {/* Company profile nudge */}
+      {/* Alerts */}
       {isSetupIncomplete && !loading && (
-        <Link href="/settings"
-          className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-2xl px-5 py-4 hover:bg-blue-100 transition-colors">
-          <Building2 className="w-4 h-4 text-blue-500 flex-shrink-0" />
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-blue-800">Complete your company profile</p>
-            <p className="text-xs text-blue-500 mt-0.5">Add your TIN and NASSCORP number to appear on payslips</p>
+        <Link href="/settings" style={{
+          display: "flex", alignItems: "center", gap: 12,
+          background: "#38bdf815", border: "1px solid #38bdf830",
+          borderRadius: 12, padding: "13px 18px", marginBottom: 14,
+          textDecoration: "none", transition: "border-color 0.2s",
+          animation: "fadeUp 0.3s ease",
+        }}>
+          <Building2 size={14} color="#38bdf8"/>
+          <div style={{ flex: 1 }}>
+            <p style={{ color: "#38bdf8", fontWeight: 600, fontSize: 13, margin: 0 }}>Complete your company profile</p>
+            <p style={{ color: "#38bdf880", fontSize: 11, margin: "2px 0 0" }}>Add your TIN and NASSCORP number to appear on payslips</p>
           </div>
-          <ArrowRight className="w-4 h-4 text-blue-400" />
+          <ArrowRight size={14} color="#38bdf8"/>
         </Link>
       )}
 
-      {/* Warning banner */}
       {preview.warnings > 0 && (
-        <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4">
-          <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
-          <p className="text-sm text-amber-700">
+        <div style={{
+          display: "flex", alignItems: "center", gap: 12,
+          background: "#fb923c12", border: "1px solid #fb923c30",
+          borderRadius: 12, padding: "13px 18px", marginBottom: 14,
+          animation: "fadeUp 0.3s ease",
+        }}>
+          <AlertTriangle size={14} color="#fb923c"/>
+          <p style={{ color: "#fb923c", fontSize: 13, margin: 0, flex: 1 }}>
             <strong>{preview.warnings} employee{preview.warnings > 1 ? "s" : ""}</strong> have gross pay below the $150 minimum wage threshold.
           </p>
-          <Link href="/payroll" className="ml-auto text-xs font-semibold text-amber-600 hover:text-amber-800 whitespace-nowrap">
-            Review →
-          </Link>
+          <Link href="/payroll" style={{ color: "#fb923c", fontSize: 12, fontWeight: 600, textDecoration: "none" }}>Review →</Link>
         </div>
       )}
 
-      {/* Onboarding checklist banner */}
+      {/* Onboarding checklist */}
       {!checklistDismissed && !loading && (
-        <div className="bg-white border border-[#50C878]/40 rounded-2xl p-5 relative">
-          <button
-            onClick={dismissChecklist}
-            aria-label="Dismiss checklist"
-            className="absolute top-4 right-4 text-slate-300 hover:text-slate-500 transition-colors">
-            <X className="w-4 h-4" />
+        <div style={{
+          background: "#0d1f35", border: "1px solid #1e3a5f", borderRadius: 16,
+          padding: "20px 22px", marginBottom: 20, position: "relative",
+          animation: "fadeUp 0.35s ease 0.05s both",
+        }}>
+          <button onClick={dismissChecklist} style={{
+            position: "absolute", top: 16, right: 16, width: 26, height: 26,
+            borderRadius: 7, border: "none", background: "#ffffff10",
+            color: "#64748b", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <X size={12}/>
           </button>
-          <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-[#50C878]" /> Getting started
+          <h3 style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 14, margin: "0 0 14px", display: "flex", alignItems: "center", gap: 8 }}>
+            <Sparkles size={14} color="#50C878"/> Getting started
           </h3>
-          <div className="grid sm:grid-cols-2 gap-2">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {[
               { done: !!company?.name && !!company?.tin, label: "Complete company profile", href: "/settings"  },
               { done: employees.length > 0,              label: "Add your first employee",  href: "/employees" },
               { done: employees.some((e) => e.isActive), label: "Activate an employee",     href: "/employees" },
               { done: false,                             label: "Run your first payroll",   href: "/payroll"   },
             ].map((step) => (
-              <a key={step.label} href={step.href}
-                className={`flex items-center gap-3 p-3 rounded-xl border transition-colors group
-                  ${step.done
-                    ? "border-emerald-100 bg-emerald-50/50 pointer-events-none"
-                    : "border-slate-100 hover:border-[#50C878]/40 hover:bg-emerald-50/30"}`}>
+              <Link key={step.label} href={step.href} className="checklist-item" style={{
+                display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+                borderRadius: 10, border: `1px solid ${step.done ? "#50C87825" : "#1e3a5f"}`,
+                background: step.done ? "#50C87808" : "transparent",
+                textDecoration: "none", transition: "all 0.15s",
+                pointerEvents: step.done ? "none" : "auto",
+              }}>
                 {step.done
-                  ? <CheckCircle2 className="w-4 h-4 text-[#50C878] flex-shrink-0" />
-                  : <div className="w-4 h-4 rounded-full border-2 border-slate-300 flex-shrink-0 group-hover:border-[#50C878] transition-colors" />}
-                <span className={`text-sm ${step.done ? "text-slate-400 line-through" : "text-slate-700"}`}>
+                  ? <CheckCircle2 size={14} color="#50C878"/>
+                  : <div style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid #334155", flexShrink: 0 }}/>
+                }
+                <span style={{ color: step.done ? "#334155" : "#94a3b8", fontSize: 12, textDecoration: step.done ? "line-through" : "none", flex: 1 }}>
                   {step.label}
                 </span>
-                {!step.done && <ArrowRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-[#50C878] ml-auto transition-colors" />}
-              </a>
+                {!step.done && <ArrowRight size={12} color="#334155"/>}
+              </Link>
             ))}
           </div>
-          {[!!company?.name && !!company?.tin, employees.length > 0, employees.some(e => e.isActive), false].filter(Boolean).length === 3 && (
-            <p className="text-xs text-slate-400 mt-3 flex items-center gap-1.5">
-              <Sparkles className="w-3 h-3 text-[#50C878]" /> Almost there — run your first pay run to complete setup.
-            </p>
-          )}
         </div>
       )}
 
       {/* Stats grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <StatCard
-          label="Active Employees"
-          value={preview.active.length}
-          sub={`${employees.length} total`}
-        />
-        <StatCard
-          label="Est. Gross Payroll"
-          value={fmt(preview.gross)}
-          sub="USD equivalent"
-          accent
-        />
-        <StatCard
-          label="Income Tax (LRA)"
-          value={fmt(preview.incomeTax)}
-          sub="Employee deduction"
-        />
-        <StatCard
-          label="NASSCORP (EE)"
-          value={fmt(preview.nasscorp)}
-          sub="4% of base salary"
-        />
-        <StatCard
-          label="Est. Net Payroll"
-          value={fmt(preview.net)}
-          sub="After all deductions"
-        />
-        <StatCard
-          label="NASSCORP (ER)"
-          value="6%"
-          sub="Employer contribution"
-        />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 20, animation: "fadeUp 0.4s ease 0.1s both" }}>
+        <StatCard label="Active Employees" value={preview.active.length} sub={`${employees.length} total`} icon={<Users size={13} color="#50C878"/>}/>
+        <StatCard label="Est. Gross Payroll" value={fmt(preview.gross)} sub="USD equivalent" accent icon={<DollarSign size={13} color="#50C878"/>}/>
+        <StatCard label="Income Tax (LRA)" value={fmt(preview.incomeTax)} sub="Employee deduction" icon={<FileText size={13} color="#334155"/>}/>
+        <StatCard label="NASSCORP (EE)" value={fmt(preview.nasscorp)} sub="4% of base salary" icon={<ShieldCheck size={13} color="#334155"/>}/>
+        <StatCard label="Est. Net Payroll" value={fmt(preview.net)} sub="After all deductions" icon={<TrendingUp size={13} color="#50C878"/>}/>
+        <StatCard label="NASSCORP (ER)" value="6%" sub="Employer contribution" icon={<ShieldCheck size={13} color="#334155"/>}/>
         <StatCard
           label="Compliance Warnings"
           value={preview.warnings}
-          sub={preview.warnings === 0 ? "All clear" : "Below minimum wage"}
+          sub={preview.warnings === 0 ? "All clear ✓" : "Below minimum wage"}
           warning={preview.warnings > 0}
+          icon={preview.warnings > 0 ? <AlertTriangle size={13} color="#fb923c"/> : <CheckCircle2 size={13} color="#50C878"/>}
         />
-        {/* ✅ Updated: $0.75 rate, no minimum, correct sub-label */}
         <StatCard
           label="Platform Fee"
           value={platformFee > 0 ? fmt(platformFee) : "$0.00"}
-          sub={preview.active.length > 0
-            ? `${preview.active.length} emp × $${RATE_PER_EMPLOYEE.toFixed(2)}`
-            : "No active employees"}
+          sub={preview.active.length > 0 ? `${preview.active.length} emp × $${RATE_PER_EMPLOYEE.toFixed(2)}` : "No active employees"}
+          icon={<Zap size={13} color="#334155"/>}
         />
       </div>
 
-      {/* Employee snapshot table */}
-      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-          <h2 className="font-semibold text-slate-800 flex items-center gap-2">
-            <FileText className="w-4 h-4 text-slate-400" /> Employee Snapshot
-          </h2>
-          <Link href="/employees"
-            className="text-xs text-[#50C878] font-semibold hover:text-[#3aa85f] flex items-center gap-1">
-            All employees <ArrowRight className="w-3 h-3" />
+      {/* Employee snapshot */}
+      <div style={{ background: "#0d1f35", border: "1px solid #1e3a5f", borderRadius: 16, overflow: "hidden", marginBottom: 20, animation: "fadeUp 0.45s ease 0.15s both" }}>
+        <div style={{
+          background: "#002147", padding: "14px 20px",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <span style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
+            <FileText size={14} color="rgba(255,255,255,0.3)"/> Employee Snapshot
+          </span>
+          <Link href="/employees" style={{
+            display: "flex", alignItems: "center", gap: 5,
+            color: "#50C878", fontSize: 12, fontWeight: 600, textDecoration: "none",
+            fontFamily: "'DM Mono',monospace",
+          }}>
+            All employees <ArrowRight size={12}/>
           </Link>
         </div>
 
         {preview.results.length === 0 ? (
-          <div className="py-16 text-center">
-            <Users className="w-10 h-10 mx-auto mb-3 text-slate-200" />
-            <p className="text-slate-400 text-sm">No active employees</p>
-            <Link href="/employees"
-              className="inline-flex items-center gap-1.5 mt-4 px-4 py-2 text-xs font-semibold rounded-xl
-                         bg-[#50C878] text-[#002147] hover:bg-[#3aa85f]">
-              <Users className="w-3.5 h-3.5" /> Add Employees
+          <div style={{ padding: "48px 24px", textAlign: "center" }}>
+            <Users size={28} color="#1e3a5f" style={{ margin: "0 auto 12px", display: "block" }}/>
+            <p style={{ color: "#334155", fontSize: 14, fontWeight: 600, margin: "0 0 4px" }}>No active employees</p>
+            <Link href="/employees" style={{
+              display: "inline-flex", alignItems: "center", gap: 6, marginTop: 14,
+              padding: "9px 16px", borderRadius: 10, background: "#50C878",
+              color: "#002147", fontSize: 12, fontWeight: 700, textDecoration: "none",
+            }}>
+              <Users size={13}/> Add Employees
             </Link>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 780 }}>
               <thead>
-                <tr className="border-b border-slate-100 bg-slate-50">
-                  {["Employee", "Dept", "CCY", "Rate/hr", "Gross", "Income Tax", "NASSCORP", "Net Pay", ""].map((h) => (
-                    <th key={h} className="text-left px-4 py-3 text-xs font-mono text-slate-400 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                <tr>
+                  {["Employee","Dept","CCY","Rate/hr","Gross","Tax","NASSCORP","Net Pay",""].map((h) => (
+                    <th key={h} style={{
+                      padding: "10px 14px", background: "#071525",
+                      borderBottom: "1px solid #1e3a5f",
+                      fontSize: 10, fontWeight: 700, color: "#334155",
+                      letterSpacing: "0.08em", textTransform: "uppercase",
+                      fontFamily: "'DM Mono',monospace", textAlign: "left", whiteSpace: "nowrap",
+                    }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {preview.results.slice(0, 8).map((result, i) => {
-                  const emp        = preview.active[i];
-                  const sym        = emp.currency === "USD" ? "$" : "L$";
-                  const hasWarning = result.warnings.length > 0;
+                  const emp     = preview.active[i];
+                  const sym     = emp.currency === "USD" ? "$" : "L$";
+                  const hasWarn = result.warnings.length > 0;
                   return (
-                    <tr key={result.employeeId}
-                      className={`border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors
-                        ${hasWarning ? "border-l-2 border-l-amber-400" : "border-l-2 border-l-transparent"}`}>
-                      <td className="px-4 py-3.5">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-full bg-[#002147]/10 flex items-center justify-center flex-shrink-0">
-                            <span className="text-[#002147] text-[10px] font-bold">
-                              {emp.firstName[0]}{emp.lastName[0]}
-                            </span>
+                    <tr key={result.employeeId} className="emp-row" style={{
+                      borderLeft: `3px solid ${hasWarn ? "#fb923c" : "transparent"}`,
+                      borderBottom: "1px solid #0d2137",
+                    }}>
+                      <td style={{ padding: "12px 14px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{
+                            width: 28, height: 28, borderRadius: "50%",
+                            background: "#50C87820", border: "1px solid #50C87840",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: 10, fontWeight: 700, color: "#50C878",
+                            fontFamily: "'DM Mono',monospace", flexShrink: 0,
+                          }}>
+                            {emp.firstName[0]}{emp.lastName[0]}
                           </div>
                           <div>
-                            <p className="font-medium text-slate-700 text-xs leading-tight">{emp.fullName}</p>
-                            <p className="text-[10px] text-slate-400">{emp.employeeNumber}</p>
+                            <p style={{ color: "#e2e8f0", fontWeight: 600, fontSize: 12, margin: 0 }}>{emp.fullName}</p>
+                            <p style={{ color: "#334155", fontSize: 10, margin: 0, fontFamily: "'DM Mono',monospace" }}>{emp.employeeNumber}</p>
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3.5 text-xs text-slate-500">{emp.department}</td>
-                      <td className="px-4 py-3.5">
-                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full
-                          ${emp.currency === "USD" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
+                      <td style={{ padding: "12px 14px", color: "#475569", fontSize: 11 }}>{emp.department}</td>
+                      <td style={{ padding: "12px 14px" }}>
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10,
+                          background: emp.currency === "USD" ? "#1e3a5f" : "#2a2a1a",
+                          color: emp.currency === "USD" ? "#38bdf8" : "#f59e0b",
+                        }}>
                           {emp.currency}
                         </span>
                       </td>
-                      <td className="px-4 py-3.5 font-mono text-xs text-slate-600">{sym}{emp.rate.toFixed(2)}</td>
-                      <td className="px-4 py-3.5 font-mono text-xs font-semibold text-slate-700">{sym}{result.grossPay.toFixed(2)}</td>
-                      <td className="px-4 py-3.5 font-mono text-xs text-red-500">{sym}{result.Paye.taxInBase.toFixed(2)}</td>
-                      <td className="px-4 py-3.5 font-mono text-xs text-orange-500">{sym}{result.nasscorp.employeeContribution.toFixed(2)}</td>
-                      <td className="px-4 py-3.5 font-mono text-xs font-bold text-emerald-600">{sym}{result.netPay.toFixed(2)}</td>
-                      <td className="px-4 py-3.5">
-                        {hasWarning
-                          ? <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                          : <CheckCircle2  className="w-3.5 h-3.5 text-emerald-400" />}
+                      <td style={{ padding: "12px 14px", fontFamily: "'DM Mono',monospace", fontSize: 12, color: "#94a3b8" }}>{sym}{emp.rate.toFixed(2)}</td>
+                      <td style={{ padding: "12px 14px", fontFamily: "'DM Mono',monospace", fontSize: 12, fontWeight: 700, color: "#e2e8f0" }}>{sym}{result.grossPay.toFixed(2)}</td>
+                      <td style={{ padding: "12px 14px", fontFamily: "'DM Mono',monospace", fontSize: 12, color: "#f87171" }}>{sym}{result.Paye.taxInBase.toFixed(2)}</td>
+                      <td style={{ padding: "12px 14px", fontFamily: "'DM Mono',monospace", fontSize: 12, color: "#fb923c" }}>{sym}{result.nasscorp.employeeContribution.toFixed(2)}</td>
+                      <td style={{ padding: "12px 14px", fontFamily: "'DM Mono',monospace", fontSize: 13, fontWeight: 800, color: "#50C878" }}>{sym}{result.netPay.toFixed(2)}</td>
+                      <td style={{ padding: "12px 14px" }}>
+                        {hasWarn
+                          ? <AlertTriangle size={13} color="#fb923c" style={{ display: "block", margin: "0 auto" }}/>
+                          : <CheckCircle2  size={13} color="#50C87860" style={{ display: "block", margin: "0 auto" }}/>
+                        }
                       </td>
                     </tr>
                   );
@@ -389,8 +450,8 @@ export default function DashboardPage() {
         )}
 
         {preview.results.length > 8 && (
-          <div className="px-5 py-3 border-t border-slate-100 text-center">
-            <Link href="/payroll" className="text-xs text-slate-400 hover:text-[#50C878] font-mono">
+          <div style={{ padding: "12px", textAlign: "center", borderTop: "1px solid #0d2137" }}>
+            <Link href="/payroll" style={{ color: "#334155", fontSize: 11, fontFamily: "'DM Mono',monospace", textDecoration: "none" }}>
               + {preview.results.length - 8} more employees — view full payroll →
             </Link>
           </div>
@@ -398,28 +459,33 @@ export default function DashboardPage() {
       </div>
 
       {/* Quick actions */}
-      <div className="grid sm:grid-cols-3 gap-4">
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, animation: "fadeUp 0.5s ease 0.2s both" }}>
         {[
-          { href: "/payroll",   icon: Play,      label: "Start Pay Run",    sub: "Process this month's payroll"           },
-          { href: "/employees", icon: Users,      label: "Manage Employees", sub: `${employees.length} total employees`   },
-          { href: "/billing",   icon: TrendingUp, label: "View Billing",     sub: `${fmt(platformFee)}/month · $0.75/emp` },
+          { href: "/payroll",   icon: <Play size={18} color="#334155"/>,      label: "Start Pay Run",    sub: "Process this month's payroll"         },
+          { href: "/employees", icon: <Users size={18} color="#334155"/>,     label: "Manage Employees", sub: `${employees.length} total employees`   },
+          { href: "/billing",   icon: <TrendingUp size={18} color="#334155"/>, label: "View Billing",    sub: `${fmt(platformFee)}/month · $0.75/emp` },
         ].map((action) => (
-          <Link key={action.href} href={action.href}
-            className="bg-white rounded-2xl border border-slate-200 p-5 hover:border-[#50C878]
-                       hover:shadow-sm transition-all group flex items-center gap-4">
-            <div className="w-10 h-10 rounded-xl bg-slate-100 group-hover:bg-[#50C878]/10
-                            flex items-center justify-center flex-shrink-0 transition-colors">
-              <action.icon className="w-5 h-5 text-slate-400 group-hover:text-[#50C878] transition-colors" />
+          <Link key={action.href} href={action.href} className="dash-link" style={{
+            display: "flex", alignItems: "center", gap: 14, padding: "18px 20px",
+            background: "#0d1f35", border: "1px solid #1e3a5f", borderRadius: 16,
+            textDecoration: "none", transition: "border-color 0.2s",
+          }}>
+            <div className="dash-link-icon" style={{
+              width: 40, height: 40, borderRadius: 11,
+              background: "#071525", border: "1px solid #1e3a5f",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              flexShrink: 0, transition: "background 0.2s",
+            }}>
+              {action.icon}
             </div>
-            <div>
-              <p className="text-sm font-semibold text-slate-700">{action.label}</p>
-              <p className="text-xs text-slate-400 mt-0.5">{action.sub}</p>
+            <div style={{ flex: 1 }}>
+              <p style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 13, margin: 0 }}>{action.label}</p>
+              <p style={{ color: "#334155", fontSize: 11, margin: "3px 0 0" }}>{action.sub}</p>
             </div>
-            <ArrowRight className="w-4 h-4 text-slate-200 group-hover:text-[#50C878] ml-auto transition-colors" />
+            <ArrowRight size={14} color="#334155" className="dash-link-arrow" style={{ transition: "color 0.2s" }}/>
           </Link>
         ))}
       </div>
-
     </div>
   );
 }

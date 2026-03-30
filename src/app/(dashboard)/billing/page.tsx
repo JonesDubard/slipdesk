@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Slipdesk — Billing Page
+ * Slipdesk — Billing Page (Dark Theme)
  * Place at: src/app/(dashboard)/billing/page.tsx
  */
 
@@ -32,37 +32,10 @@ const FlutterwaveCheckout = dynamic(
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const DEMO_USER = { email: "admin@slipdesk.lr", name: "Admin User", phone: "+231770000001" };
-
-const fmt = (n: number) =>
-  `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
+const fmt = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (iso: string | null) =>
-  iso
-    ? new Date(iso).toLocaleDateString("en-LR", { year: "numeric", month: "short", day: "numeric" })
-    : "—";
-
+  iso ? new Date(iso).toLocaleDateString("en-LR", { year: "numeric", month: "short", day: "numeric" }) : "—";
 const LRD_DISPLAY_RATE = 185.44;
-
-const STATUS_STYLES: Record<string, string> = {
-  success: "bg-emerald-100 text-emerald-700",
-  failed:  "bg-red-100 text-red-700",
-  pending: "bg-amber-100 text-amber-700",
-};
-
-function PlanBadge({ planId }: { planId: BillingProfile["planId"] }) {
-  const map: Record<string, { style: string; label: string }> = {
-    trial:     { style: "bg-blue-100 text-blue-700",       label: "Free Trial"  },
-    active:    { style: "bg-emerald-100 text-emerald-700", label: "Active"      },
-    past_due:  { style: "bg-red-100 text-red-700",         label: "Past Due"    },
-    cancelled: { style: "bg-slate-100 text-slate-500",     label: "Cancelled"   },
-  };
-  const { style, label } = map[planId];
-  return (
-    <span className={`text-xs font-mono font-semibold px-3 py-1 rounded-full ${style}`}>
-      {label}
-    </span>
-  );
-}
 
 const TIERS = [
   { count: 5,   label: "Starter"  },
@@ -72,12 +45,36 @@ const TIERS = [
   { count: 100, label: "Large"    },
 ];
 
+const STATUS_COLOR: Record<string, string> = {
+  success: "#50C878",
+  failed:  "#f87171",
+  pending: "#fb923c",
+};
+
+function PlanBadge({ planId }: { planId: BillingProfile["planId"] }) {
+  const map: Record<string, { color: string; bg: string; label: string }> = {
+    trial:     { color: "#38bdf8", bg: "#38bdf815", label: "Free Trial"  },
+    active:    { color: "#50C878", bg: "#50C87815", label: "Active"      },
+    past_due:  { color: "#f87171", bg: "#f8717115", label: "Past Due"    },
+    cancelled: { color: "#475569", bg: "#47556915", label: "Cancelled"   },
+  };
+  const s = map[planId];
+  return (
+    <span style={{
+      fontSize: 11, fontWeight: 700, fontFamily: "'DM Mono',monospace",
+      padding: "3px 10px", borderRadius: 20,
+      color: s.color, background: s.bg, border: `1px solid ${s.color}40`,
+    }}>
+      {s.label}
+    </span>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function BillingPage() {
   const { employees, company, loading } = useApp();
 
-  // All hooks declared before any conditional return (React rules)
   const [planId,          setPlanId]          = useState<BillingProfile["planId"]>("trial");
   const [paymentHistory,  setPaymentHistory]  = useState<PaymentRecord[]>([]);
   const [totalPaid,       setTotalPaid]       = useState(0);
@@ -85,15 +82,10 @@ export default function BillingPage() {
   const [showCheckout,    setShowCheckout]    = useState(false);
   const [checkoutPayload, setCheckoutPayload] = useState<CheckoutPayload | null>(null);
 
-  const activeCount = employees.filter((e) => e.isActive).length;
+  const activeCount  = employees.filter((e) => e.isActive).length;
+  const monthlyTotal = useMemo(() => Math.round(activeCount * PEPM_RATE_USD * 100) / 100, [activeCount]);
 
-  const monthlyTotal = useMemo(
-    () => Math.round(activeCount * PEPM_RATE_USD * 100) / 100,
-    [activeCount],
-  );
-
-  // ── Loading guard — prevents white screen on reload ──────────────────────
-  if (loading) return <PageSkeleton />;
+  if (loading) return <PageSkeleton/>;
 
   const billingBypassed = company?.billingBypass === true;
   const companyDisplay  = company?.name || "Your Company";
@@ -140,199 +132,245 @@ export default function BillingPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div style={{ padding: "32px", minHeight: "100vh", background: "#071525", fontFamily: "'DM Sans',sans-serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500;600&display=swap');
+        @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+      `}</style>
 
-      <div>
-        <h1 className="text-2xl font-bold text-slate-800">Billing</h1>
-        <p className="text-slate-400 text-sm mt-0.5">
+      {/* Header */}
+      <div style={{ marginBottom: 28, animation: "fadeUp 0.3s ease" }}>
+        <h1 style={{ color: "#f1f5f9", fontSize: 26, fontWeight: 800, margin: 0, letterSpacing: "-0.02em" }}>Billing</h1>
+        <p style={{ color: "#334155", fontSize: 13, marginTop: 5, fontFamily: "'DM Mono',monospace" }}>
           {companyDisplay} · {fmt(PEPM_RATE_USD)}/employee/month · Early adopter rate
           {MOCK_MODE && (
-            <span className="ml-2 text-xs bg-amber-100 text-amber-600 font-mono px-2 py-0.5 rounded-full">
+            <span style={{ marginLeft: 10, fontSize: 10, background: "#fb923c20", color: "#fb923c", border: "1px solid #fb923c30", padding: "2px 8px", borderRadius: 10, fontWeight: 700 }}>
               Demo Mode
             </span>
           )}
         </p>
       </div>
 
-      <div className="flex items-start gap-3 bg-emerald-50 border border-emerald-200 rounded-2xl px-5 py-4">
-        <TrendingUp className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
-        <p className="text-emerald-700 text-xs leading-relaxed">
-          <span className="font-semibold">
-            Early adopter pricing locked at {fmt(PEPM_RATE_USD)}/employee/month.
-          </span>{" "}
-          This rate is guaranteed for your account as long as your subscription stays active.
-          Pay only for what you use — no minimums, no contracts.
+      {/* Early adopter banner */}
+      <div style={{
+        display: "flex", alignItems: "flex-start", gap: 12,
+        background: "#50C87812", border: "1px solid #50C87830",
+        borderRadius: 14, padding: "14px 18px", marginBottom: 16,
+        animation: "fadeUp 0.35s ease 0.05s both",
+      }}>
+        <TrendingUp size={15} color="#50C878" style={{ flexShrink: 0, marginTop: 2 }}/>
+        <p style={{ color: "#50C878", fontSize: 13, margin: 0 }}>
+          <strong>Early adopter pricing locked at {fmt(PEPM_RATE_USD)}/employee/month.</strong>{" "}
+          <span style={{ color: "#50C87880" }}>
+            Rate is guaranteed as long as your subscription stays active. Pay only for what you use — no minimums, no contracts.
+          </span>
         </p>
       </div>
 
+      {/* Trial / past due alert */}
       {!billingBypassed && onTrial && (
-        <div className="flex items-start gap-4 bg-blue-50 border border-blue-200 rounded-2xl px-5 py-4">
-          <Zap className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <p className="font-semibold text-blue-800 text-sm">
+        <div style={{
+          display: "flex", alignItems: "flex-start", gap: 14,
+          background: "#38bdf815", border: "1px solid #38bdf830",
+          borderRadius: 14, padding: "16px 18px", marginBottom: 16,
+          animation: "fadeUp 0.4s ease 0.1s both",
+        }}>
+          <Zap size={16} color="#38bdf8" style={{ flexShrink: 0, marginTop: 2 }}/>
+          <div style={{ flex: 1 }}>
+            <p style={{ color: "#38bdf8", fontWeight: 700, fontSize: 13, margin: "0 0 3px" }}>
               Free trial — {daysLeft} {daysLeft !== 1 ? "days" : "day"} remaining
             </p>
-            <p className="text-blue-600 text-xs mt-0.5 leading-relaxed">
+            <p style={{ color: "#38bdf880", fontSize: 12, margin: 0 }}>
               Your first pay run is on us. After that:{" "}
-              <strong>{fmt(PEPM_RATE_USD)} per active employee per month</strong>
-              {activeCount > 0 && (
-                <> — that&apos;s <strong>{fmt(monthlyTotal)}/month</strong> for your {activeCount} employee{activeCount !== 1 ? "s" : ""}</>
-              )}. No minimum charge.
+              <strong style={{ color: "#38bdf8" }}>{fmt(PEPM_RATE_USD)} per active employee per month</strong>
+              {activeCount > 0 && <> — that&apos;s <strong style={{ color: "#38bdf8" }}>{fmt(monthlyTotal)}/month</strong> for your {activeCount} employee{activeCount !== 1 ? "s" : ""}</>}.
             </p>
           </div>
-          <button onClick={handlePayNow} disabled={activeCount === 0}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl
-                       bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40
-                       disabled:cursor-not-allowed transition-colors whitespace-nowrap">
-            Activate <ArrowRight className="w-3.5 h-3.5" />
+          <button onClick={handlePayNow} disabled={activeCount === 0} style={{
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "9px 16px", borderRadius: 10, border: "none",
+            background: "#38bdf8", color: "#002147",
+            fontSize: 12, fontWeight: 700, cursor: activeCount === 0 ? "not-allowed" : "pointer",
+            opacity: activeCount === 0 ? 0.4 : 1, flexShrink: 0, transition: "opacity 0.15s",
+          }}>
+            Activate <ArrowRight size={13}/>
           </button>
         </div>
       )}
 
       {!billingBypassed && planId === "past_due" && (
-        <div className="flex items-start gap-4 bg-red-50 border border-red-200 rounded-2xl px-5 py-4">
-          <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <p className="font-semibold text-red-800 text-sm">Payment overdue</p>
-            <p className="text-red-600 text-xs mt-0.5">Your account is past due. Pay now to restore full access.</p>
+        <div style={{
+          display: "flex", alignItems: "center", gap: 14,
+          background: "#f8717115", border: "1px solid #f8717130",
+          borderRadius: 14, padding: "14px 18px", marginBottom: 16,
+        }}>
+          <AlertTriangle size={15} color="#f87171"/>
+          <div style={{ flex: 1 }}>
+            <p style={{ color: "#f87171", fontWeight: 700, fontSize: 13, margin: 0 }}>Payment overdue</p>
+            <p style={{ color: "#f8717180", fontSize: 12, margin: 0 }}>Your account is past due. Pay now to restore full access.</p>
           </div>
-          <button onClick={handlePayNow}
-            className="px-4 py-2 text-xs font-semibold rounded-xl bg-red-600 text-white hover:bg-red-700 whitespace-nowrap">
+          <button onClick={handlePayNow} style={{
+            padding: "9px 16px", borderRadius: 10, border: "none",
+            background: "#f87171", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
+          }}>
             Pay now
           </button>
         </div>
       )}
 
-      {activeCount === 0 && (
-        <div className="flex items-start gap-4 bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4">
-          <Users className="w-5 h-5 text-slate-400 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="font-semibold text-slate-700 text-sm">No active employees yet</p>
-            <p className="text-slate-500 text-xs mt-0.5">
-              Add employees on the <strong>Employees</strong> page and your bill will update automatically.
-            </p>
+      {/* Stats row */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 20, animation: "fadeUp 0.4s ease 0.1s both" }}>
+        {[
+          { label: "Plan",          value: <PlanBadge planId={planId}/>, sub: undefined,            icon: <ShieldCheck size={13} color="#334155"/> },
+          { label: "This Month",    value: activeCount > 0 ? fmt(monthlyTotal) : "$0.00",
+            sub: activeCount > 0 ? `≈ L$${(monthlyTotal * LRD_DISPLAY_RATE).toFixed(2)}` : "Add employees to calculate",
+            accent: true, icon: <DollarSign size={13} color="#50C878"/> },
+          { label: "Active Employees", value: activeCount,
+            sub: `${employees.length} total · ${employees.length - activeCount} inactive`,
+            icon: <Users size={13} color="#334155"/> },
+          { label: "Total Paid",    value: fmt(totalPaid), sub: "lifetime", icon: <CreditCard size={13} color="#334155"/> },
+        ].map((card, i) => (
+          <div key={i} style={{
+            background: (card as any).accent ? "#002147" : "#0d1f35",
+            border: "1px solid #1e3a5f", borderRadius: 16, padding: "18px 20px",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <p style={{
+                fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase",
+                fontFamily: "'DM Mono',monospace",
+                color: (card as any).accent ? "#ffffff40" : "#334155", margin: 0,
+              }}>{card.label}</p>
+              <div style={{
+                width: 26, height: 26, borderRadius: 7,
+                background: (card as any).accent ? "#ffffff10" : "#50C87815",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                {card.icon}
+              </div>
+            </div>
+            <div style={{
+              fontSize: typeof card.value === "string" ? 20 : 14,
+              fontWeight: 800, fontFamily: "'DM Mono',monospace",
+              color: (card as any).accent ? "#50C878" : "#f1f5f9",
+              marginBottom: 6, lineHeight: 1,
+            }}>
+              {card.value}
+            </div>
+            {card.sub && (
+              <p style={{ fontSize: 11, color: (card as any).accent ? "#ffffff30" : "#334155", fontFamily: "'DM Mono',monospace", margin: 0 }}>{card.sub}</p>
+            )}
           </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="bg-white rounded-2xl border border-slate-200 p-5">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-mono text-slate-400 uppercase tracking-wider">Plan</p>
-            <ShieldCheck className="w-4 h-4 text-slate-300" />
-          </div>
-          <PlanBadge planId={planId} />
-        </div>
-        <div className="bg-[#002147] rounded-2xl p-5">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-mono text-white/40 uppercase tracking-wider">This Month</p>
-            <DollarSign className="w-4 h-4 text-[#50C878]" />
-          </div>
-          <p className="text-xl font-bold font-mono text-white">{activeCount > 0 ? fmt(monthlyTotal) : "$0.00"}</p>
-          <p className="text-xs text-white/40 mt-0.5">
-            {activeCount > 0 ? `≈ L$${(monthlyTotal * LRD_DISPLAY_RATE).toFixed(2)}` : "Add employees to calculate"}
-          </p>
-        </div>
-        <div className="bg-white rounded-2xl border border-slate-200 p-5">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-mono text-slate-400 uppercase tracking-wider">Active</p>
-            <Users className="w-4 h-4 text-slate-300" />
-          </div>
-          <p className="text-xl font-bold font-mono text-slate-800">{activeCount}</p>
-          <p className="text-xs text-slate-400 mt-0.5">{employees.length} total · {employees.length - activeCount} inactive</p>
-        </div>
-        <div className="bg-white rounded-2xl border border-slate-200 p-5">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-mono text-slate-400 uppercase tracking-wider">Total Paid</p>
-            <CreditCard className="w-4 h-4 text-slate-300" />
-          </div>
-          <p className="text-xl font-bold font-mono text-slate-800">{fmt(totalPaid)}</p>
-          <p className="text-xs text-slate-400 mt-0.5">lifetime</p>
-        </div>
+        ))}
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-6">
-        <div className="flex items-start justify-between flex-wrap gap-4 mb-6">
+      {/* Billing cycle card */}
+      <div style={{ background: "#0d1f35", border: "1px solid #1e3a5f", borderRadius: 16, padding: "24px", marginBottom: 16, animation: "fadeUp 0.45s ease 0.15s both" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
           <div>
-            <h2 className="font-semibold text-slate-800">Current billing cycle</h2>
-            <p className="text-slate-400 text-sm mt-0.5">{currentMonth}</p>
+            <p style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 15, margin: "0 0 3px" }}>Current billing cycle</p>
+            <p style={{ color: "#334155", fontSize: 12, margin: 0, fontFamily: "'DM Mono',monospace" }}>{currentMonth}</p>
           </div>
           {planId !== "trial" && nextBillingDate && (
-            <div className="text-right">
-              <p className="text-xs text-slate-400 font-mono">Next billing date</p>
-              <p className="text-sm font-semibold text-slate-700">{fmtDate(nextBillingDate)}</p>
+            <div style={{ textAlign: "right" }}>
+              <p style={{ fontSize: 10, color: "#334155", fontFamily: "'DM Mono',monospace", margin: "0 0 3px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Next billing date</p>
+              <p style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", margin: 0 }}>{fmtDate(nextBillingDate)}</p>
             </div>
           )}
         </div>
 
-        <div className="bg-slate-50 rounded-xl p-5 space-y-3 mb-5">
-          <div className="flex justify-between items-center text-sm">
-            <span className="text-slate-600">Active employees</span>
-            <span className="font-mono font-semibold text-slate-800">{activeCount}</span>
-          </div>
-          <div className="flex justify-between items-center text-sm">
-            <span className="text-slate-600">Rate per employee</span>
-            <span className="font-mono font-semibold text-slate-800">{fmt(PEPM_RATE_USD)} / month</span>
-          </div>
-          <div className="border-t border-slate-200 pt-3 flex justify-between items-center">
-            <span className="font-semibold text-slate-700">Monthly total</span>
-            <div className="text-right">
-              <p className="font-mono font-bold text-[#002147] text-lg">{activeCount > 0 ? fmt(monthlyTotal) : "$0.00"}</p>
+        {/* Line items */}
+        <div style={{ background: "#071525", border: "1px solid #1e3a5f", borderRadius: 12, padding: "16px 18px", marginBottom: 16 }}>
+          {[
+            { label: "Active employees", value: String(activeCount) },
+            { label: "Rate per employee", value: `${fmt(PEPM_RATE_USD)} / month` },
+          ].map((row) => (
+            <div key={row.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <span style={{ color: "#475569", fontSize: 13 }}>{row.label}</span>
+              <span style={{ color: "#e2e8f0", fontWeight: 600, fontSize: 13, fontFamily: "'DM Mono',monospace" }}>{row.value}</span>
+            </div>
+          ))}
+          <div style={{ height: 1, background: "#1e3a5f", margin: "12px 0" }}/>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ color: "#94a3b8", fontWeight: 700, fontSize: 14 }}>Monthly total</span>
+            <div style={{ textAlign: "right" }}>
+              <p style={{ color: "#50C878", fontWeight: 800, fontSize: 20, fontFamily: "'DM Mono',monospace", margin: 0 }}>
+                {activeCount > 0 ? fmt(monthlyTotal) : "$0.00"}
+              </p>
               {activeCount > 0 && (
-                <p className="text-xs text-slate-400 font-mono">≈ L${(monthlyTotal * LRD_DISPLAY_RATE).toFixed(2)}</p>
+                <p style={{ color: "#334155", fontSize: 10, fontFamily: "'DM Mono',monospace", margin: 0 }}>
+                  ≈ L${(monthlyTotal * LRD_DISPLAY_RATE).toFixed(2)}
+                </p>
               )}
             </div>
           </div>
         </div>
 
-        <div className="mb-5">
-          <p className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-3">
+        {/* Pricing tiers */}
+        <div style={{ marginBottom: 18 }}>
+          <p style={{ fontSize: 10, color: "#334155", fontFamily: "'DM Mono',monospace", textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 10px" }}>
             Pricing reference — {fmt(PEPM_RATE_USD)}/employee · no minimum
           </p>
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 8 }}>
             {TIERS.map((tier, i) => {
               const prevMax       = [0, 5, 10, 25, 50][i];
               const isCurrentTier = activeCount <= tier.count && activeCount > prevMax;
-              const tierFee       = tier.count * PEPM_RATE_USD;
               return (
-                <div key={tier.count}
-                  className={`rounded-xl px-3 py-2.5 text-center border transition-all
-                    ${isCurrentTier ? "bg-[#002147] border-[#002147]" : "bg-white border-slate-200"}`}>
-                  <p className={`text-xs font-mono ${isCurrentTier ? "text-[#50C878]" : "text-slate-400"}`}>{tier.label}</p>
-                  <p className={`font-bold font-mono text-sm ${isCurrentTier ? "text-white" : "text-slate-700"}`}>{fmt(tierFee)}/mo</p>
-                  <p className={`text-[10px] font-mono ${isCurrentTier ? "text-white/50" : "text-slate-400"}`}>{tier.count} emp</p>
+                <div key={tier.count} style={{
+                  borderRadius: 10, padding: "10px 8px", textAlign: "center",
+                  background: isCurrentTier ? "#002147" : "#071525",
+                  border: `1px solid ${isCurrentTier ? "#50C878" : "#1e3a5f"}`,
+                  transition: "all 0.2s",
+                }}>
+                  <p style={{ fontSize: 10, fontFamily: "'DM Mono',monospace", color: isCurrentTier ? "#50C878" : "#334155", margin: "0 0 3px" }}>{tier.label}</p>
+                  <p style={{ fontSize: 13, fontWeight: 800, fontFamily: "'DM Mono',monospace", color: isCurrentTier ? "#f1f5f9" : "#94a3b8", margin: "0 0 2px" }}>
+                    {fmt(tier.count * PEPM_RATE_USD)}/mo
+                  </p>
+                  <p style={{ fontSize: 10, fontFamily: "'DM Mono',monospace", color: isCurrentTier ? "#50C87880" : "#1e3a5f", margin: 0 }}>{tier.count} emp</p>
                 </div>
               );
             })}
           </div>
         </div>
 
+        {/* Pay button */}
         {billingBypassed ? (
-          <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-2xl px-5 py-4">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+          <div style={{
+            display: "flex", alignItems: "center", gap: 12,
+            background: "#50C87812", border: "1px solid #50C87830",
+            borderRadius: 12, padding: "14px 18px",
+          }}>
+            <CheckCircle2 size={16} color="#50C878"/>
             <div>
-              <p className="font-semibold text-emerald-800 text-sm">Billing managed by Slipdesk</p>
-              <p className="text-emerald-600 text-xs mt-0.5">Your account has unlimited access. No payment required.</p>
+              <p style={{ color: "#50C878", fontWeight: 700, fontSize: 13, margin: 0 }}>Billing managed by Slipdesk</p>
+              <p style={{ color: "#50C87880", fontSize: 12, margin: 0 }}>Your account has unlimited access. No payment required.</p>
             </div>
           </div>
         ) : (
-          <button onClick={handlePayNow} disabled={activeCount === 0}
-            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl
-                       bg-[#F5A623] text-white font-bold hover:bg-[#e09415]
-                       disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-            <CreditCard className="w-4 h-4" />
-            {activeCount > 0 ? `Pay ${fmt(monthlyTotal)} via Flutterwave` : "Add employees to calculate your bill"}
-          </button>
+          <>
+            <button onClick={handlePayNow} disabled={activeCount === 0} style={{
+              width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              padding: "14px", borderRadius: 12, border: "none",
+              background: activeCount > 0 ? "#F5A623" : "#F5A62340",
+              color: "#002147", fontWeight: 800, fontSize: 14, cursor: activeCount === 0 ? "not-allowed" : "pointer",
+              transition: "opacity 0.15s",
+            }}
+              onMouseEnter={(e) => { if (activeCount > 0) e.currentTarget.style.opacity = "0.88"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+            >
+              <CreditCard size={16}/>
+              {activeCount > 0 ? `Pay ${fmt(monthlyTotal)} via Flutterwave` : "Add employees to calculate your bill"}
+            </button>
+            <p style={{ textAlign: "center", fontSize: 11, color: "#334155", marginTop: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              <ShieldCheck size={12} color="#334155"/> Secured by Flutterwave · Card, Orange Money & Bank Transfer
+            </p>
+          </>
         )}
-        <p className="text-center text-xs text-slate-400 mt-3 flex items-center justify-center gap-1.5">
-          <ShieldCheck className="w-3 h-3" />
-          Secured by Flutterwave · Card, Orange Money &amp; Bank Transfer
-        </p>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-6">
-        <h2 className="font-semibold text-slate-800 mb-4">What&apos;s included</h2>
-        <div className="grid sm:grid-cols-2 gap-3">
+      {/* What's included */}
+      <div style={{ background: "#0d1f35", border: "1px solid #1e3a5f", borderRadius: 16, padding: "24px", marginBottom: 16, animation: "fadeUp 0.5s ease 0.2s both" }}>
+        <p style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 15, margin: "0 0 16px" }}>What&apos;s included</p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           {[
             "Unlimited pay runs per month",
             "LRA Income Tax auto-calculation",
@@ -343,39 +381,49 @@ export default function BillingPage() {
             "Company logo on all payslips",
             "Email support",
           ].map((f) => (
-            <div key={f} className="flex items-center gap-2.5">
-              <CheckCircle2 className="w-4 h-4 text-[#50C878] flex-shrink-0" />
-              <span className="text-sm text-slate-600">{f}</span>
+            <div key={f} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <CheckCircle2 size={13} color="#50C878" style={{ flexShrink: 0 }}/>
+              <span style={{ color: "#475569", fontSize: 13 }}>{f}</span>
             </div>
           ))}
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-6">
-        <h2 className="font-semibold text-slate-800 mb-5 flex items-center gap-2">
-          <Clock className="w-4 h-4 text-slate-400" /> Payment History
-        </h2>
+      {/* Payment history */}
+      <div style={{ background: "#0d1f35", border: "1px solid #1e3a5f", borderRadius: 16, padding: "24px", marginBottom: 16, animation: "fadeUp 0.55s ease 0.25s both" }}>
+        <p style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 15, margin: "0 0 16px", display: "flex", alignItems: "center", gap: 8 }}>
+          <Clock size={14} color="#334155"/> Payment History
+        </p>
         {paymentHistory.length === 0 ? (
-          <div className="text-center py-10">
-            <FileText className="w-8 h-8 text-slate-200 mx-auto mb-3" />
-            <p className="text-slate-400 text-sm">No payments yet</p>
-            <p className="text-slate-300 text-xs mt-1">Your payment history will appear here after your first payment</p>
+          <div style={{ padding: "32px 0", textAlign: "center" }}>
+            <FileText size={28} color="#1e3a5f" style={{ margin: "0 auto 10px", display: "block" }}/>
+            <p style={{ color: "#334155", fontSize: 13 }}>No payments yet</p>
+            <p style={{ color: "#1e3a5f", fontSize: 11, fontFamily: "'DM Mono',monospace" }}>Your payment history will appear here after your first payment</p>
           </div>
         ) : (
-          <div className="space-y-2">
-            <div className="grid grid-cols-5 gap-4 px-3 pb-2 border-b border-slate-100">
+          <div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px 100px 80px", gap: 14, paddingBottom: 10, borderBottom: "1px solid #1e3a5f", marginBottom: 8 }}>
               {["Date","Period","Employees","Amount","Status"].map((h) => (
-                <p key={h} className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">{h}</p>
+                <p key={h} style={{ fontSize: 10, fontFamily: "'DM Mono',monospace", color: "#334155", textTransform: "uppercase", letterSpacing: "0.06em", margin: 0 }}>{h}</p>
               ))}
             </div>
             {paymentHistory.map((record) => (
-              <div key={record.id}
-                className="grid grid-cols-5 gap-4 px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors items-center">
-                <p className="text-xs text-slate-600 font-mono">{fmtDate(record.date)}</p>
-                <p className="text-xs text-slate-600">{record.periodLabel}</p>
-                <p className="text-xs font-mono text-slate-600">{record.employees}</p>
-                <p className="text-xs font-mono font-semibold text-slate-800">{fmt(record.amount)}</p>
-                <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full w-fit ${STATUS_STYLES[record.status]}`}>
+              <div key={record.id} style={{
+                display: "grid", gridTemplateColumns: "1fr 1fr 80px 100px 80px",
+                gap: 14, padding: "12px 0", borderBottom: "1px solid #071525",
+                alignItems: "center",
+              }}>
+                <p style={{ fontSize: 12, fontFamily: "'DM Mono',monospace", color: "#475569", margin: 0 }}>{fmtDate(record.date)}</p>
+                <p style={{ fontSize: 12, color: "#475569", margin: 0 }}>{record.periodLabel}</p>
+                <p style={{ fontSize: 12, fontFamily: "'DM Mono',monospace", color: "#475569", margin: 0 }}>{record.employees}</p>
+                <p style={{ fontSize: 12, fontFamily: "'DM Mono',monospace", fontWeight: 700, color: "#e2e8f0", margin: 0 }}>{fmt(record.amount)}</p>
+                <span style={{
+                  fontSize: 10, fontFamily: "'DM Mono',monospace", fontWeight: 700,
+                  padding: "2px 8px", borderRadius: 20,
+                  color: STATUS_COLOR[record.status],
+                  background: `${STATUS_COLOR[record.status]}15`,
+                  border: `1px solid ${STATUS_COLOR[record.status]}30`,
+                }}>
                   {record.status}
                 </span>
               </div>
@@ -384,19 +432,26 @@ export default function BillingPage() {
         )}
       </div>
 
+      {/* Mock mode notice */}
       {MOCK_MODE && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5">
-          <div className="flex items-start gap-3">
-            <RefreshCw className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+        <div style={{
+          background: "#fb923c10", border: "1px solid #fb923c30",
+          borderRadius: 16, padding: "20px 22px", animation: "fadeUp 0.6s ease 0.3s both",
+        }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+            <RefreshCw size={16} color="#fb923c" style={{ flexShrink: 0, marginTop: 2 }}/>
             <div>
-              <p className="font-semibold text-amber-800 text-sm">Ready to go live?</p>
-              <p className="text-amber-600 text-xs mt-1">Running in demo mode — no real charges are made. To accept real payments:</p>
-              <ol className="text-amber-600 text-xs mt-2 space-y-1 list-decimal list-inside">
-                <li>Sign up at flutterwave.com and complete KYB verification</li>
-                <li>Get your live API keys from the Flutterwave dashboard</li>
-                <li>Set <code className="bg-amber-100 px-1 rounded">MOCK_MODE = false</code> in <code className="bg-amber-100 px-1 rounded">src/lib/billing.ts</code></li>
-                <li>Add <code className="bg-amber-100 px-1 rounded">NEXT_PUBLIC_FLUTTERWAVE_PUBLIC_KEY</code> to <code className="bg-amber-100 px-1 rounded">.env.local</code></li>
-                <li>Create <code className="bg-amber-100 px-1 rounded">src/app/api/billing/verify/route.ts</code> for server-side verification</li>
+              <p style={{ color: "#fb923c", fontWeight: 700, fontSize: 13, margin: "0 0 6px" }}>Ready to go live?</p>
+              <p style={{ color: "#fb923c80", fontSize: 12, margin: "0 0 10px" }}>Running in demo mode — no real charges are made. To accept real payments:</p>
+              <ol style={{ color: "#fb923c80", fontSize: 11, paddingLeft: 16, margin: 0 }}>
+                {[
+                  "Sign up at flutterwave.com and complete KYB verification",
+                  "Get your live API keys from the Flutterwave dashboard",
+                  "Set MOCK_MODE = false in src/lib/billing.ts",
+                  "Add NEXT_PUBLIC_FLUTTERWAVE_PUBLIC_KEY to .env.local",
+                ].map((step, i) => (
+                  <li key={i} style={{ marginBottom: 4 }}>{step}</li>
+                ))}
               </ol>
             </div>
           </div>
