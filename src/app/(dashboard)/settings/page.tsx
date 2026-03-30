@@ -1,10 +1,5 @@
 "use client";
 
-/**
- * Slipdesk — Settings Page (Dark Theme)
- * Place at: src/app/(dashboard)/settings/page.tsx
- */
-
 import { useState, useEffect } from "react";
 import {
   Save, AlertTriangle, CheckCircle2, Building2,
@@ -14,12 +9,10 @@ import { createClient } from "@/lib/supabase/client";
 import { useApp, type CompanyProfile, EMPTY_COMPANY } from "@/context/AppContext";
 import LogoUploader from "@/components/LogoUploader";
 
-// ─── Shared input styles ──────────────────────────────────────────────────────
-
 const inputStyle: React.CSSProperties = {
   width: "100%", padding: "10px 13px",
-  background: "#071525", border: "1px solid #1e3a5f",
-  borderRadius: 9, color: "#e2e8f0", fontSize: 13,
+  background: "var(--background)", border: "1px solid var(--border)",
+  borderRadius: 9, color: "var(--foreground)", fontSize: 13,
   fontFamily: "'DM Sans',sans-serif", outline: "none",
   boxSizing: "border-box", transition: "border-color 0.2s",
 };
@@ -35,7 +28,7 @@ function Inp({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
       <label style={{
-        fontSize: 11, fontWeight: 600, color: "#334155",
+        fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)",
         letterSpacing: "0.06em", textTransform: "uppercase",
         fontFamily: "'DM Mono',monospace",
       }}>{label}</label>
@@ -44,8 +37,8 @@ function Inp({
           type={type} value={value} placeholder={placeholder}
           onChange={(e) => onChange(e.target.value)}
           style={{ ...inputStyle, paddingRight: rightSlot ? 42 : 13 }}
-          onFocus={(e) => { e.target.style.borderColor = "#50C87870"; }}
-          onBlur={(e)  => { e.target.style.borderColor = "#1e3a5f"; }}
+          onFocus={(e) => { e.target.style.borderColor = "var(--primary)"; }}
+          onBlur={(e)  => { e.target.style.borderColor = "var(--border)"; }}
         />
         {rightSlot && (
           <div style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)" }}>
@@ -61,18 +54,18 @@ function Inp({
 function SectionCard({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
   return (
     <div style={{
-      background: "#0d1f35", border: "1px solid #1e3a5f",
+      background: "var(--card)", border: "1px solid var(--border)",
       borderRadius: 16, padding: "24px", display: "flex", flexDirection: "column", gap: 18,
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{
           width: 32, height: 32, borderRadius: 10,
-          background: "#50C87820", border: "1px solid #50C87840",
+          background: "color-mix(in oklch, var(--primary) 20%, transparent)", border: "1px solid color-mix(in oklch, var(--primary) 40%, transparent)",
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
           {icon}
         </div>
-        <span style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 15 }}>{title}</span>
+        <span style={{ color: "var(--foreground)", fontWeight: 700, fontSize: 15 }}>{title}</span>
       </div>
       {children}
     </div>
@@ -84,15 +77,15 @@ function Alert({ type, message }: { type: "success" | "error"; message: string }
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: 10,
-      background: isSuccess ? "#50C87812" : "#f8717112",
-      border: `1px solid ${isSuccess ? "#50C87830" : "#f8717130"}`,
+      background: isSuccess ? "color-mix(in oklch, var(--primary) 12%, transparent)" : "color-mix(in oklch, var(--destructive) 12%, transparent)",
+      border: `1px solid ${isSuccess ? "color-mix(in oklch, var(--primary) 30%, transparent)" : "color-mix(in oklch, var(--destructive) 30%, transparent)"}`,
       borderRadius: 10, padding: "11px 14px",
     }}>
       {isSuccess
-        ? <CheckCircle2 size={14} color="#50C878"/>
-        : <AlertTriangle size={14} color="#f87171"/>
+        ? <CheckCircle2 size={14} color="var(--primary)"/>
+        : <AlertTriangle size={14} color="var(--destructive)"/>
       }
-      <p style={{ color: isSuccess ? "#50C878" : "#f87171", fontSize: 13, margin: 0 }}>{message}</p>
+      <p style={{ color: isSuccess ? "var(--primary)" : "var(--destructive)", fontSize: 13, margin: 0 }}>{message}</p>
     </div>
   );
 }
@@ -102,8 +95,6 @@ const PW_RULES = [
   { label: "One uppercase letter",  test: (p: string) => /[A-Z]/.test(p) },
   { label: "One number",            test: (p: string) => /[0-9]/.test(p) },
 ];
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
   const { company, setCompany } = useApp();
@@ -169,24 +160,23 @@ export default function SettingsPage() {
   const pwMatch  = newPassword === confirmPassword && confirmPassword.length > 0;
 
   return (
-    <div style={{ padding: "32px", minHeight: "100vh", background: "#071525", fontFamily: "'DM Sans',sans-serif" }}>
+    <div style={{ padding: "32px", minHeight: "100vh", background: "var(--background)", fontFamily: "'DM Sans',sans-serif" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500;600&display=swap');
         @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
         input[type=date]::-webkit-calendar-picker-indicator{filter:invert(0.4);cursor:pointer}
       `}</style>
 
-      {/* Header */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 28, flexWrap: "wrap", gap: 12, animation: "fadeUp 0.3s ease" }}>
         <div>
-          <h1 style={{ color: "#f1f5f9", fontSize: 26, fontWeight: 800, margin: 0, letterSpacing: "-0.02em" }}>Settings</h1>
-          <p style={{ color: "#334155", fontSize: 13, marginTop: 5, fontFamily: "'DM Mono',monospace" }}>Company profile & account</p>
+          <h1 style={{ color: "var(--foreground)", fontSize: 26, fontWeight: 800, margin: 0, letterSpacing: "-0.02em" }}>Settings</h1>
+          <p style={{ color: "var(--muted-foreground)", fontSize: 13, marginTop: 5, fontFamily: "'DM Mono',monospace" }}>Company profile & account</p>
         </div>
         <button onClick={handleSave} disabled={saving || !dirty} style={{
           display: "flex", alignItems: "center", gap: 7,
           padding: "10px 18px", borderRadius: 11, border: "none",
-          background: saving || !dirty ? "#50C87830" : "#50C878",
-          color: "#002147", fontWeight: 700, fontSize: 13,
+          background: saving || !dirty ? "color-mix(in oklch, var(--primary) 30%, transparent)" : "var(--primary)",
+          color: "var(--primary-foreground)", fontWeight: 700, fontSize: 13,
           cursor: saving || !dirty ? "not-allowed" : "pointer", transition: "all 0.15s",
         }}>
           {saving ? <><Loader size={13} style={{ animation: "spin 1s linear infinite" }}/> Saving…</> : <><Save size={13}/> Save Changes</>}
@@ -195,14 +185,12 @@ export default function SettingsPage() {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 680 }}>
 
-        {/* Global alerts */}
         {saved  && <div style={{ animation: "fadeUp 0.2s ease" }}><Alert type="success" message="Changes saved successfully."/></div>}
         {error  && <div style={{ animation: "fadeUp 0.2s ease" }}><Alert type="error"   message={error}/></div>}
 
-        {/* Company Logo */}
         <div style={{ animation: "fadeUp 0.35s ease 0.05s both" }}>
-          <SectionCard title="Company Logo" icon={<Building2 size={15} color="#50C878"/>}>
-            <p style={{ color: "#334155", fontSize: 12, margin: 0 }}>
+          <SectionCard title="Company Logo" icon={<Building2 size={15} color="var(--primary)"/>}>
+            <p style={{ color: "var(--muted-foreground)", fontSize: 12, margin: 0 }}>
               Appears on all payslips and PDFs. PNG, JPG, SVG or WebP · max 2 MB.
             </p>
             <LogoUploader
@@ -212,9 +200,8 @@ export default function SettingsPage() {
           </SectionCard>
         </div>
 
-        {/* Company Details */}
         <div style={{ animation: "fadeUp 0.4s ease 0.1s both" }}>
-          <SectionCard title="Company Details" icon={<Building2 size={15} color="#50C878"/>}>
+          <SectionCard title="Company Details" icon={<Building2 size={15} color="var(--primary)"/>}>
             <Inp
               label="Company Name *"
               value={form.name}
@@ -234,8 +221,8 @@ export default function SettingsPage() {
               <button onClick={handleSave} disabled={saving} style={{
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
                 padding: "12px", borderRadius: 11, border: "none",
-                background: saving ? "#50C87830" : "#50C878",
-                color: "#002147", fontWeight: 700, fontSize: 13,
+                background: saving ? "color-mix(in oklch, var(--primary) 30%, transparent)" : "var(--primary)",
+                color: "var(--primary-foreground)", fontWeight: 700, fontSize: 13,
                 cursor: saving ? "not-allowed" : "pointer", transition: "all 0.15s",
               }}>
                 {saving ? <><Loader size={13} style={{ animation: "spin 1s linear infinite" }}/> Saving…</> : <><Save size={13}/> Save Changes</>}
@@ -244,9 +231,8 @@ export default function SettingsPage() {
           </SectionCard>
         </div>
 
-        {/* Change Password */}
         <div style={{ animation: "fadeUp 0.45s ease 0.15s both" }}>
-          <SectionCard title="Change Password" icon={<Lock size={15} color="#50C878"/>}>
+          <SectionCard title="Change Password" icon={<Lock size={15} color="var(--primary)"/>}>
             {pwSaved && <Alert type="success" message="Password updated successfully."/>}
             {pwError && <Alert type="error"   message={pwError}/>}
 
@@ -258,7 +244,7 @@ export default function SettingsPage() {
               type={showNewPw ? "text" : "password"}
               rightSlot={
                 <button type="button" onClick={() => setShowNewPw((v) => !v)} style={{
-                  background: "none", border: "none", cursor: "pointer", color: "#334155",
+                  background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)",
                   display: "flex", alignItems: "center", padding: 0,
                 }}>
                   {showNewPw ? <EyeOff size={15}/> : <Eye size={15}/>}
@@ -270,10 +256,10 @@ export default function SettingsPage() {
                     <div key={r.label} style={{ display: "flex", alignItems: "center", gap: 7 }}>
                       <div style={{
                         width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
-                        background: r.test(newPassword) ? "#50C878" : "#334155",
+                        background: r.test(newPassword) ? "var(--primary)" : "var(--muted-foreground)",
                         transition: "background 0.2s",
                       }}/>
-                      <span style={{ fontSize: 11, color: r.test(newPassword) ? "#50C878" : "#334155", fontFamily: "'DM Mono',monospace" }}>
+                      <span style={{ fontSize: 11, color: r.test(newPassword) ? "var(--primary)" : "var(--muted-foreground)", fontFamily: "'DM Mono',monospace" }}>
                         {r.label}
                       </span>
                     </div>
@@ -290,14 +276,14 @@ export default function SettingsPage() {
               type={showConfirmPw ? "text" : "password"}
               rightSlot={
                 <button type="button" onClick={() => setShowConfirmPw((v) => !v)} style={{
-                  background: "none", border: "none", cursor: "pointer", color: "#334155",
+                  background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)",
                   display: "flex", alignItems: "center", padding: 0,
                 }}>
                   {showConfirmPw ? <EyeOff size={15}/> : <Eye size={15}/>}
                 </button>
               }
               extra={confirmPassword.length > 0 && !pwMatch && (
-                <p style={{ fontSize: 11, color: "#f87171", margin: "4px 0 0", fontFamily: "'DM Mono',monospace" }}>
+                <p style={{ fontSize: 11, color: "var(--destructive)", margin: "4px 0 0", fontFamily: "'DM Mono',monospace" }}>
                   Passwords don&apos;t match.
                 </p>
               )}
@@ -309,8 +295,8 @@ export default function SettingsPage() {
               style={{
                 display: "flex", alignItems: "center", gap: 7,
                 padding: "11px 18px", borderRadius: 11, border: "none",
-                background: pwSaving || !pwStrong || !pwMatch ? "#50C87830" : "#50C878",
-                color: "#002147", fontWeight: 700, fontSize: 13,
+                background: pwSaving || !pwStrong || !pwMatch ? "color-mix(in oklch, var(--primary) 30%, transparent)" : "var(--primary)",
+                color: "var(--primary-foreground)", fontWeight: 700, fontSize: 13,
                 cursor: pwSaving || !pwStrong || !pwMatch ? "not-allowed" : "pointer",
                 transition: "all 0.15s", width: "fit-content",
               }}
@@ -323,31 +309,30 @@ export default function SettingsPage() {
           </SectionCard>
         </div>
 
-        {/* Danger zone */}
         <div style={{ animation: "fadeUp 0.5s ease 0.2s both" }}>
-          <div style={{ background: "#0d1f35", border: "1px solid #f8717130", borderRadius: 16, padding: "24px" }}>
+          <div style={{ background: "var(--card)", border: "1px solid color-mix(in oklch, var(--destructive) 30%, transparent)", borderRadius: 16, padding: "24px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
               <div style={{
                 width: 32, height: 32, borderRadius: 10,
-                background: "#f8717115", border: "1px solid #f8717130",
+                background: "color-mix(in oklch, var(--destructive) 15%, transparent)", border: "1px solid color-mix(in oklch, var(--destructive) 30%, transparent)",
                 display: "flex", alignItems: "center", justifyContent: "center",
               }}>
-                <AlertTriangle size={15} color="#f87171"/>
+                <AlertTriangle size={15} color="var(--destructive)"/>
               </div>
-              <span style={{ color: "#f87171", fontWeight: 700, fontSize: 15 }}>Danger Zone</span>
+              <span style={{ color: "var(--destructive)", fontWeight: 700, fontSize: 15 }}>Danger Zone</span>
             </div>
-            <p style={{ color: "#334155", fontSize: 12, margin: "0 0 14px" }}>
+            <p style={{ color: "var(--muted-foreground)", fontSize: 12, margin: "0 0 14px" }}>
               Reset the company profile to blank. Click Save Changes after to persist.
             </p>
             <button onClick={handleReset} style={{
               display: "flex", alignItems: "center", gap: 7,
               padding: "9px 16px", borderRadius: 10,
-              background: "#f8717112", border: "1px solid #f8717130",
-              color: "#f87171", fontSize: 13, fontWeight: 600, cursor: "pointer",
+              background: "color-mix(in oklch, var(--destructive) 12%, transparent)", border: "1px solid color-mix(in oklch, var(--destructive) 30%, transparent)",
+              color: "var(--destructive)", fontSize: 13, fontWeight: 600, cursor: "pointer",
               transition: "all 0.15s",
             }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "#f8717120"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "#f8717112"; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in oklch, var(--destructive) 20%, transparent)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "color-mix(in oklch, var(--destructive) 12%, transparent)"; }}
             >
               <RotateCcw size={13}/> Reset Company Profile
             </button>

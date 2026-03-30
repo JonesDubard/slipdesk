@@ -1,19 +1,5 @@
 "use client";
 
-/**
- * Slipdesk — Payroll Page (UI Refresh)
- * Place at: src/app/(dashboard)/payroll/page.tsx
- *
- * UI changes in this version (all logic preserved from original):
- *  - Setup screen redesigned: cleaner form card, employee preview strip
- *  - Status stepper is larger + pill-shaped with icons
- *  - Table header bar is a richer navy gradient with run stats inline
- *  - Table rows have tighter visual rhythm and color-coded columns
- *  - Summary footer is a standalone bar with USD-equivalent totals
- *  - History cards show a mini bar chart per run
- *  - All original fixes (FIX 1-5) fully preserved
- */
-
 import {
   useReducer, useMemo, useState, useCallback, useEffect, useRef,
 } from "react";
@@ -88,14 +74,14 @@ function bulkRowToPayRunLine(r: BulkRow, exchangeRate: number, realId?: string):
     regularHours: r.regularHours, overtimeHours: r.overtimeHours, holidayHours: r.holidayHours,
     additionalEarnings: emp.allowances ?? 0,
     deductions:     r.deductions ?? 0,
-    deductionItems: r.deductionItems ?? [],   // ← NEW
+    deductionItems: r.deductionItems ?? [],
     exchangeRate, calc: null,
     paymentMethod: emp.paymentMethod,
     bankName: emp.bankName, accountNumber: emp.accountNumber, mobileNumber: emp.momoNumber,
   };
 }
 
-// ─── FIX 1: recalcLine ────────────────────────────────────────────────────────
+// ─── recalcLine ────────────────────────────────────────────────────────────────
 
 function recalcLine(line:PayRunLine):PayRunLine{
   try{
@@ -143,9 +129,13 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
   const {calc,currency}=line;
   if(!calc) throw new Error("No calculation data");
   const sym=currency==="USD"?"$":"L$";
-  const NAVY="#002147",EMERALD="#50C878",SLATE="#64748b",LIGHT="#f8fafc",BORDER="#e2e8f0";
+  const NAVY="color-mix(in oklch, var(--primary) 30%, black)";
+  const EMERALD="var(--primary)";
+  const SLATE="var(--muted-foreground)";
+  const LIGHT="color-mix(in oklch, var(--background) 10%, white)";
+  const BORDER="var(--border)";
   const S=StyleSheet.create({
-    page:{fontFamily:"Helvetica",fontSize:9,color:"#1e293b",backgroundColor:"#fff",paddingHorizontal:36,paddingVertical:32},
+    page:{fontFamily:"Helvetica",fontSize:9,color:"var(--foreground)",backgroundColor:"var(--background)",paddingHorizontal:36,paddingVertical:32},
     header:{flexDirection:"row",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,paddingBottom:16,borderBottomWidth:2,borderBottomColor:NAVY},
     coLeft:{flexDirection:"row",alignItems:"center",gap:10},logo:{width:48,height:48,objectFit:"contain"},
     coName:{fontSize:16,fontFamily:"Helvetica-Bold",color:NAVY,marginBottom:3},
@@ -155,7 +145,7 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
     infoGrid:{flexDirection:"row",gap:12,marginBottom:18},
     infoBox:{flex:1,backgroundColor:LIGHT,borderRadius:6,padding:10,borderWidth:1,borderColor:BORDER},
     infoLbl:{fontSize:7,fontFamily:"Helvetica-Bold",color:SLATE,textTransform:"uppercase",letterSpacing:0.5,marginBottom:2},
-    infoVal:{fontSize:9,color:NAVY,fontFamily:"Helvetica-Bold"},infoSub:{fontSize:8,color:"#374151"},
+    infoVal:{fontSize:9,color:NAVY,fontFamily:"Helvetica-Bold"},infoSub:{fontSize:8,color:"color-mix(in oklch, var(--foreground) 60%, transparent)"},
     secTitle:{fontSize:8,fontFamily:"Helvetica-Bold",color:SLATE,textTransform:"uppercase",letterSpacing:0.8,marginBottom:6,marginTop:14},
     table:{borderWidth:1,borderColor:BORDER,borderRadius:6,overflow:"hidden"},
     tHead:{flexDirection:"row",backgroundColor:NAVY,paddingHorizontal:10,paddingVertical:6},
@@ -165,10 +155,10 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
     tRow:{flexDirection:"row",paddingHorizontal:10,paddingVertical:8,borderTopWidth:1,borderTopColor:BORDER,alignItems:"flex-start"},
     tAlt:{backgroundColor:LIGHT},
     tdDesc:{width:140,fontSize:8.5,fontFamily:"Helvetica-Bold",color:NAVY},
-    tdNotes:{flex:1,fontSize:8,color:"#374151",lineHeight:1.6},
-    tdAmt:{width:90,fontSize:8.5,color:"#374151",textAlign:"right"},
+    tdNotes:{flex:1,fontSize:8,color:"color-mix(in oklch, var(--foreground) 60%, transparent)",lineHeight:1.6},
+    tdAmt:{width:90,fontSize:8.5,color:"color-mix(in oklch, var(--foreground) 60%, transparent)",textAlign:"right"},
     tdAmtBold:{width:90,fontSize:8.5,fontFamily:"Helvetica-Bold",color:NAVY,textAlign:"right"},
-    tdRed:{width:90,fontSize:8.5,color:"#dc2626",textAlign:"right"},
+    tdRed:{width:90,fontSize:8.5,color:"var(--destructive)",textAlign:"right"},
     tdNote:{flex:1,fontSize:7.5,color:SLATE,lineHeight:1.5},
     erBox:{marginTop:10,backgroundColor:LIGHT,borderRadius:6,padding:8,borderWidth:1,borderColor:BORDER},
     erLabel:{fontSize:7,fontFamily:"Helvetica-Bold",color:SLATE,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4},
@@ -177,22 +167,22 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
     netBox:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",backgroundColor:NAVY,borderRadius:6,paddingHorizontal:14,paddingVertical:10,marginTop:12},
     netLabel:{fontSize:10,fontFamily:"Helvetica-Bold",color:"#fff"},
     netValue:{fontSize:16,fontFamily:"Helvetica-Bold",color:EMERALD,textAlign:"right"},
-    netWords:{backgroundColor:"#f8fafc",borderRadius:6,paddingHorizontal:12,paddingVertical:7,marginTop:6,borderWidth:1,borderColor:BORDER,flexDirection:"row",alignItems:"center",gap:6},
+    netWords:{backgroundColor:LIGHT,borderRadius:6,paddingHorizontal:12,paddingVertical:7,marginTop:6,borderWidth:1,borderColor:BORDER,flexDirection:"row",alignItems:"center",gap:6},
     netWordsLbl:{fontSize:7,fontFamily:"Helvetica-Bold",color:SLATE,textTransform:"uppercase",letterSpacing:0.4},
     netWordsTxt:{fontSize:8,color:NAVY,fontFamily:"Helvetica-Bold",flex:1},
-    payBox:{marginTop:10,backgroundColor:"#f0fdf4",borderRadius:6,padding:8,borderWidth:1,borderColor:"#86efac"},
-    payLbl:{fontSize:7,fontFamily:"Helvetica-Bold",color:"#166534",textTransform:"uppercase",letterSpacing:0.5,marginBottom:4},
+    payBox:{marginTop:10,backgroundColor:"color-mix(in oklch, var(--primary) 15%, transparent)",borderRadius:6,padding:8,borderWidth:1,borderColor:"color-mix(in oklch, var(--primary) 50%, transparent)"},
+    payLbl:{fontSize:7,fontFamily:"Helvetica-Bold",color:"color-mix(in oklch, var(--primary) 60%, black)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:4},
     payRow:{flexDirection:"row",gap:20,flexWrap:"wrap"},payItem:{flex:1,minWidth:120},
-    payItemLbl:{fontSize:7,color:"#166534",marginBottom:1},payItemVal:{fontSize:8.5,fontFamily:"Helvetica-Bold",color:NAVY},
+    payItemLbl:{fontSize:7,color:"color-mix(in oklch, var(--primary) 60%, black)",marginBottom:1},payItemVal:{fontSize:8.5,fontFamily:"Helvetica-Bold",color:NAVY},
     compRow:{flexDirection:"row",gap:8,marginTop:10},
-    compBadge:{flex:1,flexDirection:"row",alignItems:"center",gap:4,backgroundColor:"#f0fdf4",borderWidth:1,borderColor:"#86efac",borderRadius:4,paddingHorizontal:8,paddingVertical:5},
+    compBadge:{flex:1,flexDirection:"row",alignItems:"center",gap:4,backgroundColor:"color-mix(in oklch, var(--primary) 15%, transparent)",borderWidth:1,borderColor:"color-mix(in oklch, var(--primary) 50%, transparent)",borderRadius:4,paddingHorizontal:8,paddingVertical:5},
     compDot:{width:5,height:5,borderRadius:3,backgroundColor:EMERALD},
-    compText:{fontSize:7.5,color:"#166534",fontFamily:"Helvetica-Bold"},
+    compText:{fontSize:7.5,color:"color-mix(in oklch, var(--primary) 60%, black)",fontFamily:"Helvetica-Bold"},
     sigSection:{flexDirection:"row",gap:30,marginTop:24,paddingTop:16,borderTopWidth:1,borderTopColor:BORDER},
-    sigBox:{flex:1},sigLine:{borderBottomWidth:1,borderBottomColor:"#cbd5e1",marginBottom:4,height:20},
+    sigBox:{flex:1},sigLine:{borderBottomWidth:1,borderBottomColor:"color-mix(in oklch, var(--foreground) 20%, transparent)",marginBottom:4,height:20},
     sigLabel:{fontSize:7.5,color:SLATE,textAlign:"center"},
     footer:{marginTop:16,paddingTop:10,borderTopWidth:1,borderTopColor:BORDER,flexDirection:"row",justifyContent:"space-between",alignItems:"center"},
-    footerTxt:{fontSize:7,color:"#94a3b8"},footerBrand:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:NAVY},
+    footerTxt:{fontSize:7,color:"color-mix(in oklch, var(--foreground) 60%, transparent)"},footerBrand:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:NAVY},
   });
   const earningsRows=[
     {label:"Regular Salary",note:`${line.regularHours} hrs × ${sym}${line.rate.toFixed(2)}/hr`,amount:calc.regularSalary},
@@ -265,13 +255,13 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
         <View style={S.table}>
           <View style={S.tHead}><Text style={S.thDesc}>Description</Text><Text style={S.thNotes}>Notes</Text><Text style={S.thAmt}>Amount ({currency})</Text></View>
           {earningsRows.map((row,i)=>(<View key={row.label} style={[S.tRow,i%2===1?S.tAlt:{}]}><Text style={S.tdDesc}>{row.label}</Text><Text style={S.tdNotes}>{row.note}</Text><Text style={S.tdAmt}>{fmtMoney(row.amount,sym)}</Text></View>))}
-          <View style={[S.tRow,{backgroundColor:"#f0fdf4"}]}><Text style={S.tdDesc}>GROSS PAY</Text><Text style={S.tdNotes}>{" "}</Text><Text style={S.tdAmtBold}>{fmtMoney(calc.grossPay,sym)}</Text></View>
+          <View style={[S.tRow,{backgroundColor:"color-mix(in oklch, var(--primary) 15%, transparent)"}]}><Text style={S.tdDesc}>GROSS PAY</Text><Text style={S.tdNotes}>{" "}</Text><Text style={S.tdAmtBold}>{fmtMoney(calc.grossPay,sym)}</Text></View>
         </View>
         <Text style={S.secTitle}>Deductions</Text>
         <View style={S.table}>
           <View style={S.tHead}><Text style={S.thDesc}>Description</Text><Text style={S.thNotes}>Basis</Text><Text style={S.thAmt}>Amount ({currency})</Text></View>
           {deductionRows.map((row,i)=>(<View key={row.label} style={[S.tRow,i%2===1?S.tAlt:{}]}><Text style={S.tdDesc}>{row.label}</Text><Text style={S.tdNote}>{row.note}</Text><Text style={S.tdRed}>({fmtMoney(row.amount,sym)})</Text></View>))}
-          <View style={[S.tRow,{backgroundColor:"#fff7ed"}]}><Text style={S.tdDesc}>TOTAL DEDUCTIONS</Text><Text style={S.tdNotes}>{" "}</Text><Text style={[S.tdRed,{fontFamily:"Helvetica-Bold"}]}>({fmtMoney(calc.totalDeductions,sym)})</Text></View>
+          <View style={[S.tRow,{backgroundColor:"color-mix(in oklch, var(--warning) 15%, transparent)"}]}><Text style={S.tdDesc}>TOTAL DEDUCTIONS</Text><Text style={S.tdNotes}>{" "}</Text><Text style={[S.tdRed,{fontFamily:"Helvetica-Bold"}]}>({fmtMoney(calc.totalDeductions,sym)})</Text></View>
         </View>
         <View style={S.erBox}>
           <Text style={S.erLabel}>Employer Contributions (not deducted from employee)</Text>
@@ -325,8 +315,8 @@ function DownloadSlipButton({line,periodLabel,payDate,company}:{line:PayRunLine;
   }
   return(
     <button onClick={handle} disabled={loading||!line.calc}
-      style={{display:"flex",alignItems:"center",gap:4,padding:"5px 9px",borderRadius:7,border:"1px solid #1e3a5f",background:"transparent",color:line.calc?"#50C878":"#334155",fontSize:11,fontWeight:600,cursor:line.calc?"pointer":"not-allowed",transition:"all 0.15s"}}
-      onMouseEnter={e=>{if(line.calc){e.currentTarget.style.background="#50C87815";}}}
+      style={{display:"flex",alignItems:"center",gap:4,padding:"5px 9px",borderRadius:7,border:"1px solid var(--border)",background:"transparent",color:line.calc?"var(--primary)":"var(--muted-foreground)",fontSize:11,fontWeight:600,cursor:line.calc?"pointer":"not-allowed",transition:"all 0.15s"}}
+      onMouseEnter={e=>{if(line.calc){e.currentTarget.style.background="color-mix(in oklch, var(--primary) 15%, transparent)";}}}
       onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
       {loading?<Loader style={{animation:"spin 1s linear infinite"}} size={12}/>:<FileDown size={12}/>}
       PDF
@@ -355,7 +345,7 @@ function BulkDownloadButton({lines,periodLabel,payDate,company}:{lines:PayRunLin
   }
   return(
     <button onClick={handleAll} disabled={loading||!valid.length}
-      style={{display:"flex",alignItems:"center",gap:7,padding:"9px 16px",borderRadius:10,cursor:"pointer",background:valid.length?"#50C878":"#50C87840",border:"none",color:"#002147",fontSize:12,fontWeight:700,transition:"all 0.15s"}}
+      style={{display:"flex",alignItems:"center",gap:7,padding:"9px 16px",borderRadius:10,cursor:"pointer",background:valid.length?"var(--primary)":"color-mix(in oklch, var(--primary) 45%, transparent)",border:"none",color:"var(--primary-foreground)",fontSize:12,fontWeight:700,transition:"all 0.15s"}}
       onMouseEnter={e=>{if(valid.length&&!loading) e.currentTarget.style.opacity="0.88";}}
       onMouseLeave={e=>{e.currentTarget.style.opacity="1";}}>
       {loading?<><Loader style={{animation:"spin 1s linear infinite"}} size={13}/>{progress.total>0?`${progress.done}/${progress.total}…`:"Generating…"}</> : <><Download size={13}/>All Payslips ({valid.length})</>}
@@ -363,7 +353,7 @@ function BulkDownloadButton({lines,periodLabel,payDate,company}:{lines:PayRunLin
   );
 }
 
-// ─── FIX 5: EditableCell ──────────────────────────────────────────────────────
+// ─── EditableCell ──────────────────────────────────────────────────────────────
 
 function EditableCell({value,lineId,field,isLocked,dispatch,prefix="",decimals=2}:{
   value:number;lineId:string;field:keyof PayRunLine;isLocked:boolean;
@@ -381,19 +371,19 @@ function EditableCell({value,lineId,field,isLocked,dispatch,prefix="",decimals=2
     setEditing(false);
   },[local,lineId,field,value,dispatch]);
 
-  if(isLocked) return <span style={{display:"block",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,color:"#475569"}}>{prefix}{value.toFixed(decimals)}</span>;
+  if(isLocked) return <span style={{display:"block",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,color:"var(--muted-foreground)"}}>{prefix}{value.toFixed(decimals)}</span>;
   if(editing) return(
     <input autoFocus value={local}
-      style={{width:"100%",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,background:"#50C87815",border:"1px solid #50C878",borderRadius:6,padding:"3px 6px",color:"#e2e8f0",outline:"none"}}
+      style={{width:"100%",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,background:"color-mix(in oklch, var(--primary) 15%, transparent)",border:"1px solid var(--primary)",borderRadius:6,padding:"3px 6px",color:"var(--foreground)",outline:"none"}}
       onChange={e=>setLocal(e.target.value)}
       onBlur={commit}
       onKeyDown={e=>{if(e.key==="Enter") commit(); if(e.key==="Escape"){setLocal(String(value));setEditing(false);}}}/>
   );
   return(
     <button onClick={()=>{setLocal(String(value));setEditing(true);}}
-      style={{width:"100%",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,color:"#94a3b8",background:"transparent",border:"1px solid transparent",borderRadius:6,padding:"3px 6px",cursor:"text",transition:"all 0.12s"}}
-      onMouseEnter={e=>{e.currentTarget.style.background="#50C87812";e.currentTarget.style.color="#50C878";e.currentTarget.style.borderColor="#50C87840";}}
-      onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="#94a3b8";e.currentTarget.style.borderColor="transparent";}}>
+      style={{width:"100%",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,color:"var(--muted-foreground)",background:"transparent",border:"1px solid transparent",borderRadius:6,padding:"3px 6px",cursor:"text",transition:"all 0.12s"}}
+      onMouseEnter={e=>{e.currentTarget.style.background="color-mix(in oklch, var(--primary) 12%, transparent)";e.currentTarget.style.color="var(--primary)";e.currentTarget.style.borderColor="color-mix(in oklch, var(--primary) 40%, transparent)";}}
+      onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="var(--muted-foreground)";e.currentTarget.style.borderColor="transparent";}}>
       {prefix}{value.toFixed(decimals)}
     </button>
   );
@@ -409,18 +399,18 @@ function RunSummary({lines,exchangeRate}:{lines:PayRunLine[];exchangeRate:number
   },{gross:0,nasscorp:0,erNasc:0,tax:0,net:0}),[lines,exchangeRate]);
   const f=(n:number)=>`$${n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
   return(
-    <div style={{background:"#071525",border:"1px solid #1e3a5f",borderTop:"none",borderRadius:"0 0 16px 16px",padding:"14px 24px"}}>
+    <div style={{background:"var(--background)",border:"1px solid var(--border)",borderTop:"none",borderRadius:"0 0 16px 16px",padding:"14px 24px"}}>
       <div style={{display:"flex",alignItems:"center",gap:32,flexWrap:"wrap"}}>
-        <span style={{color:"#1e3a5f",fontSize:10,fontFamily:"'DM Mono',monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginRight:"auto"}}>USD Equivalent Totals</span>
+        <span style={{color:"var(--border)",fontSize:10,fontFamily:"'DM Mono',monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginRight:"auto"}}>USD Equivalent Totals</span>
         {[
-          {label:"Gross",value:f(t.gross),color:"#e2e8f0"},
-          {label:"NASSCORP EE",value:f(t.nasscorp),color:"#fb923c"},
-          {label:"NASSCORP ER",value:f(t.erNasc),color:"#f97316"},
-          {label:"Income Tax",value:f(t.tax),color:"#f87171"},
-          {label:"Net Pay",value:f(t.net),color:"#50C878"},
+          {label:"Gross",value:f(t.gross),color:"var(--foreground)"},
+          {label:"NASSCORP EE",value:f(t.nasscorp),color:"var(--warning)"},
+          {label:"NASSCORP ER",value:f(t.erNasc),color:"var(--warning)"},
+          {label:"Income Tax",value:f(t.tax),color:"var(--destructive)"},
+          {label:"Net Pay",value:f(t.net),color:"var(--primary)"},
         ].map(item=>(
           <div key={item.label} style={{textAlign:"center"}}>
-            <p style={{fontSize:10,color:"#334155",fontFamily:"'DM Mono',monospace",textTransform:"uppercase",letterSpacing:"0.06em",margin:"0 0 3px"}}>{item.label}</p>
+            <p style={{fontSize:10,color:"var(--muted-foreground)",fontFamily:"'DM Mono',monospace",textTransform:"uppercase",letterSpacing:"0.06em",margin:"0 0 3px"}}>{item.label}</p>
             <p style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:item.color,margin:0}}>{item.value}</p>
           </div>
         ))}
@@ -448,14 +438,14 @@ function StatusStepper({current,onAdvance,saving=false}:{current:RunStatus;onAdv
           return(
             <div key={step} style={{display:"flex",alignItems:"center",gap:4}}>
               <div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 14px",borderRadius:20,fontSize:12,fontWeight:700,
-                background:active?"#50C878":done?"#50C87820":"#071525",
-                color:active?"#002147":done?"#50C878":"#334155",
-                border:`1px solid ${active?"transparent":done?"#50C87840":"#1e3a5f"}`,
+                background:active?"var(--primary)":done?"color-mix(in oklch, var(--primary) 20%, transparent)":"var(--background)",
+                color:active?"var(--primary-foreground)":done?"var(--primary)":"var(--muted-foreground)",
+                border:`1px solid ${active?"transparent":done?"color-mix(in oklch, var(--primary) 40%, transparent)":"var(--border)"}`,
                 transition:"all 0.2s"}}>
                 {done?<CheckCircle2 size={12}/>:STATUS_ICONS[step]}
                 {STATUS_LABELS[step]}
               </div>
-              {i<STATUS_STEPS.length-1&&<ChevronRight size={12} color="#1e3a5f"/>}
+              {i<STATUS_STEPS.length-1&&<ChevronRight size={12} color="var(--border)"/>}
             </div>
           );
         })}
@@ -463,9 +453,9 @@ function StatusStepper({current,onAdvance,saving=false}:{current:RunStatus;onAdv
       {current!=="paid"&&(
         <button onClick={onAdvance} disabled={saving}
           style={{display:"flex",alignItems:"center",gap:7,padding:"9px 18px",borderRadius:10,cursor:saving?"not-allowed":"pointer",
-            background:"#002147",color:"#50C878",fontSize:12,fontWeight:700,border:"1px solid #1e3a5f",transition:"all 0.15s"}}
-          onMouseEnter={e=>{if(!saving){e.currentTarget.style.background="#50C878";e.currentTarget.style.color="#002147";}}}
-          onMouseLeave={e=>{e.currentTarget.style.background="#002147";e.currentTarget.style.color="#50C878";}}>
+            background:"color-mix(in oklch, var(--primary) 15%, var(--card))",color:"var(--primary)",fontSize:12,fontWeight:700,border:"1px solid var(--border)",transition:"all 0.15s"}}
+          onMouseEnter={e=>{if(!saving){e.currentTarget.style.background="var(--primary)";e.currentTarget.style.color="var(--primary-foreground)";}}}
+          onMouseLeave={e=>{e.currentTarget.style.background="color-mix(in oklch, var(--primary) 15%, var(--card))";e.currentTarget.style.color="var(--primary)";}}>
           {saving?<><Loader size={12} style={{animation:"spin 1s linear infinite"}}/> Saving…</>:<><Play size={12}/>{NEXT_LABELS[current]}</>}
         </button>
       )}
@@ -513,24 +503,24 @@ export default function PayrollPage(){
   const activeEmployees=employees.filter(e=>e.isActive);
 
   function handleStartRun() {
-  const rows: PayRunLine[] = activeEmployees.map(emp => ({
-    id: emp.id, employeeId: emp.id, employeeNumber: emp.employeeNumber,
-    fullName: emp.fullName, jobTitle: emp.jobTitle, department: emp.department,
-    currency: emp.currency, rate: emp.rate,
-    regularHours:  emp.pendingRegularHours  ?? emp.standardHours,
-    overtimeHours: emp.pendingOvertimeHours ?? 0,
-    holidayHours:  emp.pendingHolidayHours  ?? 0,
-    additionalEarnings: emp.allowances ?? 0,
-    deductions:     emp.pendingDeductions ?? 0,
-    deductionItems: [],   // ← NEW — manual runs start with no itemized deductions
-    exchangeRate, calc: null,
-    paymentMethod: emp.paymentMethod,
-    bankName: emp.bankName, accountNumber: emp.accountNumber,
-    mobileNumber: emp.momoNumber, mobileProvider: undefined,
-  }));
-  dispatch({ type: "SET_ROWS", rows });
-  setRunStarted(true);
-}
+    const rows: PayRunLine[] = activeEmployees.map(emp => ({
+      id: emp.id, employeeId: emp.id, employeeNumber: emp.employeeNumber,
+      fullName: emp.fullName, jobTitle: emp.jobTitle, department: emp.department,
+      currency: emp.currency, rate: emp.rate,
+      regularHours:  emp.pendingRegularHours  ?? emp.standardHours,
+      overtimeHours: emp.pendingOvertimeHours ?? 0,
+      holidayHours:  emp.pendingHolidayHours  ?? 0,
+      additionalEarnings: emp.allowances ?? 0,
+      deductions:     emp.pendingDeductions ?? 0,
+      deductionItems: [],
+      exchangeRate, calc: null,
+      paymentMethod: emp.paymentMethod,
+      bankName: emp.bankName, accountNumber: emp.accountNumber,
+      mobileNumber: emp.momoNumber, mobileProvider: undefined,
+    }));
+    dispatch({ type: "SET_ROWS", rows });
+    setRunStarted(true);
+  }
 
   async function advanceStatus(){
     const idx=STATUS_STEPS.indexOf(status);
@@ -600,19 +590,19 @@ export default function PayrollPage(){
   const col=createColumnHelper<PayRunLine>();
   const columns=useMemo(()=>[
     col.accessor("employeeNumber",{header:"#",size:64,
-      cell:c=><span style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"#334155"}}>{c.getValue()}</span>}),
+      cell:c=><span style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"var(--muted-foreground)"}}>{c.getValue()}</span>}),
     col.accessor("fullName",{header:"Employee",size:150,
       cell:c=>(
         <div>
-          <p style={{fontSize:13,fontWeight:600,color:"#e2e8f0",margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130}}>{c.getValue()}</p>
-          <p style={{fontSize:10,color:"#334155",margin:"2px 0 0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130}}>{c.row.original.department}</p>
+          <p style={{fontSize:13,fontWeight:600,color:"var(--foreground)",margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130}}>{c.getValue()}</p>
+          <p style={{fontSize:10,color:"var(--muted-foreground)",margin:"2px 0 0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130}}>{c.row.original.department}</p>
         </div>
       )}),
     col.accessor("currency",{header:"CCY",size:50,
       cell:c=>(
         <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:10,
-          background:c.getValue()==="USD"?"#1e3a5f":"#2a2a1a",
-          color:c.getValue()==="USD"?"#38bdf8":"#f59e0b"}}>
+          background:c.getValue()==="USD"?"color-mix(in oklch, var(--secondary) 30%, transparent)":"color-mix(in oklch, var(--warning) 20%, transparent)",
+          color:c.getValue()==="USD"?"var(--secondary)":"var(--warning)"}}>
           {c.getValue()}
         </span>
       )}),
@@ -631,29 +621,29 @@ export default function PayrollPage(){
     col.display({id:"gross",header:"Gross",size:90,
       cell:c=>{
         const sym=c.row.original.currency==="USD"?"$":"L$";
-        return <span style={{display:"block",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:700,color:"#e2e8f0"}}>{c.row.original.calc?`${sym}${c.row.original.calc.grossPay.toFixed(2)}`:"—"}</span>;
+        return <span style={{display:"block",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:700,color:"var(--foreground)"}}>{c.row.original.calc?`${sym}${c.row.original.calc.grossPay.toFixed(2)}`:"—"}</span>;
       }}),
     col.display({id:"tax",header:"Tax",size:80,
       cell:c=>{
         const sym=c.row.original.currency==="USD"?"$":"L$";
-        return <span style={{display:"block",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,color:"#f87171"}}>{c.row.original.calc?`${sym}${c.row.original.calc.Paye.taxInBase.toFixed(2)}`:"—"}</span>;
+        return <span style={{display:"block",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,color:"var(--destructive)"}}>{c.row.original.calc?`${sym}${c.row.original.calc.Paye.taxInBase.toFixed(2)}`:"—"}</span>;
       }}),
     col.display({id:"net",header:"Net Pay",size:96,
       cell:c=>{
         const sym=c.row.original.currency==="USD"?"$":"L$";
-        return <span style={{display:"block",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:800,color:"#50C878"}}>{c.row.original.calc?`${sym}${c.row.original.calc.netPay.toFixed(2)}`:"—"}</span>;
+        return <span style={{display:"block",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:800,color:"var(--primary)"}}>{c.row.original.calc?`${sym}${c.row.original.calc.netPay.toFixed(2)}`:"—"}</span>;
       }}),
     col.display({id:"slip",header:"",size:70,
       cell:c=><DownloadSlipButton line={c.row.original} periodLabel={periodLabel} payDate={payDate} company={pdfCompany}/>}),
     col.display({id:"warn",header:"",size:28,
       cell:c=>{
         const warnings=c.row.original.calc?.warnings??[];
-        if(!warnings.length) return <CheckCircle2 size={14} color="#50C87860" style={{margin:"0 auto",display:"block"}}/>;
+        if(!warnings.length) return <CheckCircle2 size={14} color="color-mix(in oklch, var(--primary) 60%, transparent)" style={{margin:"0 auto",display:"block"}}/>;
         return(
           <div style={{position:"relative"}} className="warn-group">
-            <AlertTriangle size={14} color="#fb923c" style={{cursor:"pointer",display:"block",margin:"0 auto"}}/>
-            <div style={{position:"absolute",right:0,top:20,zIndex:50,display:"none",width:240,background:"#0d2137",border:"1px solid #fb923c30",borderRadius:10,padding:10,boxShadow:"0 8px 24px #00000060"}} className="warn-tip">
-              {warnings.map((w,i)=><p key={i} style={{color:"#fb923c",fontSize:11,margin:"2px 0"}}>{w}</p>)}
+            <AlertTriangle size={14} color="var(--warning)" style={{cursor:"pointer",display:"block",margin:"0 auto"}}/>
+            <div style={{position:"absolute",right:0,top:20,zIndex:50,display:"none",width:240,background:"var(--card)",border:"1px solid color-mix(in oklch, var(--warning) 30%, transparent)",borderRadius:10,padding:10,boxShadow:"0 8px 24px color-mix(in oklch, var(--foreground) 30%, transparent)"}} className="warn-tip">
+              {warnings.map((w,i)=><p key={i} style={{color:"var(--warning)",fontSize:11,margin:"2px 0"}}>{w}</p>)}
             </div>
           </div>
         );
@@ -668,7 +658,7 @@ export default function PayrollPage(){
   if(!runStarted){
     const withHours=activeEmployees.filter(e=>(e.pendingOvertimeHours??0)>0||(e.pendingHolidayHours??0)>0).length;
     return(
-      <div style={{minHeight:"100vh",background:"#071525",padding:"32px",fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{minHeight:"100vh",background:"var(--background)",padding:"32px",fontFamily:"'DM Sans',sans-serif"}}>
         <style>{`
           @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500;600&display=swap');
           @keyframes spin{to{transform:rotate(360deg)}}
@@ -676,10 +666,9 @@ export default function PayrollPage(){
           input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         `}</style>
 
-        {/* Header */}
         <div style={{marginBottom:28,animation:"fadeUp 0.3s ease"}}>
-          <h1 style={{fontSize:26,fontWeight:800,color:"#f1f5f9",letterSpacing:"-0.02em",margin:0}}>Payroll</h1>
-          <p style={{color:"#334155",fontSize:13,marginTop:5}}>Configure and start a new pay run</p>
+          <h1 style={{fontSize:26,fontWeight:800,color:"var(--foreground)",letterSpacing:"-0.02em",margin:0}}>Payroll</h1>
+          <p style={{color:"var(--muted-foreground)",fontSize:13,marginTop:5}}>Configure and start a new pay run</p>
         </div>
 
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,maxWidth:920}}>
@@ -687,60 +676,54 @@ export default function PayrollPage(){
           {/* Left: config form */}
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
 
-            {/* Alert: no employees */}
             {activeEmployees.length===0&&(
-              <div style={{background:"#fb923c12",border:"1px solid #fb923c30",borderRadius:14,padding:"14px 18px",display:"flex",gap:12,alignItems:"flex-start",animation:"fadeUp 0.3s ease"}}>
-                <AlertTriangle size={16} color="#fb923c" style={{flexShrink:0,marginTop:2}}/>
+              <div style={{background:"color-mix(in oklch, var(--warning) 12%, transparent)",border:"1px solid color-mix(in oklch, var(--warning) 30%, transparent)",borderRadius:14,padding:"14px 18px",display:"flex",gap:12,alignItems:"flex-start",animation:"fadeUp 0.3s ease"}}>
+                <AlertTriangle size={16} color="var(--warning)" style={{flexShrink:0,marginTop:2}}/>
                 <div>
-                  <p style={{color:"#fb923c",fontWeight:700,fontSize:13,margin:"0 0 3px"}}>No active employees</p>
-                  <p style={{color:"#64748b",fontSize:12,margin:0}}>Add employees on the <strong style={{color:"#94a3b8"}}>Employees</strong> page first.</p>
+                  <p style={{color:"var(--warning)",fontWeight:700,fontSize:13,margin:"0 0 3px"}}>No active employees</p>
+                  <p style={{color:"var(--muted-foreground)",fontSize:12,margin:0}}>Add employees on the <strong style={{color:"var(--foreground)"}}>Employees</strong> page first.</p>
                 </div>
               </div>
             )}
 
-            {/* Config card */}
-            <div style={{background:"#0d1f35",border:"1px solid #1e3a5f",borderRadius:16,padding:"24px",display:"flex",flexDirection:"column",gap:18,animation:"fadeUp 0.35s ease 0.05s both"}}>
+            <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:16,padding:"24px",display:"flex",flexDirection:"column",gap:18,animation:"fadeUp 0.35s ease 0.05s both"}}>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
-                <div style={{width:32,height:32,borderRadius:10,background:"#50C87820",border:"1px solid #50C87840",display:"flex",alignItems:"center",justifyContent:"center"}}>
-                  <Calendar size={15} color="#50C878"/>
+                <div style={{width:32,height:32,borderRadius:10,background:"color-mix(in oklch, var(--primary) 20%, transparent)",border:"1px solid color-mix(in oklch, var(--primary) 40%, transparent)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                  <Calendar size={15} color="var(--primary)"/>
                 </div>
-                <span style={{color:"#e2e8f0",fontWeight:700,fontSize:15}}>New Pay Run</span>
+                <span style={{color:"var(--foreground)",fontWeight:700,fontSize:15}}>New Pay Run</span>
               </div>
 
-              {/* Period label */}
               <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                <label style={{fontSize:11,fontWeight:600,color:"#334155",letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace"}}>Pay Period Label</label>
+                <label style={{fontSize:11,fontWeight:600,color:"var(--muted-foreground)",letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace"}}>Pay Period Label</label>
                 <input value={periodLabel} onChange={e=>setPeriodLabel(e.target.value)} placeholder="e.g. July 2025"
-                  style={{padding:"10px 12px",background:"#071525",border:"1px solid #1e3a5f",borderRadius:9,color:"#e2e8f0",fontSize:13,outline:"none",transition:"border-color 0.2s"}}
-                  onFocus={e=>{e.target.style.borderColor="#50C87870";}} onBlur={e=>{e.target.style.borderColor="#1e3a5f";}}/>
+                  style={{padding:"10px 12px",background:"var(--background)",border:"1px solid var(--border)",borderRadius:9,color:"var(--foreground)",fontSize:13,outline:"none",transition:"border-color 0.2s"}}
+                  onFocus={e=>{e.target.style.borderColor="var(--primary)";}} onBlur={e=>{e.target.style.borderColor="var(--border)";}}/>
               </div>
 
-              {/* Pay date */}
               <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                <label style={{fontSize:11,fontWeight:600,color:"#334155",letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace"}}>Pay Date</label>
+                <label style={{fontSize:11,fontWeight:600,color:"var(--muted-foreground)",letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace"}}>Pay Date</label>
                 <input type="date" value={payDate} onChange={e=>setPayDate(e.target.value)}
-                  style={{padding:"10px 12px",background:"#071525",border:"1px solid #1e3a5f",borderRadius:9,color:"#e2e8f0",fontSize:13,outline:"none",transition:"border-color 0.2s"}}
-                  onFocus={e=>{e.target.style.borderColor="#50C87870";}} onBlur={e=>{e.target.style.borderColor="#1e3a5f";}}/>
+                  style={{padding:"10px 12px",background:"var(--background)",border:"1px solid var(--border)",borderRadius:9,color:"var(--foreground)",fontSize:13,outline:"none",transition:"border-color 0.2s"}}
+                  onFocus={e=>{e.target.style.borderColor="var(--primary)";}} onBlur={e=>{e.target.style.borderColor="var(--border)";}}/>
               </div>
 
-              {/* Exchange rate */}
               <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                <label style={{fontSize:11,fontWeight:600,color:"#334155",letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace"}}>LRD / USD Exchange Rate</label>
+                <label style={{fontSize:11,fontWeight:600,color:"var(--muted-foreground)",letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace"}}>LRD / USD Exchange Rate</label>
                 <div style={{position:"relative"}}>
-                  <DollarSign size={14} color="#334155" style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}}/>
+                  <DollarSign size={14} color="var(--muted-foreground)" style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}}/>
                   <input type="number" value={exchangeRate} onChange={e=>setExchangeRate(parseFloat(e.target.value)||185.44)} placeholder="185.44"
-                    style={{width:"100%",padding:"10px 12px 10px 32px",background:"#071525",border:"1px solid #1e3a5f",borderRadius:9,color:"#e2e8f0",fontSize:13,outline:"none",boxSizing:"border-box",transition:"border-color 0.2s"}}
-                    onFocus={e=>{e.target.style.borderColor="#50C87870";}} onBlur={e=>{e.target.style.borderColor="#1e3a5f";}}/>
+                    style={{width:"100%",padding:"10px 12px 10px 32px",background:"var(--background)",border:"1px solid var(--border)",borderRadius:9,color:"var(--foreground)",fontSize:13,outline:"none",boxSizing:"border-box",transition:"border-color 0.2s"}}
+                    onFocus={e=>{e.target.style.borderColor="var(--primary)";}} onBlur={e=>{e.target.style.borderColor="var(--border)";}}/>
                 </div>
-                <p style={{color:"#334155",fontSize:11,margin:0}}>Used for income tax calculation on LRD salaries</p>
+                <p style={{color:"var(--muted-foreground)",fontSize:11,margin:0}}>Used for income tax calculation on LRD salaries</p>
               </div>
 
-              {/* Start button */}
               <button onClick={handleStartRun} disabled={activeEmployees.length===0}
                 style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"13px",borderRadius:11,border:"none",
                   cursor:activeEmployees.length===0?"not-allowed":"pointer",
-                  background:activeEmployees.length===0?"#50C87830":"#50C878",
-                  color:"#002147",fontSize:14,fontWeight:800,transition:"all 0.15s",marginTop:4}}
+                  background:activeEmployees.length===0?"color-mix(in oklch, var(--primary) 30%, transparent)":"var(--primary)",
+                  color:"var(--primary-foreground)",fontSize:14,fontWeight:800,transition:"all 0.15s",marginTop:4}}
                 onMouseEnter={e=>{if(activeEmployees.length>0) e.currentTarget.style.opacity="0.88";}}
                 onMouseLeave={e=>{e.currentTarget.style.opacity="1";}}>
                 <Zap size={15}/> Start Pay Run · {activeEmployees.length} employees
@@ -751,69 +734,67 @@ export default function PayrollPage(){
           {/* Right: summary + history */}
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
 
-            {/* Employee preview */}
             {activeEmployees.length>0&&(
-              <div style={{background:"#0d1f35",border:"1px solid #1e3a5f",borderRadius:16,padding:"20px 22px",animation:"fadeUp 0.4s ease 0.1s both"}}>
+              <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:16,padding:"20px 22px",animation:"fadeUp 0.4s ease 0.1s both"}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-                  <span style={{color:"#e2e8f0",fontWeight:700,fontSize:13}}>Employee Preview</span>
-                  <span style={{background:"#50C87820",color:"#50C878",border:"1px solid #50C87840",borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700}}>{activeEmployees.length} Active</span>
+                  <span style={{color:"var(--foreground)",fontWeight:700,fontSize:13}}>Employee Preview</span>
+                  <span style={{background:"color-mix(in oklch, var(--primary) 20%, transparent)",color:"var(--primary)",border:"1px solid color-mix(in oklch, var(--primary) 40%, transparent)",borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700}}>{activeEmployees.length} Active</span>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   {activeEmployees.slice(0,5).map(emp=>(
-                    <div key={emp.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 10px",borderRadius:8,background:"#071525"}}>
+                    <div key={emp.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 10px",borderRadius:8,background:"var(--background)"}}>
                       <div style={{display:"flex",alignItems:"center",gap:9}}>
-                        <div style={{width:28,height:28,borderRadius:"50%",background:"#50C87820",border:"1px solid #50C87840",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:"#50C878",fontFamily:"'DM Mono',monospace",flexShrink:0}}>
+                        <div style={{width:28,height:28,borderRadius:"50%",background:"color-mix(in oklch, var(--primary) 20%, transparent)",border:"1px solid color-mix(in oklch, var(--primary) 40%, transparent)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:"var(--primary)",fontFamily:"'DM Mono',monospace",flexShrink:0}}>
                           {emp.firstName.charAt(0)}{emp.lastName.charAt(0)}
                         </div>
                         <div>
-                          <p style={{fontSize:12,fontWeight:600,color:"#e2e8f0",margin:0}}>{emp.firstName} {emp.lastName}</p>
-                          <p style={{fontSize:10,color:"#334155",margin:0,fontFamily:"'DM Mono',monospace"}}>{emp.department}</p>
+                          <p style={{fontSize:12,fontWeight:600,color:"var(--foreground)",margin:0}}>{emp.firstName} {emp.lastName}</p>
+                          <p style={{fontSize:10,color:"var(--muted-foreground)",margin:0,fontFamily:"'DM Mono',monospace"}}>{emp.department}</p>
                         </div>
                       </div>
                       <div style={{textAlign:"right"}}>
-                        <p style={{fontSize:12,fontWeight:700,color:"#50C878",margin:0,fontFamily:"'DM Mono',monospace"}}>
+                        <p style={{fontSize:12,fontWeight:700,color:"var(--primary)",margin:0,fontFamily:"'DM Mono',monospace"}}>
                           {emp.currency==="LRD"?"L$":"$"}{emp.rate.toFixed(2)}
                         </p>
                         {((emp.pendingOvertimeHours??0)>0||(emp.pendingHolidayHours??0)>0)&&(
-                          <p style={{fontSize:9,color:"#38bdf8",margin:0}}>hours imported</p>
+                          <p style={{fontSize:9,color:"var(--secondary)",margin:0}}>hours imported</p>
                         )}
                       </div>
                     </div>
                   ))}
                   {activeEmployees.length>5&&(
-                    <p style={{textAlign:"center",color:"#334155",fontSize:11,fontFamily:"'DM Mono',monospace",margin:"4px 0 0"}}>
+                    <p style={{textAlign:"center",color:"var(--muted-foreground)",fontSize:11,fontFamily:"'DM Mono',monospace",margin:"4px 0 0"}}>
                       +{activeEmployees.length-5} more employees
                     </p>
                   )}
                 </div>
                 {withHours>0&&(
-                  <div style={{marginTop:12,padding:"8px 12px",borderRadius:8,background:"#38bdf815",border:"1px solid #38bdf830",display:"flex",alignItems:"center",gap:8}}>
-                    <RefreshCw size={12} color="#38bdf8"/>
-                    <p style={{color:"#38bdf8",fontSize:11,margin:0,fontWeight:600}}>{withHours} employee{withHours!==1?"s":""} have CSV-imported hours ready</p>
+                  <div style={{marginTop:12,padding:"8px 12px",borderRadius:8,background:"color-mix(in oklch, var(--secondary) 15%, transparent)",border:"1px solid color-mix(in oklch, var(--secondary) 30%, transparent)",display:"flex",alignItems:"center",gap:8}}>
+                    <RefreshCw size={12} color="var(--secondary)"/>
+                    <p style={{color:"var(--secondary)",fontSize:11,margin:0,fontWeight:600}}>{withHours} employee{withHours!==1?"s":""} have CSV-imported hours ready</p>
                   </div>
                 )}
               </div>
             )}
 
-            {/* History */}
             {history.length>0&&(
-              <div style={{background:"#0d1f35",border:"1px solid #1e3a5f",borderRadius:16,padding:"20px 22px",animation:"fadeUp 0.45s ease 0.15s both"}}>
+              <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:16,padding:"20px 22px",animation:"fadeUp 0.45s ease 0.15s both"}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
-                  <Clock size={14} color="#334155"/>
-                  <span style={{color:"#e2e8f0",fontWeight:700,fontSize:13}}>Pay Run History</span>
+                  <Clock size={14} color="var(--muted-foreground)"/>
+                  <span style={{color:"var(--foreground)",fontWeight:700,fontSize:13}}>Pay Run History</span>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:6}}>
                   {history.slice(0,5).map(run=>(
-                    <div key={run.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 12px",borderRadius:10,background:"#071525",gap:8}}>
+                    <div key={run.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 12px",borderRadius:10,background:"var(--background)",gap:8}}>
                       <div style={{minWidth:0,flex:1}}>
-                        <p style={{fontSize:13,fontWeight:600,color:"#e2e8f0",margin:"0 0 2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{run.periodLabel}</p>
-                        <p style={{fontSize:10,color:"#334155",margin:0,fontFamily:"'DM Mono',monospace"}}>
+                        <p style={{fontSize:13,fontWeight:600,color:"var(--foreground)",margin:"0 0 2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{run.periodLabel}</p>
+                        <p style={{fontSize:10,color:"var(--muted-foreground)",margin:0,fontFamily:"'DM Mono',monospace"}}>
                           {run.employeeCount} emp · Net ${run.totalNet.toLocaleString("en-US",{minimumFractionDigits:2})}
                         </p>
                       </div>
                       <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
                         {run.lines.length>0&&<BulkDownloadButton lines={run.lines} periodLabel={run.periodLabel} payDate={run.payDate} company={pdfCompany}/>}
-                        <span style={{fontSize:10,fontFamily:"'DM Mono',monospace",padding:"3px 8px",borderRadius:20,background:"#50C87820",color:"#50C878",border:"1px solid #50C87840"}}>paid</span>
+                        <span style={{fontSize:10,fontFamily:"'DM Mono',monospace",padding:"3px 8px",borderRadius:20,background:"color-mix(in oklch, var(--primary) 20%, transparent)",color:"var(--primary)",border:"1px solid color-mix(in oklch, var(--primary) 40%, transparent)"}}>paid</span>
                       </div>
                     </div>
                   ))}
@@ -829,44 +810,43 @@ export default function PayrollPage(){
   // ── Active pay run ────────────────────────────────────────────────────────
 
   return(
-    <div style={{minHeight:"100vh",background:"#071525",padding:"32px",fontFamily:"'DM Sans',sans-serif"}}>
+    <div style={{minHeight:"100vh",background:"var(--background)",padding:"32px",fontFamily:"'DM Sans',sans-serif"}}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500;600&display=swap');
         @keyframes spin{to{transform:rotate(360deg)}}
         @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
         .warn-group:hover .warn-tip{display:block!important}
-        th{background:#071525!important;padding:10px 12px;border-bottom:1px solid #1e3a5f;position:sticky;top:0;z-index:10}
-        td{padding:10px 12px;border-bottom:1px solid #0d2137}
+        th{background:var(--background)!important;padding:10px 12px;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10}
+        td{padding:10px 12px;border-bottom:1px solid var(--border)}
         tr:last-child td{border-bottom:none}
-        tr:hover td{background:#0d213760}
+        tr:hover td{background:color-mix(in oklch, var(--foreground) 5%, var(--card))}
       `}</style>
 
-      {/* Header */}
       <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:24,flexWrap:"wrap",gap:12,animation:"fadeUp 0.3s ease"}}>
         <div>
-          <h1 style={{fontSize:26,fontWeight:800,color:"#f1f5f9",letterSpacing:"-0.02em",margin:0}}>Payroll</h1>
-          <p style={{color:"#334155",fontSize:13,marginTop:5,display:"flex",alignItems:"center",gap:8}}>
-            <Calendar size={12} color="#334155"/>{periodLabel}
-            <span style={{color:"#1e3a5f"}}>·</span>
-            <Users size={12} color="#334155"/>{lines.length} employees
-            <span style={{color:"#1e3a5f"}}>·</span>
-            <RefreshCw size={12} color="#334155"/>L${exchangeRate}/$1
+          <h1 style={{fontSize:26,fontWeight:800,color:"var(--foreground)",letterSpacing:"-0.02em",margin:0}}>Payroll</h1>
+          <p style={{color:"var(--muted-foreground)",fontSize:13,marginTop:5,display:"flex",alignItems:"center",gap:8}}>
+            <Calendar size={12} color="var(--muted-foreground)"/>{periodLabel}
+            <span style={{color:"var(--border)"}}>·</span>
+            <Users size={12} color="var(--muted-foreground)"/>{lines.length} employees
+            <span style={{color:"var(--border)"}}>·</span>
+            <RefreshCw size={12} color="var(--muted-foreground)"/>L${exchangeRate}/$1
           </p>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           {status==="paid"&&(
             <button onClick={startNewRun}
-              style={{display:"flex",alignItems:"center",gap:7,padding:"9px 14px",borderRadius:10,border:"1px solid #1e3a5f",background:"transparent",color:"#64748b",fontSize:12,fontWeight:600,cursor:"pointer"}}
-              onMouseEnter={e=>{e.currentTarget.style.borderColor="#50C87850";e.currentTarget.style.color="#e2e8f0";}}
-              onMouseLeave={e=>{e.currentTarget.style.borderColor="#1e3a5f";e.currentTarget.style.color="#64748b";}}>
+              style={{display:"flex",alignItems:"center",gap:7,padding:"9px 14px",borderRadius:10,border:"1px solid var(--border)",background:"transparent",color:"var(--muted-foreground)",fontSize:12,fontWeight:600,cursor:"pointer"}}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor="color-mix(in oklch, var(--primary) 50%, transparent)";e.currentTarget.style.color="var(--foreground)";}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.color="var(--muted-foreground)";}}>
               <Plus size={13}/> New Pay Run
             </button>
           )}
           {!isLocked&&(
             <button onClick={()=>setShowUpload(true)}
-              style={{display:"flex",alignItems:"center",gap:7,padding:"9px 14px",borderRadius:10,border:"1px solid #1e3a5f",background:"transparent",color:"#64748b",fontSize:12,fontWeight:600,cursor:"pointer"}}
-              onMouseEnter={e=>{e.currentTarget.style.borderColor="#50C87850";e.currentTarget.style.color="#e2e8f0";}}
-              onMouseLeave={e=>{e.currentTarget.style.borderColor="#1e3a5f";e.currentTarget.style.color="#64748b";}}>
+              style={{display:"flex",alignItems:"center",gap:7,padding:"9px 14px",borderRadius:10,border:"1px solid var(--border)",background:"transparent",color:"var(--muted-foreground)",fontSize:12,fontWeight:600,cursor:"pointer"}}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor="color-mix(in oklch, var(--primary) 50%, transparent)";e.currentTarget.style.color="var(--foreground)";}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.color="var(--muted-foreground)";}}>
               <Upload size={13}/> Import CSV
             </button>
           )}
@@ -874,78 +854,45 @@ export default function PayrollPage(){
         </div>
       </div>
 
-      {/* Status stepper */}
-      <div style={{background:"#0d1f35",border:"1px solid #1e3a5f",borderRadius:14,padding:"16px 20px",marginBottom:16,animation:"fadeUp 0.35s ease 0.05s both"}}>
+      <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:14,padding:"16px 20px",marginBottom:16,animation:"fadeUp 0.35s ease 0.05s both"}}>
         <StatusStepper current={status} onAdvance={advanceStatus} saving={saving}/>
       </div>
 
-      {/* Alerts */}
       {warningCount>0&&(
-        <div style={{background:"#fb923c12",border:"1px solid #fb923c30",borderRadius:12,padding:"12px 18px",display:"flex",alignItems:"center",gap:12,marginBottom:12,animation:"fadeUp 0.35s ease"}}>
-          <AlertTriangle size={14} color="#fb923c"/>
-          <p style={{color:"#fb923c",fontSize:13,margin:0,fontWeight:600}}>{warningCount} employee{warningCount>1?"s":""} have gross pay below the $150 USD minimum wage. Review before approving.</p>
+        <div style={{background:"color-mix(in oklch, var(--warning) 12%, transparent)",border:"1px solid color-mix(in oklch, var(--warning) 30%, transparent)",borderRadius:12,padding:"12px 18px",display:"flex",alignItems:"center",gap:12,marginBottom:12,animation:"fadeUp 0.35s ease"}}>
+          <AlertTriangle size={14} color="var(--warning)"/>
+          <p style={{color:"var(--warning)",fontSize:13,margin:0,fontWeight:600}}>{warningCount} employee{warningCount>1?"s":""} have gross pay below the $150 USD minimum wage. Review before approving.</p>
         </div>
       )}
       {isLocked&&(
-        <div style={{background:"#38bdf815",border:"1px solid #38bdf830",borderRadius:12,padding:"12px 18px",display:"flex",alignItems:"center",gap:12,marginBottom:12,animation:"fadeUp 0.35s ease"}}>
-          <Lock size={14} color="#38bdf8"/>
-          <p style={{color:"#38bdf8",fontSize:13,margin:0,fontWeight:600}}>Pay run is <strong>{status}</strong>. Figures are locked — you can still download payslips.</p>
+        <div style={{background:"color-mix(in oklch, var(--secondary) 15%, transparent)",border:"1px solid color-mix(in oklch, var(--secondary) 30%, transparent)",borderRadius:12,padding:"12px 18px",display:"flex",alignItems:"center",gap:12,marginBottom:12,animation:"fadeUp 0.35s ease"}}>
+          <Lock size={14} color="var(--secondary)"/>
+          <p style={{color:"var(--secondary)",fontSize:13,margin:0,fontWeight:600}}>Pay run is <strong>{status}</strong>. Figures are locked — you can still download payslips.</p>
         </div>
       )}
 
-      {/* Payroll table */}
       {lines.length>0&&(
         <>
-          <div style={{background:"#0d1f35",border:"1px solid #1e3a5f",borderRadius:"16px 16px 0 0",overflow:"hidden",animation:"fadeUp 0.4s ease 0.1s both"}}>
-            {/* Table toolbar */}
-            <div style={{background:"#002147",padding:"13px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:"16px 16px 0 0",overflow:"hidden",animation:"fadeUp 0.4s ease 0.1s both"}}>
+            <div style={{background:"color-mix(in oklch, var(--primary) 15%, var(--card))",padding:"13px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <FileText size={14} color="rgba(255,255,255,0.3)"/>
-                <span style={{color:"#e2e8f0",fontWeight:700,fontSize:14}}>Review & Edit Payroll</span>
-                {!isLocked&&<span style={{color:"rgba(255,255,255,0.25)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Click any cell to edit</span>}
+                <FileText size={14} color="color-mix(in oklch, var(--foreground) 30%, transparent)"/>
+                <span style={{color:"var(--foreground)",fontWeight:700,fontSize:14}}>Review & Edit Payroll</span>
+                {!isLocked&&<span style={{color:"color-mix(in oklch, var(--foreground) 25%, transparent)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Click any cell to edit</span>}
               </div>
               <div style={{display:"flex",alignItems:"center",gap:12}}>
-                {warningCount>0&&<span style={{display:"flex",alignItems:"center",gap:5,color:"#fb923c",fontSize:11,fontFamily:"'DM Mono',monospace"}}><AlertTriangle size={11}/>{warningCount} warning{warningCount>1?"s":""}</span>}
-                <span style={{color:"rgba(255,255,255,0.2)",fontSize:11,fontFamily:"'DM Mono',monospace"}}>{lines.length} employees</span>
+                {warningCount>0&&<span style={{display:"flex",alignItems:"center",gap:5,color:"var(--warning)",fontSize:11,fontFamily:"'DM Mono',monospace"}}><AlertTriangle size={11}/>{warningCount} warning{warningCount>1?"s":""}</span>}
+                <span style={{color:"color-mix(in oklch, var(--foreground) 20%, transparent)",fontSize:11,fontFamily:"'DM Mono',monospace"}}>{lines.length} employees</span>
               </div>
             </div>
 
-            {/* Desktop table */}
-            <div style={{overflowX:"auto",display:"none"}} className="sm-table">
-              <table style={{width:"100%",borderCollapse:"collapse"}}>
-                <thead>
-                  {table.getHeaderGroups().map(hg=>(
-                    <tr key={hg.id}>
-                      {hg.headers.map(h=>(
-                        <th key={h.id} style={{width:h.getSize(),padding:"10px 12px",background:"#071525",borderBottom:"1px solid #1e3a5f",fontSize:10,fontWeight:700,color:"#334155",letterSpacing:"0.08em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace",textAlign:"left",whiteSpace:"nowrap"}}>
-                          {flexRender(h.column.columnDef.header,h.getContext())}
-                        </th>
-                      ))}
-                    </tr>
-                  ))}
-                </thead>
-                <tbody>
-                  {table.getRowModel().rows.map(row=>(
-                    <tr key={row.id} style={{borderLeft:`3px solid ${row.original.calc?.warnings.length?"#fb923c":"transparent"}`,transition:"background 0.12s"}}>
-                      {row.getVisibleCells().map(cell=>(
-                        <td key={cell.id} style={{padding:"10px 12px",borderBottom:"1px solid #0d2137",width:cell.column.getSize()}}>
-                          {flexRender(cell.column.columnDef.cell,cell.getContext())}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Always-visible table (no sm breakpoint needed in inline styles) */}
             <div style={{overflowX:"auto"}}>
               <table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}>
                 <thead>
                   {table.getHeaderGroups().map(hg=>(
                     <tr key={hg.id}>
                       {hg.headers.map(h=>(
-                        <th key={h.id} style={{width:h.getSize(),padding:"10px 12px",background:"#071525",borderBottom:"1px solid #1e3a5f",fontSize:10,fontWeight:700,color:"#334155",letterSpacing:"0.08em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace",textAlign:"left",whiteSpace:"nowrap"}}>
+                        <th key={h.id} style={{width:h.getSize(),padding:"10px 12px",background:"var(--background)",borderBottom:"1px solid var(--border)",fontSize:10,fontWeight:700,color:"var(--muted-foreground)",letterSpacing:"0.08em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace",textAlign:"left",whiteSpace:"nowrap"}}>
                           {flexRender(h.column.columnDef.header,h.getContext())}
                         </th>
                       ))}
@@ -954,11 +901,11 @@ export default function PayrollPage(){
                 </thead>
                 <tbody>
                   {table.getRowModel().rows.map(row=>(
-                    <tr key={row.id} style={{borderLeft:`3px solid ${row.original.calc?.warnings.length?"#fb923c":"transparent"}`,transition:"background 0.12s",cursor:"default"}}
-                      onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background="#0d213750";}}
+                    <tr key={row.id} style={{borderLeft:`3px solid ${row.original.calc?.warnings.length?"var(--warning)":"transparent"}`,transition:"background 0.12s",cursor:"default"}}
+                      onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background="color-mix(in oklch, var(--foreground) 5%, var(--card))";}}
                       onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background="transparent";}}>
                       {row.getVisibleCells().map(cell=>(
-                        <td key={cell.id} style={{padding:"10px 12px",borderBottom:"1px solid #0d2137",width:cell.column.getSize()}}>
+                        <td key={cell.id} style={{padding:"10px 12px",borderBottom:"1px solid var(--border)",width:cell.column.getSize()}}>
                           {flexRender(cell.column.columnDef.cell,cell.getContext())}
                         </td>
                       ))}
@@ -969,24 +916,22 @@ export default function PayrollPage(){
             </div>
           </div>
 
-          {/* Summary strip */}
           <RunSummary lines={lines} exchangeRate={exchangeRate}/>
         </>
       )}
 
-      {/* History (shown in active run view too) */}
       {history.length>0&&(
-        <div style={{background:"#0d1f35",border:"1px solid #1e3a5f",borderRadius:16,padding:"20px 22px",marginTop:20,animation:"fadeUp 0.5s ease 0.2s both"}}>
+        <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:16,padding:"20px 22px",marginTop:20,animation:"fadeUp 0.5s ease 0.2s both"}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
-            <Clock size={14} color="#334155"/>
-            <span style={{color:"#e2e8f0",fontWeight:700,fontSize:14}}>Pay Run History</span>
+            <Clock size={14} color="var(--muted-foreground)"/>
+            <span style={{color:"var(--foreground)",fontWeight:700,fontSize:14}}>Pay Run History</span>
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
             {history.map(run=>(
-              <div key={run.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 14px",borderRadius:10,background:"#071525",gap:10}}>
+              <div key={run.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 14px",borderRadius:10,background:"var(--background)",gap:10}}>
                 <div style={{minWidth:0,flex:1}}>
-                  <p style={{fontSize:13,fontWeight:600,color:"#e2e8f0",margin:"0 0 3px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{run.periodLabel}</p>
-                  <p style={{fontSize:11,color:"#334155",margin:0,fontFamily:"'DM Mono',monospace"}}>
+                  <p style={{fontSize:13,fontWeight:600,color:"var(--foreground)",margin:"0 0 3px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{run.periodLabel}</p>
+                  <p style={{fontSize:11,color:"var(--muted-foreground)",margin:0,fontFamily:"'DM Mono',monospace"}}>
                     {run.employeeCount} emp · Gross ${run.totalGross.toLocaleString("en-US",{minimumFractionDigits:2})} · Net ${run.totalNet.toLocaleString("en-US",{minimumFractionDigits:2})}
                     {run.totalTax?` · Tax $${run.totalTax.toLocaleString("en-US",{minimumFractionDigits:2})}`:""} 
                     {run.totalNasscorp?` · NASC $${run.totalNasscorp.toLocaleString("en-US",{minimumFractionDigits:2})}`:""} 
@@ -994,7 +939,7 @@ export default function PayrollPage(){
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
                   {run.lines.length>0&&<BulkDownloadButton lines={run.lines} periodLabel={run.periodLabel} payDate={run.payDate} company={pdfCompany}/>}
-                  <span style={{fontSize:10,fontFamily:"'DM Mono',monospace",padding:"3px 10px",borderRadius:20,background:"#50C87820",color:"#50C878",border:"1px solid #50C87840",fontWeight:700}}>paid</span>
+                  <span style={{fontSize:10,fontFamily:"'DM Mono',monospace",padding:"3px 10px",borderRadius:20,background:"color-mix(in oklch, var(--primary) 20%, transparent)",color:"var(--primary)",border:"1px solid color-mix(in oklch, var(--primary) 40%, transparent)",fontWeight:700}}>paid</span>
                 </div>
               </div>
             ))}
