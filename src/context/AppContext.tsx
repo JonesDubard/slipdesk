@@ -326,27 +326,42 @@ const addEmployee = useCallback(async (
 
   const archiveEmployee = useCallback(async (id: string) => {
     if (!id) return;
-    const { data:co } = await db(supabase).from("companies").select("id").single();
-    if (!co) return;
-    await db(supabase).from("employees").update({ is_archived:true, is_active:false }).eq("id",id).eq("company_id",co.id);
-    setAllEmployees((prev) => prev.map((e) => e.id === id ? { ...e, isArchived:true, isActive:false } : e));
-  }, [supabase]);
+    // Use the already-loaded company id from state instead of re-fetching,
+    // which avoids a silent failure when the session is briefly stale.
+    if (!company.id) throw new Error("Company not loaded");
+    await db(supabase)
+      .from("employees")
+      .update({ is_archived: true, is_active: false })
+      .eq("id", id)
+      .eq("company_id", company.id);
+    setAllEmployees((prev) =>
+      prev.map((e) => e.id === id ? { ...e, isArchived: true, isActive: false } : e)
+    );
+  }, [supabase, company.id]);
 
   const restoreEmployee = useCallback(async (id: string) => {
     if (!id) return;
-    const { data:co } = await db(supabase).from("companies").select("id").single();
-    if (!co) return;
-    await db(supabase).from("employees").update({ is_archived:false, is_active:true }).eq("id",id).eq("company_id",co.id);
-    setAllEmployees((prev) => prev.map((e) => e.id === id ? { ...e, isArchived:false, isActive:true } : e));
-  }, [supabase]);
+    if (!company.id) throw new Error("Company not loaded");
+    await db(supabase)
+      .from("employees")
+      .update({ is_archived: false, is_active: true })
+      .eq("id", id)
+      .eq("company_id", company.id);
+    setAllEmployees((prev) =>
+      prev.map((e) => e.id === id ? { ...e, isArchived: false, isActive: true } : e)
+    );
+  }, [supabase, company.id]);
 
   const hardDeleteEmployee = useCallback(async (id: string) => {
     if (!id) return;
-    const { data:co } = await db(supabase).from("companies").select("id").single();
-    if (!co) return;
-    await db(supabase).from("employees").delete().eq("id",id).eq("company_id",co.id);
+    if (!company.id) throw new Error("Company not loaded");
+    await db(supabase)
+      .from("employees")
+      .delete()
+      .eq("id", id)
+      .eq("company_id", company.id);
     setAllEmployees((prev) => prev.filter((e) => e.id !== id));
-  }, [supabase]);
+  }, [supabase, company.id]);
 
   const refreshEmployees = useCallback(async () => {
     const { data: emps } = await db(supabase).from("employees").select("*").order("employee_number");

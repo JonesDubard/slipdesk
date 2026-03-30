@@ -11,6 +11,13 @@ export type EmploymentType = "full_time" | "part_time" | "contractor" | "casual"
 export type Currency       = "USD" | "LRD";
 export type PaymentMethod  = "bank_transfer" | "mtn_momo" | "orange_money" | "cash";
 
+
+export interface DeductionItem {
+  label:  string;   // e.g. "Pay Advance", "Food", "Transportation"
+  note?:  string;  // optional explanation shown on payslip
+  amount: number;
+}
+
 // ─── Employee ─────────────────────────────────────────────────────────────────
 
 export interface Employee {
@@ -81,14 +88,9 @@ export interface PayRunLine {
   regularHours:       number;
   overtimeHours:      number;
   holidayHours:       number;
-  additionalEarnings: number;  // one-off extras on top of recurring allowances
-
-  /**
-   * Flat deduction (salary advance, loan repayment, etc.).
-   * Applied AFTER tax + NASSCORP — reduces netPay only.
-   * Does not affect grossPay or the taxable base.
-   */
-  deductions:         number;
+  additionalEarnings: number; 
+  deductionItems?:  DeductionItem[];
+  deductions?:         number;
 
   exchangeRate:       number;
   calc:               PayrollResult | null;
@@ -131,6 +133,7 @@ export interface CompanyProfile {
   /** Public URL from Supabase Storage, or null if not uploaded */
   logoUrl:       string | null;
 }
+
 
 export const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
   name:          "",

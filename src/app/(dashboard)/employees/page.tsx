@@ -12,7 +12,7 @@
  *  4. UI: polished stats bar, hover states, action column z-index, bulk bar
  */
 
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useRef, useCallback, useMemo,useEffect } from "react";
 import {
   Search, Plus, X, Upload, Download, FileText, Loader,
   Archive, Edit3, RotateCcw, Trash2,
@@ -22,6 +22,7 @@ import type { Employee, EmploymentType, Currency, PaymentMethod } from "@/contex
 import { useApp } from "@/context/AppContext";
 import { useToast } from "@/components/Toast";
 import PageSkeleton from "@/components/PageSkeleton";
+import { createClient } from "@/lib/supabase/client";
 
 function parseDateToISO(dateStr: string | undefined): string {
   if (!dateStr) return "";
@@ -81,7 +82,7 @@ const CSV_HEADERS = [
   "email","phone","county","start_date","employment_type","currency",
   "rate","standard_hours","allowances","nasscorp_number","payment_method",
   "bank_name","account_number","momo_number","regular_hours","overtime_hours",
-  "holiday_hours","deductions",
+  "holiday_hours","ded_pay_advance","ded_food","ded_transportation","ded_loan_repayment","ded_other",
 ];
 
 const EMPTY_FORM: Omit<Employee, "id" | "employeeNumber" | "fullName" | "isArchived"> = {
@@ -107,8 +108,9 @@ function getAvatarColor(name: string) {
 function downloadTemplate() {
   const rows = [
     CSV_HEADERS.join(","),
-    "EMP-001,Moses,Kollie,Operations Manager,Operations,m.kollie@co.lr,+231770000001,Montserrado,2023-01-15,full_time,USD,8.50,173.33,0,NSC-001-2024,bank_transfer,Ecobank Liberia,1234567890,,173.33,0,0,0",
-    "EMP-002,Fanta,Kamara,Finance Officer,Finance,f.kamara@co.lr,+231770000002,Montserrado,2023-03-01,full_time,LRD,1500,173.33,50000,NSC-002-2024,mtn_momo,,,0770000002,173.33,0,8,0",
+    // ded_pay_advance, ded_food, ded_transportation, ded_loan_repayment, ded_other
+    "EMP-001,Moses,Kollie,Operations Manager,Operations,m.kollie@co.lr,+231770000001,Montserrado,2023-01-15,full_time,USD,8.50,173.33,0,NSC-001-2024,bank_transfer,Ecobank Liberia,1234567890,,173.33,0,0,100,30,20,0,0",
+    "EMP-002,Fanta,Kamara,Finance Officer,Finance,f.kamara@co.lr,+231770000002,Montserrado,2023-03-01,full_time,LRD,1500,173.33,50000,NSC-002-2024,mtn_momo,,,0770000002,173.33,0,8,0,0,0,250,0",
   ];
   const blob = new Blob([rows.join("\n")], { type: "text/csv" });
   const url  = URL.createObjectURL(blob);
@@ -205,7 +207,11 @@ function parseEmployeeCSV(text: string): ParsedRow[] {
         pendingRegularHours:  n(raw.regular_hours),
         pendingOvertimeHours: n(raw.overtime_hours),
         pendingHolidayHours:  n(raw.holiday_hours),
-        pendingDeductions:    n(raw.deductions),
+        pendingDeductions: Object.entries(raw)
+  .filter(([key]) => key.startsWith("ded_"))
+  .reduce((sum, [, val]) => sum + (parseFloat(val) || 0), 0) ||
+  n(raw.deductions) || // fallback for old-format CSVs with plain "deductions" column
+  null,
       },
     });
   }
@@ -1125,6 +1131,22 @@ export default function EmployeesPage() {
   const { employees, archivedEmployees, addEmployee, updateEmployee, archiveEmployee, hardDeleteEmployee, restoreEmployee, refreshEmployees, loading } = useApp();
   const { toast } = useToast();
 
+  const sbRef = useRef<ReturnType<typeof createClient> | null>(null);
+  if (!sbRef.current) sbRef.current = createClient();
+  const supabase = sbRef.current;
+ 
+  // Refresh the Supabase session every 4 minutes while the page is open.
+  // This prevents the auth token from expiring during idle periods, which
+  // causes the page to go white or uploads to hang indefinitely.
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const { error } = await supabase.auth.refreshSession();
+      if (error) console.warn("Session refresh failed:", error.message);
+    }, 4 * 60 * 1000); // every 4 minutes
+ 
+    return () => clearInterval(interval);
+  }, [supabase]);
+
   const [search,        setSearch]        = useState("");
   const [deptFilter,    setDeptFilter]    = useState("All");
   const [showArchived,  setShowArchived]  = useState(false);
@@ -1259,14 +1281,42 @@ async function handleSaveEmployee(data: Omit<Employee, "id" | "fullName" | "isAr
 
   // Bulk
   async function handleBulkArchive() {
-    for (const id of selected) await archiveEmployee(id);
-    toast.success(`${selected.size} employee${selected.size !== 1 ? "s" : ""} archived.`);
+    const ids = Array.from(selected);
+    // Clear selection immediately so the UI feels responsive
     setSelected(new Set());
+    let successCount = 0;
+    for (const id of ids) {
+      try {
+        await archiveEmployee(id);
+        successCount++;
+      } catch (err) {
+        console.error("Failed to archive employee:", id, err);
+      }
+    }
+    if (successCount > 0) {
+      toast.success(`${successCount} employee${successCount !== 1 ? "s" : ""} archived.`);
+    } else {
+      toast.error("Archive failed — please try again.");
+    }
   }
   async function handleBulkDelete() {
-    for (const id of selected) await hardDeleteEmployee(id);
-    toast.success(`${selected.size} employee${selected.size !== 1 ? "s" : ""} deleted.`);
+    const ids = Array.from(selected);
+    // Clear selection immediately so the UI feels responsive
     setSelected(new Set());
+    let successCount = 0;
+    for (const id of ids) {
+      try {
+        await hardDeleteEmployee(id);
+        successCount++;
+      } catch (err) {
+        console.error("Failed to delete employee:", id, err);
+      }
+    }
+    if (successCount > 0) {
+      toast.success(`${successCount} employee${successCount !== 1 ? "s" : ""} deleted.`);
+    } else {
+      toast.error("Delete failed — please try again.");
+    }
   }
 
   function toggleSelect(id: string) {

@@ -77,18 +77,21 @@ function numberToWords(amount:number):string{
 
 // ─── BulkRow → PayRunLine ─────────────────────────────────────────────────────
 
-function bulkRowToPayRunLine(r:BulkRow,exchangeRate:number,realId?:string):PayRunLine{
-  const emp=r.employee;
-  const id=realId??`BULK-${emp.employeeNumber||Date.now()}-${Math.random().toString(36).slice(2,7)}`;
+function bulkRowToPayRunLine(r: BulkRow, exchangeRate: number, realId?: string): PayRunLine {
+  const emp = r.employee;
+  const id  = realId ?? `BULK-${emp.employeeNumber||Date.now()}-${Math.random().toString(36).slice(2,7)}`;
   return {
-    id,employeeId:id,employeeNumber:emp.employeeNumber,
-    fullName:`${emp.firstName} ${emp.lastName}`.trim(),
-    jobTitle:emp.jobTitle,department:emp.department,
-    currency:emp.currency,rate:emp.rate,
-    regularHours:r.regularHours,overtimeHours:r.overtimeHours,holidayHours:r.holidayHours,
-    additionalEarnings:emp.allowances??0,deductions:r.deductions??0,
-    exchangeRate,calc:null,paymentMethod:emp.paymentMethod,
-    bankName:emp.bankName,accountNumber:emp.accountNumber,mobileNumber:emp.momoNumber,
+    id, employeeId: id, employeeNumber: emp.employeeNumber,
+    fullName: `${emp.firstName} ${emp.lastName}`.trim(),
+    jobTitle: emp.jobTitle, department: emp.department,
+    currency: emp.currency, rate: emp.rate,
+    regularHours: r.regularHours, overtimeHours: r.overtimeHours, holidayHours: r.holidayHours,
+    additionalEarnings: emp.allowances ?? 0,
+    deductions:     r.deductions ?? 0,
+    deductionItems: r.deductionItems ?? [],   // ← NEW
+    exchangeRate, calc: null,
+    paymentMethod: emp.paymentMethod,
+    bankName: emp.bankName, accountNumber: emp.accountNumber, mobileNumber: emp.momoNumber,
   };
 }
 
@@ -197,11 +200,31 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
     ...(line.holidayHours>0?[{label:"Holiday Pay",note:`${line.holidayHours} hrs × ${sym}${line.rate.toFixed(2)} × 2.0`,amount:calc.holidayPay}]:[]),
     ...(calc.additionalEarnings>0?[{label:"Allowances & Extras",note:"Recurring allowances + one-off earnings",amount:calc.additionalEarnings}]:[]),
   ];
-  const ded=line.deductions??0;
-  const deductionRows=[
-    {label:"NASSCORP (Employee 4%)",note:`4% of ${sym}${calc.nasscorp.base.toFixed(2)} regular salary`,amount:calc.nasscorp.employeeContribution},
-    {label:"Income Tax (LRA)",note:`Effective rate: ${(calc.Paye.effectiveRate*100).toFixed(1)}%`,amount:calc.Paye.taxInBase},
-    ...(ded>0?[{label:"Other Deductions",note:"Salary advance / loan repayment / etc.",amount:ded}]:[]),
+  const ded      = line.deductions ?? 0;
+  const dedItems = line.deductionItems ?? [];
+  const otherDedRows: { label: string; note: string; amount: number }[] =
+    dedItems.length > 0
+      ? dedItems.map(item => ({
+          label:  item.label,
+          note:   item.note ?? "",
+          amount: item.amount,
+        }))
+      : ded > 0
+        ? [{ label: "Other Deductions", note: "Pay advance / loan repayment / etc.", amount: ded }]
+        : [];
+ 
+  const deductionRows = [
+    {
+      label:  "NASSCORP (Employee 4%)",
+      note:   `4% of ${sym}${calc.nasscorp.base.toFixed(2)} regular salary`,
+      amount: calc.nasscorp.employeeContribution,
+    },
+    {
+      label:  "Income Tax (LRA)",
+      note:   `Effective rate: ${(calc.Paye.effectiveRate * 100).toFixed(1)}%`,
+      amount: calc.Paye.taxInBase,
+    },
+    ...otherDedRows,
   ];
   const generated=new Date().toLocaleDateString("en-LR",{year:"numeric",month:"long",day:"numeric"});
   const payDateFmt=new Date(payDate).toLocaleDateString("en-LR",{year:"numeric",month:"long",day:"numeric"});
@@ -489,18 +512,25 @@ export default function PayrollPage(){
   const warningCount=lines.filter(l=>l.calc&&l.calc.warnings.length>0).length;
   const activeEmployees=employees.filter(e=>e.isActive);
 
-  function handleStartRun(){
-    const rows:PayRunLine[]=activeEmployees.map(emp=>({
-      id:emp.id,employeeId:emp.id,employeeNumber:emp.employeeNumber,fullName:emp.fullName,
-      jobTitle:emp.jobTitle,department:emp.department,currency:emp.currency,rate:emp.rate,
-      regularHours:emp.pendingRegularHours??emp.standardHours,
-      overtimeHours:emp.pendingOvertimeHours??0,holidayHours:emp.pendingHolidayHours??0,
-      additionalEarnings:emp.allowances??0,deductions:emp.pendingDeductions??0,
-      exchangeRate,calc:null,paymentMethod:emp.paymentMethod,
-      bankName:emp.bankName,accountNumber:emp.accountNumber,mobileNumber:emp.momoNumber,mobileProvider:undefined,
-    }));
-    dispatch({type:"SET_ROWS",rows}); setRunStarted(true);
-  }
+  function handleStartRun() {
+  const rows: PayRunLine[] = activeEmployees.map(emp => ({
+    id: emp.id, employeeId: emp.id, employeeNumber: emp.employeeNumber,
+    fullName: emp.fullName, jobTitle: emp.jobTitle, department: emp.department,
+    currency: emp.currency, rate: emp.rate,
+    regularHours:  emp.pendingRegularHours  ?? emp.standardHours,
+    overtimeHours: emp.pendingOvertimeHours ?? 0,
+    holidayHours:  emp.pendingHolidayHours  ?? 0,
+    additionalEarnings: emp.allowances ?? 0,
+    deductions:     emp.pendingDeductions ?? 0,
+    deductionItems: [],   // ← NEW — manual runs start with no itemized deductions
+    exchangeRate, calc: null,
+    paymentMethod: emp.paymentMethod,
+    bankName: emp.bankName, accountNumber: emp.accountNumber,
+    mobileNumber: emp.momoNumber, mobileProvider: undefined,
+  }));
+  dispatch({ type: "SET_ROWS", rows });
+  setRunStarted(true);
+}
 
   async function advanceStatus(){
     const idx=STATUS_STEPS.indexOf(status);
