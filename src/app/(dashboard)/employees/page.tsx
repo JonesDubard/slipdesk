@@ -23,6 +23,28 @@ import { useApp } from "@/context/AppContext";
 import { useToast } from "@/components/Toast";
 import PageSkeleton from "@/components/PageSkeleton";
 
+function parseDateToISO(dateStr: string | undefined): string {
+  if (!dateStr) return "";
+  // Already ISO format?
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+  // Try DD/MM/YYYY
+  const parts = dateStr.split('/');
+  if (parts.length === 3) {
+    const [day, month, year] = parts;
+    if (year.length === 4 && month.length === 2 && day.length === 2) {
+      return `${year}-${month}-${day}`;
+    }
+  }
+  // Try DD-MM-YYYY
+  const dashParts = dateStr.split('-');
+  if (dashParts.length === 3 && dashParts[2].length === 4) {
+    const [day, month, year] = dashParts;
+    return `${year}-${month}-${day}`;
+  }
+  // Fallback: return as is (will likely cause a DB error)
+  return dateStr;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const DEPARTMENTS = ["All", "Operations", "Finance", "Engineering", "Sales", "Human Resources"];
@@ -159,14 +181,14 @@ function parseEmployeeCSV(text: string): ParsedRow[] {
     results.push({
       errors,
       data: {
-        employeeNumber: raw.employee_number || "",
+        employeeNumber: "",
         firstName, lastName,
         jobTitle:       raw.job_title   || "",
         department:     raw.department  || "Operations",
         email:          raw.email       || "",
         phone:          raw.phone       || "",
         county:         raw.county      || "Montserrado",
-        startDate:      raw.start_date  || "",
+        startDate:      parseDateToISO(raw.start_date),
         employmentType: (["full_time","part_time","contractor","casual"].includes(raw.employment_type)
           ? raw.employment_type : "full_time") as EmploymentType,
         currency:       currency === "LRD" ? "LRD" : "USD",
@@ -1100,7 +1122,7 @@ function BulkBar({ count, isArchiveView, onArchive, onDelete, onClear }: {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function EmployeesPage() {
-  const { employees, addEmployee, updateEmployee, archiveEmployee, hardDeleteEmployee, restoreEmployee, refreshEmployees, loading } = useApp();
+  const { employees, archivedEmployees, addEmployee, updateEmployee, archiveEmployee, hardDeleteEmployee, restoreEmployee, refreshEmployees, loading } = useApp();
   const { toast } = useToast();
 
   const [search,        setSearch]        = useState("");
@@ -1110,6 +1132,11 @@ export default function EmployeesPage() {
   const [drawerEmp,     setDrawerEmp]     = useState<Employee | undefined>(undefined);
   const [showDrawer,    setShowDrawer]    = useState(false);
   const [selected,      setSelected]      = useState<Set<string>>(new Set());
+
+  const allEmployees = useMemo(
+  () => [...employees, ...archivedEmployees],
+  [employees, archivedEmployees]
+);
 
   // ── Derived data ────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -1138,37 +1165,46 @@ export default function EmployeesPage() {
 
   // src/app/(dashboard)/employees/page.tsx
 async function handleBulkImport(rows: Partial<Employee>[]): Promise<ImportResult> {
-  const existingNums = employees
+  // 1. Find current maximum employee number from all existing employees
+  const existingNums = allEmployees
     .map((e) => parseInt(e.employeeNumber.replace(/\D/g, ""), 10))
     .filter(Boolean);
-  let counter = existingNums.length ? Math.max(...existingNums) : 0;
-
-  const numbered = rows.map((row) => {
-    const csvNum = (row.employeeNumber ?? "").trim();
-    const empNum = csvNum || `EMP-${String(++counter).padStart(3, "0")}`;
-    return { row, empNum };
-  });
+  let nextNum = existingNums.length ? Math.max(...existingNums) + 1 : 1;
 
   let imported = 0;
   const skipped: ImportResult["skipped"] = [];
 
-  for (let i = 0; i < numbered.length; i++) {
-    const { row, empNum } = numbered[i];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const empNum = `EMP-${String(nextNum++).padStart(3, "0")}`; // generate next number
+
     try {
-      // addEmployee now throws on duplicate or any other error
       await addEmployee(
         { ...(row as Omit<Employee, "id" | "fullName" | "isArchived">), isActive: true },
-        empNum,
+        empNum, // <-- pass the generated number
       );
       imported++;
     } catch (err) {
-      skipped.push({
-        rowNum: i + 2,
-        name: [row.firstName, row.lastName].filter(Boolean).join(" "),
-        reasons: [err instanceof Error ? err.message : "Unknown error"],
-      });
-      console.error(`Row ${i + 2} failed:`, err);
-    }
+  // Capture the full error message
+  let errorMessage = "Unknown error";
+  if (err instanceof Error) {
+    errorMessage = err.message;
+  } else if (typeof err === "object" && err !== null) {
+    // Supabase errors often have a 'message' property even if not enumerable
+    errorMessage = (err as any).message ?? JSON.stringify(err);
+  } else {
+    errorMessage = String(err);
+  }
+
+  console.error(`Row ${i + 2} failed:`, err);
+  console.error("Error details:", errorMessage);
+
+  skipped.push({
+    rowNum: i + 2,
+    name: [row.firstName, row.lastName].filter(Boolean).join(" "),
+    reasons: [errorMessage],
+  });
+}
   }
 
   await refreshEmployees();

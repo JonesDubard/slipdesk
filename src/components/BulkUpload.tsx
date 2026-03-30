@@ -16,6 +16,28 @@ import { useRef, useState } from "react";
 import { Upload, Download, AlertCircle, CheckCircle2, X, Info } from "lucide-react";
 import type { Employee, EmploymentType, Currency, PaymentMethod } from "@/context/AppContext";
 
+function parseDateToISO(dateStr: string | undefined): string {
+  if (!dateStr) return "";
+  // Already ISO format?
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+  // Try DD/MM/YYYY
+  const parts = dateStr.split('/');
+  if (parts.length === 3) {
+    const [day, month, year] = parts;
+    if (year.length === 4 && month.length === 2 && day.length === 2) {
+      return `${year}-${month}-${day}`;
+    }
+  }
+  // Try DD-MM-YYYY
+  const dashParts = dateStr.split('-');
+  if (dashParts.length === 3 && dashParts[2].length === 4) {
+    const [day, month, year] = dashParts;
+    return `${year}-${month}-${day}`;
+  }
+  // Fallback: return as is (will likely cause a DB error)
+  return dateStr;
+}
+
 // ─── Extended parsed row (employee + this-period hours + deductions) ──────────
 
 export interface BulkRow {
@@ -131,7 +153,7 @@ function parseRow(raw: Record<string, string>, lineNum: number): { row: BulkRow 
     email:          raw.email?.trim()       || "",
     phone:          raw.phone?.trim()       || "",
     county:         raw.county?.trim()      || "",
-    startDate:      raw.start_date?.trim()  || "",
+    startDate: parseDateToISO(raw.start_date),
     employmentType: empType,
     currency,
     rate:           parseNum(raw.rate, 0),
