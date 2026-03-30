@@ -3,22 +3,6 @@
 /**
  * Slipdesk — App Context (Supabase-backed)
  * Place at: src/context/AppContext.tsx
- *
- * FIX 3 — Dashboard goes white on navigation:
- *
- * Root cause: The component tree mounts fresh on each navigation in Next.js
- * App Router. `booted` and `dataLoading` both start as false/false so
- * `loading = !booted || dataLoading = true` immediately — correct. But the
- * old code also re-ran loadData() on every TOKEN_REFRESHED auth event,
- * which flipped `dataLoading` back to true even mid-session, causing
- * children that gate on `!loading` to unmount (white screen).
- *
- * The fix (already partially in place) is:
- *  a) Never trigger loadData() on TOKEN_REFRESHED — only on SIGNED_IN / USER_UPDATED.
- *  b) Expose a separate `initializing` flag for the very first mount so
- *     the layout can show a skeleton instead of rendering nothing.
- *  c) Children that use `loading` to gate their render should use
- *     `initializing` instead, so mid-session token refreshes don't blank the page.
  */
 
 import {
@@ -57,7 +41,6 @@ export interface Employee {
   momoNumber:     string;
   isActive:       boolean;
   isArchived:     boolean;
-  // Pending payroll overrides — set via CSV import, consumed on pay run start
   pendingRegularHours?:  number | null;
   pendingOvertimeHours?: number | null;
   pendingHolidayHours?:  number | null;
@@ -106,7 +89,6 @@ function dbToEmployee(row: DbEmployee): Employee {
     momoNumber:     row.momo_number,
     isActive:       row.is_active,
     isArchived:     row.is_archived,
-    // Pending payroll overrides — stored in DB columns if present, otherwise null
     pendingRegularHours:  row.pending_regular_hours  ?? null,
     pendingOvertimeHours: row.pending_overtime_hours ?? null,
     pendingHolidayHours:  row.pending_holiday_hours  ?? null,
@@ -130,16 +112,13 @@ function dbToCompany(row: DbCompany): CompanyProfile {
 
 interface AppState {
   user:         User | null;
-  /** True only during initial page boot — use this to show skeleton screens.
-   *  Does NOT flip true again on mid-session token refreshes. */
   loading:      boolean;
-  /** Alias for loading — kept for backward compatibility. */
   initializing: boolean;
   company:    CompanyProfile;
   setCompany: (profile: Partial<CompanyProfile>) => Promise<void>;
   employees:          Employee[];
   archivedEmployees:  Employee[];
-  addEmployee:        (data: Omit<Employee, "id" | "fullName" | "isArchived">) => Promise<Employee | null>;
+  addEmployee:        (data: Omit<Employee, "id" | "fullName" | "isArchived">, employeeNumber?: string) => Promise<Employee | null>;
   refreshEmployees:   () => Promise<void>;
   updateEmployee:     (id: string, data: Partial<Employee>) => Promise<void>;
   archiveEmployee:    (id: string) => Promise<void>;
@@ -154,11 +133,7 @@ const AppContext = createContext<AppState | null>(null);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(supabase: ReturnType<typeof createClient>): any { return supabase as any; }
 
-// ─── Module-level boot flag ───────────────────────────────────────────────────
-// Using a module-level variable (not React state) means this survives
-// Next.js App Router navigations, which remount the component tree but do NOT
-// reload the JS module. Without this, `booted` reset to false on every page
-// navigation → every page went white until Supabase responded again.
+// Module-level boot flag — survives Next.js App Router navigations
 let _hasBooted = false;
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -167,15 +142,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const supabase = sbRef.current;
 
   const [user,         setUser]         = useState<User | null>(null);
-  // Initialise from the module flag so navigating back to a page never
-  // shows a white screen — if we've already booted once, start as true.
   const [booted,       setBooted]       = useState(_hasBooted);
   const [dataLoading,  setDataLoading]  = useState(false);
   const [company,      setCompanyState] = useState<CompanyProfile>(EMPTY_COMPANY);
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
 
-  // `loading` is true only on the very first boot across the entire session.
-  // TOKEN_REFRESHED events and page navigations do NOT flip it back to true.
   const loading = !booted;
 
   useEffect(() => {
@@ -190,8 +161,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await loadData();
         if (mounted) setDataLoading(false);
       }
-      // Flip both the module-level flag and React state. The module flag
-      // persists across navigations; the React state drives re-renders.
       if (mounted) { _hasBooted = true; setBooted(true); }
     }
 
@@ -204,22 +173,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setUser(newUser);
 
         if (newUser) {
-          // FIX 3: only reload data on meaningful sign-in events.
-          // TOKEN_REFRESHED fires silently every ~60 mins and must NOT
-          // trigger a data reload — that was causing the dashboard to
-          // go white every hour.
           if (event === "SIGNED_IN" || event === "USER_UPDATED") {
             setDataLoading(true);
             await loadData();
             if (mounted) setDataLoading(false);
           }
-          // TOKEN_REFRESHED: do nothing — the session is still valid,
-          // the data is still in state, no reload needed.
         } else {
-          // Signed out — clear everything
           setCompanyState(EMPTY_COMPANY);
           setAllEmployees([]);
-          // Note: booted stays true so a sign-out doesn't blank the page
         }
       },
     );
@@ -267,19 +228,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [company.id, supabase]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const nextEmpNumber = useCallback(() => {
-    const nums = allEmployees.map((e) => parseInt(e.employeeNumber.replace(/\D/g,""), 10)).filter(Boolean);
+  // FIX: accepts an optional currentList snapshot so bulk callers can pass a
+  // stable list and avoid reading stale React state across concurrent saves.
+  const nextEmpNumber = useCallback((currentList: Employee[] = allEmployees) => {
+    const nums = currentList
+      .map((e) => parseInt(e.employeeNumber.replace(/\D/g, ""), 10))
+      .filter(Boolean);
     return `EMP-${String(nums.length ? Math.max(...nums) + 1 : 1).padStart(3, "0")}`;
   }, [allEmployees]);
 
+  // FIX: accepts an optional pre-assigned employeeNumber so bulk import callers
+  // can compute all numbers upfront before any async work begins, preventing
+  // stale-state collisions that caused the upsert conflict to overwrite rows.
   const addEmployee = useCallback(async (
     data: Omit<Employee, "id" | "fullName" | "isArchived">,
+    employeeNumber?: string,
   ): Promise<Employee | null> => {
     const { data:co } = await db(supabase).from("companies").select("id").single();
     if (!co) return null;
     const { data:row } = await db(supabase).from("employees").upsert({
       company_id:      co.id,
-      employee_number: data.employeeNumber || nextEmpNumber(),
+      employee_number: employeeNumber || data.employeeNumber || nextEmpNumber(),
       first_name:      data.firstName,
       last_name:       data.lastName,
       job_title:       data.jobTitle,
@@ -298,9 +267,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       bank_name:       data.bankName,
       account_number:  data.accountNumber,
       momo_number:     data.momoNumber,
-      is_active:            data.isActive,
-      is_archived:          false,
-      // Write pending hour overrides if provided — null means "use default"
+      is_active:       data.isActive,
+      is_archived:     false,
       ...(data.pendingRegularHours  !== undefined && { pending_regular_hours:  data.pendingRegularHours  }),
       ...(data.pendingOvertimeHours !== undefined && { pending_overtime_hours: data.pendingOvertimeHours }),
       ...(data.pendingHolidayHours  !== undefined && { pending_holiday_hours:  data.pendingHolidayHours  }),
@@ -314,7 +282,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const exists = prev.some((e) => e.id === mapped.id);
       return exists ? prev.map((e) => e.id === mapped.id ? mapped : e) : [...prev, mapped];
     });
-    // Return the fully-mapped employee so callers get the real Supabase UUID
     return mapped;
   }, [supabase, nextEmpNumber]);
 
@@ -371,8 +338,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAllEmployees((prev) => prev.filter((e) => e.id !== id));
   }, [supabase]);
 
-  // Reload employees from Supabase — used after bulk import to ensure
-  // all concurrently-saved employees are reflected in state accurately.
   const refreshEmployees = useCallback(async () => {
     const { data: emps } = await db(supabase).from("employees").select("*").order("employee_number");
     if (emps) setAllEmployees((emps as DbEmployee[]).map(dbToEmployee));
@@ -393,7 +358,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       user,
       loading,
-      initializing: loading,   // alias — both refer to first-boot loading only
+      initializing: loading,
       company, setCompany,
       employees, archivedEmployees,
       addEmployee, refreshEmployees, updateEmployee,
