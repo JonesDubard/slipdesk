@@ -240,15 +240,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // FIX: accepts an optional pre-assigned employeeNumber so bulk import callers
   // can compute all numbers upfront before any async work begins, preventing
   // stale-state collisions that caused the upsert conflict to overwrite rows.
-  const addEmployee = useCallback(async (
-    data: Omit<Employee, "id" | "fullName" | "isArchived">,
-    employeeNumber?: string,
-  ): Promise<Employee | null> => {
-    const { data:co } = await db(supabase).from("companies").select("id").single();
-    if (!co) return null;
-    const { data:row } = await db(supabase).from("employees").upsert({
+  // src/context/AppContext.tsx
+const addEmployee = useCallback(async (
+  data: Omit<Employee, "id" | "fullName" | "isArchived">,
+  employeeNumber?: string,
+): Promise<Employee> => { // now returns Employee (never null)
+  const { data:co, error:coErr } = await db(supabase)
+    .from("companies")
+    .select("id")
+    .single();
+
+  if (coErr || !co) throw new Error("Company not found. Please set up your company profile first.");
+
+  const finalNumber = employeeNumber || data.employeeNumber || nextEmpNumber();
+
+  const { data:row, error } = await db(supabase)
+    .from("employees")
+    .insert({
       company_id:      co.id,
-      employee_number: employeeNumber || data.employeeNumber || nextEmpNumber(),
+      employee_number: finalNumber,
       first_name:      data.firstName,
       last_name:       data.lastName,
       job_title:       data.jobTitle,
@@ -273,17 +283,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...(data.pendingOvertimeHours !== undefined && { pending_overtime_hours: data.pendingOvertimeHours }),
       ...(data.pendingHolidayHours  !== undefined && { pending_holiday_hours:  data.pendingHolidayHours  }),
       ...(data.pendingDeductions    !== undefined && { pending_deductions:     data.pendingDeductions    }),
-    }, { onConflict:"company_id,employee_number" }).select().single();
+    })
+    .select()
+    .single();
 
-    if (!row) return null;
+  if (error) throw error; // e.g., duplicate key violation
+  if (!row) throw new Error("Failed to insert employee – no row returned.");
 
-    const mapped = dbToEmployee(row as DbEmployee);
-    setAllEmployees((prev) => {
-      const exists = prev.some((e) => e.id === mapped.id);
-      return exists ? prev.map((e) => e.id === mapped.id ? mapped : e) : [...prev, mapped];
-    });
-    return mapped;
-  }, [supabase, nextEmpNumber]);
+  const mapped = dbToEmployee(row as DbEmployee);
+  setAllEmployees((prev) => [...prev, mapped]);
+  return mapped;
+}, [supabase, nextEmpNumber]);
 
   const updateEmployee = useCallback(async (id: string, data: Partial<Employee>) => {
     const { data:row } = await db(supabase).from("employees").update({

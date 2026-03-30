@@ -1136,60 +1136,60 @@ export default function EmployeesPage() {
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
-  async function handleBulkImport(rows: Partial<Employee>[]): Promise<ImportResult> {
-    // Pre-compute ALL employee numbers before any await to avoid stale-state
-    // collisions (sequential awaits all see the same React state snapshot).
-    const existingNums = employees
-      .map((e) => parseInt(e.employeeNumber.replace(/\D/g, ""), 10))
-      .filter(Boolean);
-    let counter = existingNums.length ? Math.max(...existingNums) : 0;
+  // src/app/(dashboard)/employees/page.tsx
+async function handleBulkImport(rows: Partial<Employee>[]): Promise<ImportResult> {
+  const existingNums = employees
+    .map((e) => parseInt(e.employeeNumber.replace(/\D/g, ""), 10))
+    .filter(Boolean);
+  let counter = existingNums.length ? Math.max(...existingNums) : 0;
 
-    const numbered = rows.map((row) => {
-      const csvNum = (row.employeeNumber ?? "").trim();
-      const empNum = csvNum || `EMP-${String(++counter).padStart(3, "0")}`;
-      return { row, empNum };
-    });
+  const numbered = rows.map((row) => {
+    const csvNum = (row.employeeNumber ?? "").trim();
+    const empNum = csvNum || `EMP-${String(++counter).padStart(3, "0")}`;
+    return { row, empNum };
+  });
 
-    let imported = 0;
-    const skipped: ImportResult["skipped"] = [];
+  let imported = 0;
+  const skipped: ImportResult["skipped"] = [];
 
-    for (let i = 0; i < numbered.length; i++) {
-      const { row, empNum } = numbered[i];
-      try {
-        await addEmployee(
-          { ...(row as Omit<Employee, "id" | "fullName" | "isArchived">), isActive: true },
-          empNum,
-        );
-        imported++;
-      } catch (err) {
-        // Capture per-row failures so partial success is still surfaced
-        skipped.push({
-          rowNum: i + 2,
-          name: [row.firstName, row.lastName].filter(Boolean).join(" "),
-          reasons: [err instanceof Error ? err.message : "Unknown error"],
-        });
-        console.error(`Row ${i + 2} failed:`, err);
-      }
-    }
-
-    await refreshEmployees();
-
-    if (imported > 0) {
-      toast.success(
-        skipped.length > 0
-          ? `${imported} imported, ${skipped.length} skipped — see details below.`
-          : `Successfully imported ${imported} employee${imported !== 1 ? "s" : ""}.`
+  for (let i = 0; i < numbered.length; i++) {
+    const { row, empNum } = numbered[i];
+    try {
+      // addEmployee now throws on duplicate or any other error
+      await addEmployee(
+        { ...(row as Omit<Employee, "id" | "fullName" | "isArchived">), isActive: true },
+        empNum,
       );
-    } else {
-      toast.error("No employees were imported. Check the errors below.");
+      imported++;
+    } catch (err) {
+      skipped.push({
+        rowNum: i + 2,
+        name: [row.firstName, row.lastName].filter(Boolean).join(" "),
+        reasons: [err instanceof Error ? err.message : "Unknown error"],
+      });
+      console.error(`Row ${i + 2} failed:`, err);
     }
-
-    if (skipped.length === 0) setShowUpload(false);
-
-    return { imported, skipped };
   }
 
-  async function handleSaveEmployee(data: Omit<Employee, "id" | "fullName" | "isArchived">) {
+  await refreshEmployees();
+
+  if (imported > 0) {
+    toast.success(
+      skipped.length > 0
+        ? `${imported} imported, ${skipped.length} skipped — see details below.`
+        : `Successfully imported ${imported} employee${imported !== 1 ? "s" : ""}.`
+    );
+  } else {
+    toast.error("No employees were imported. Check the errors below.");
+  }
+
+  if (skipped.length === 0) setShowUpload(false);
+
+  return { imported, skipped };
+}
+
+async function handleSaveEmployee(data: Omit<Employee, "id" | "fullName" | "isArchived">) {
+  try {
     if (drawerEmp) {
       await updateEmployee(drawerEmp.id, data);
       toast.success("Employee updated.");
@@ -1197,7 +1197,12 @@ export default function EmployeesPage() {
       await addEmployee(data);
       toast.success("Employee added.");
     }
+    setShowDrawer(false);
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : "Operation failed");
+    console.error("Save employee error:", err);
   }
+}
 
   function openAdd()           { setDrawerEmp(undefined); setShowDrawer(true); }
   function openEdit(e: Employee) { setDrawerEmp(e);         setShowDrawer(true); }
