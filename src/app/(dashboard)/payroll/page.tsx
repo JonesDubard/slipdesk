@@ -21,6 +21,12 @@ import PageSkeleton from "@/components/PageSkeleton";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 
+const PDF_NAVY    = "#002147";
+const PDF_EMERALD = "#50C878";
+const PDF_SLATE   = "#64748b";
+const PDF_LIGHT   = "#f8fafc";
+const PDF_BORDER  = "#e2e8f0";
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type RunStatus = "draft"|"review"|"approved"|"paid";
@@ -129,60 +135,55 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
   const {calc,currency}=line;
   if(!calc) throw new Error("No calculation data");
   const sym=currency==="USD"?"$":"L$";
-  const NAVY="color-mix(in oklch, var(--primary) 30%, black)";
-  const EMERALD="var(--primary)";
-  const SLATE="var(--muted-foreground)";
-  const LIGHT="color-mix(in oklch, var(--background) 10%, white)";
-  const BORDER="var(--border)";
   const S=StyleSheet.create({
-    page:{fontFamily:"Helvetica",fontSize:9,color:"var(--foreground)",backgroundColor:"var(--background)",paddingHorizontal:36,paddingVertical:32},
-    header:{flexDirection:"row",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,paddingBottom:16,borderBottomWidth:2,borderBottomColor:NAVY},
+    page:{fontFamily:"Helvetica",fontSize:9,color:"#1e293b",backgroundColor:"#fff",paddingHorizontal:36,paddingVertical:32},
+    header:{flexDirection:"row",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,paddingBottom:16,borderBottomWidth:2,borderBottomColor:PDF_NAVY},
     coLeft:{flexDirection:"row",alignItems:"center",gap:10},logo:{width:48,height:48,objectFit:"contain"},
-    coName:{fontSize:16,fontFamily:"Helvetica-Bold",color:NAVY,marginBottom:3},
-    coMeta:{fontSize:8,color:SLATE,lineHeight:1.5},
-    badge:{backgroundColor:NAVY,paddingHorizontal:12,paddingVertical:6,borderRadius:4},
+    coName:{fontSize:16,fontFamily:"Helvetica-Bold",color:PDF_NAVY,marginBottom:3},
+    coMeta:{fontSize:8,color:PDF_SLATE,lineHeight:1.5},
+    badge:{backgroundColor:PDF_NAVY,paddingHorizontal:12,paddingVertical:6,borderRadius:4},
     badgeText:{fontSize:10,fontFamily:"Helvetica-Bold",color:"#fff",letterSpacing:1},
     infoGrid:{flexDirection:"row",gap:12,marginBottom:18},
-    infoBox:{flex:1,backgroundColor:LIGHT,borderRadius:6,padding:10,borderWidth:1,borderColor:BORDER},
-    infoLbl:{fontSize:7,fontFamily:"Helvetica-Bold",color:SLATE,textTransform:"uppercase",letterSpacing:0.5,marginBottom:2},
-    infoVal:{fontSize:9,color:NAVY,fontFamily:"Helvetica-Bold"},infoSub:{fontSize:8,color:"color-mix(in oklch, var(--foreground) 60%, transparent)"},
-    secTitle:{fontSize:8,fontFamily:"Helvetica-Bold",color:SLATE,textTransform:"uppercase",letterSpacing:0.8,marginBottom:6,marginTop:14},
-    table:{borderWidth:1,borderColor:BORDER,borderRadius:6,overflow:"hidden"},
-    tHead:{flexDirection:"row",backgroundColor:NAVY,paddingHorizontal:10,paddingVertical:6},
+    infoBox:{flex:1,backgroundColor:PDF_LIGHT,borderRadius:6,padding:10,borderWidth:1,borderColor:PDF_BORDER},
+    infoLbl:{fontSize:7,fontFamily:"Helvetica-Bold",color:PDF_SLATE,textTransform:"uppercase",letterSpacing:0.5,marginBottom:2},
+    infoVal:{fontSize:9,color:PDF_NAVY,fontFamily:"Helvetica-Bold"},infoSub:{fontSize:8,color:"#374151"},
+    secTitle:{fontSize:8,fontFamily:"Helvetica-Bold",color:PDF_SLATE,textTransform:"uppercase",letterSpacing:0.8,marginBottom:6,marginTop:14},
+    table:{borderWidth:1,borderColor:PDF_BORDER,borderRadius:6,overflow:"hidden"},
+    tHead:{flexDirection:"row",backgroundColor:PDF_NAVY,paddingHorizontal:10,paddingVertical:6},
     thDesc:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:"#fff",width:140},
     thNotes:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:"#fff",flex:1},
     thAmt:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:"#fff",textAlign:"right",width:90},
-    tRow:{flexDirection:"row",paddingHorizontal:10,paddingVertical:8,borderTopWidth:1,borderTopColor:BORDER,alignItems:"flex-start"},
-    tAlt:{backgroundColor:LIGHT},
-    tdDesc:{width:140,fontSize:8.5,fontFamily:"Helvetica-Bold",color:NAVY},
-    tdNotes:{flex:1,fontSize:8,color:"color-mix(in oklch, var(--foreground) 60%, transparent)",lineHeight:1.6},
-    tdAmt:{width:90,fontSize:8.5,color:"color-mix(in oklch, var(--foreground) 60%, transparent)",textAlign:"right"},
-    tdAmtBold:{width:90,fontSize:8.5,fontFamily:"Helvetica-Bold",color:NAVY,textAlign:"right"},
-    tdRed:{width:90,fontSize:8.5,color:"var(--destructive)",textAlign:"right"},
-    tdNote:{flex:1,fontSize:7.5,color:SLATE,lineHeight:1.5},
-    erBox:{marginTop:10,backgroundColor:LIGHT,borderRadius:6,padding:8,borderWidth:1,borderColor:BORDER},
-    erLabel:{fontSize:7,fontFamily:"Helvetica-Bold",color:SLATE,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4},
+    tRow:{flexDirection:"row",paddingHorizontal:10,paddingVertical:8,borderTopWidth:1,borderTopColor:PDF_BORDER,alignItems:"flex-start"},
+    tAlt:{backgroundColor:PDF_LIGHT},
+    tdDesc:{width:140,fontSize:8.5,fontFamily:"Helvetica-Bold",color:PDF_NAVY},
+    tdNotes:{flex:1,fontSize:8,color:"#374151",lineHeight:1.6},
+    tdAmt:{width:90,fontSize:8.5,color:"#374151",textAlign:"right"},
+    tdAmtBold:{width:90,fontSize:8.5,fontFamily:"Helvetica-Bold",color:PDF_NAVY,textAlign:"right"},
+    tdRed:{width:90,fontSize:8.5,color:"#dc2626",textAlign:"right"},
+    tdNote:{flex:1,fontSize:7.5,color:PDF_SLATE,lineHeight:1.5},
+    erBox:{marginTop:10,backgroundColor:PDF_LIGHT,borderRadius:6,padding:8,borderWidth:1,borderColor:PDF_BORDER},
+    erLabel:{fontSize:7,fontFamily:"Helvetica-Bold",color:PDF_SLATE,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4},
     erRow:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},
-    erText:{fontSize:7.5,color:SLATE},erAmount:{fontSize:8,fontFamily:"Helvetica-Bold",color:NAVY},
-    netBox:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",backgroundColor:NAVY,borderRadius:6,paddingHorizontal:14,paddingVertical:10,marginTop:12},
+    erText:{fontSize:7.5,color:PDF_SLATE},erAmount:{fontSize:8,fontFamily:"Helvetica-Bold",color:PDF_NAVY},
+    netBox:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",backgroundColor:PDF_NAVY,borderRadius:6,paddingHorizontal:14,paddingVertical:10,marginTop:12},
     netLabel:{fontSize:10,fontFamily:"Helvetica-Bold",color:"#fff"},
-    netValue:{fontSize:16,fontFamily:"Helvetica-Bold",color:EMERALD,textAlign:"right"},
-    netWords:{backgroundColor:LIGHT,borderRadius:6,paddingHorizontal:12,paddingVertical:7,marginTop:6,borderWidth:1,borderColor:BORDER,flexDirection:"row",alignItems:"center",gap:6},
-    netWordsLbl:{fontSize:7,fontFamily:"Helvetica-Bold",color:SLATE,textTransform:"uppercase",letterSpacing:0.4},
-    netWordsTxt:{fontSize:8,color:NAVY,fontFamily:"Helvetica-Bold",flex:1},
-    payBox:{marginTop:10,backgroundColor:"color-mix(in oklch, var(--primary) 15%, transparent)",borderRadius:6,padding:8,borderWidth:1,borderColor:"color-mix(in oklch, var(--primary) 50%, transparent)"},
-    payLbl:{fontSize:7,fontFamily:"Helvetica-Bold",color:"color-mix(in oklch, var(--primary) 60%, black)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:4},
+    netValue:{fontSize:16,fontFamily:"Helvetica-Bold",color:PDF_EMERALD,textAlign:"right"},
+    netWords:{backgroundColor:PDF_LIGHT,borderRadius:6,paddingHorizontal:12,paddingVertical:7,marginTop:6,borderWidth:1,borderColor:PDF_BORDER,flexDirection:"row",alignItems:"center",gap:6},
+    netWordsLbl:{fontSize:7,fontFamily:"Helvetica-Bold",color:PDF_SLATE,textTransform:"uppercase",letterSpacing:0.4},
+    netWordsTxt:{fontSize:8,color:PDF_NAVY,fontFamily:"Helvetica-Bold",flex:1},
+    payBox:{marginTop:10,backgroundColor:"#f0fdf4",borderRadius:6,padding:8,borderWidth:1,borderColor:"#86efac"},
+    payLbl:{fontSize:7,fontFamily:"Helvetica-Bold",color:"#166534",textTransform:"uppercase",letterSpacing:0.5,marginBottom:4},
     payRow:{flexDirection:"row",gap:20,flexWrap:"wrap"},payItem:{flex:1,minWidth:120},
-    payItemLbl:{fontSize:7,color:"color-mix(in oklch, var(--primary) 60%, black)",marginBottom:1},payItemVal:{fontSize:8.5,fontFamily:"Helvetica-Bold",color:NAVY},
+    payItemLbl:{fontSize:7,color:"#166534",marginBottom:1},payItemVal:{fontSize:8.5,fontFamily:"Helvetica-Bold",color:PDF_NAVY},
     compRow:{flexDirection:"row",gap:8,marginTop:10},
-    compBadge:{flex:1,flexDirection:"row",alignItems:"center",gap:4,backgroundColor:"color-mix(in oklch, var(--primary) 15%, transparent)",borderWidth:1,borderColor:"color-mix(in oklch, var(--primary) 50%, transparent)",borderRadius:4,paddingHorizontal:8,paddingVertical:5},
-    compDot:{width:5,height:5,borderRadius:3,backgroundColor:EMERALD},
-    compText:{fontSize:7.5,color:"color-mix(in oklch, var(--primary) 60%, black)",fontFamily:"Helvetica-Bold"},
-    sigSection:{flexDirection:"row",gap:30,marginTop:24,paddingTop:16,borderTopWidth:1,borderTopColor:BORDER},
-    sigBox:{flex:1},sigLine:{borderBottomWidth:1,borderBottomColor:"color-mix(in oklch, var(--foreground) 20%, transparent)",marginBottom:4,height:20},
-    sigLabel:{fontSize:7.5,color:SLATE,textAlign:"center"},
-    footer:{marginTop:16,paddingTop:10,borderTopWidth:1,borderTopColor:BORDER,flexDirection:"row",justifyContent:"space-between",alignItems:"center"},
-    footerTxt:{fontSize:7,color:"color-mix(in oklch, var(--foreground) 60%, transparent)"},footerBrand:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:NAVY},
+    compBadge:{flex:1,flexDirection:"row",alignItems:"center",gap:4,backgroundColor:"#f0fdf4",borderWidth:1,borderColor:"#86efac",borderRadius:4,paddingHorizontal:8,paddingVertical:5},
+    compDot:{width:5,height:5,borderRadius:3,backgroundColor:PDF_EMERALD},
+    compText:{fontSize:7.5,color:"#166534",fontFamily:"Helvetica-Bold"},
+    sigSection:{flexDirection:"row",gap:30,marginTop:24,paddingTop:16,borderTopWidth:1,borderTopColor:PDF_BORDER},
+    sigBox:{flex:1},sigLine:{borderBottomWidth:1,borderBottomColor:"#cbd5e1",marginBottom:4,height:20},
+    sigLabel:{fontSize:7.5,color:PDF_SLATE,textAlign:"center"},
+    footer:{marginTop:16,paddingTop:10,borderTopWidth:1,borderTopColor:PDF_BORDER,flexDirection:"row",justifyContent:"space-between",alignItems:"center"},
+    footerTxt:{fontSize:7,color:"#94a3b8"},footerBrand:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:PDF_NAVY},
   });
   const earningsRows=[
     {label:"Regular Salary",note:`${line.regularHours} hrs × ${sym}${line.rate.toFixed(2)}/hr`,amount:calc.regularSalary},
@@ -255,13 +256,13 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
         <View style={S.table}>
           <View style={S.tHead}><Text style={S.thDesc}>Description</Text><Text style={S.thNotes}>Notes</Text><Text style={S.thAmt}>Amount ({currency})</Text></View>
           {earningsRows.map((row,i)=>(<View key={row.label} style={[S.tRow,i%2===1?S.tAlt:{}]}><Text style={S.tdDesc}>{row.label}</Text><Text style={S.tdNotes}>{row.note}</Text><Text style={S.tdAmt}>{fmtMoney(row.amount,sym)}</Text></View>))}
-          <View style={[S.tRow,{backgroundColor:"color-mix(in oklch, var(--primary) 15%, transparent)"}]}><Text style={S.tdDesc}>GROSS PAY</Text><Text style={S.tdNotes}>{" "}</Text><Text style={S.tdAmtBold}>{fmtMoney(calc.grossPay,sym)}</Text></View>
+          <View style={[S.tRow,{backgroundColor:"#f0fdf4"}]}><Text style={S.tdDesc}>GROSS PAY</Text><Text style={S.tdNotes}>{" "}</Text><Text style={S.tdAmtBold}>{fmtMoney(calc.grossPay,sym)}</Text></View>
         </View>
         <Text style={S.secTitle}>Deductions</Text>
         <View style={S.table}>
           <View style={S.tHead}><Text style={S.thDesc}>Description</Text><Text style={S.thNotes}>Basis</Text><Text style={S.thAmt}>Amount ({currency})</Text></View>
           {deductionRows.map((row,i)=>(<View key={row.label} style={[S.tRow,i%2===1?S.tAlt:{}]}><Text style={S.tdDesc}>{row.label}</Text><Text style={S.tdNote}>{row.note}</Text><Text style={S.tdRed}>({fmtMoney(row.amount,sym)})</Text></View>))}
-          <View style={[S.tRow,{backgroundColor:"color-mix(in oklch, var(--warning) 15%, transparent)"}]}><Text style={S.tdDesc}>TOTAL DEDUCTIONS</Text><Text style={S.tdNotes}>{" "}</Text><Text style={[S.tdRed,{fontFamily:"Helvetica-Bold"}]}>({fmtMoney(calc.totalDeductions,sym)})</Text></View>
+          <View style={[S.tRow,{backgroundColor:"#fff7ed"}]}><Text style={S.tdDesc}>TOTAL DEDUCTIONS</Text><Text style={S.tdNotes}>{" "}</Text><Text style={[S.tdRed,{fontFamily:"Helvetica-Bold"}]}>({fmtMoney(calc.totalDeductions,sym)})</Text></View>
         </View>
         <View style={S.erBox}>
           <Text style={S.erLabel}>Employer Contributions (not deducted from employee)</Text>
