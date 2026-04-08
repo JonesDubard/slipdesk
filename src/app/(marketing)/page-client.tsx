@@ -146,10 +146,10 @@ function Nav() {
         </nav>
 
         <div className="flex items-center gap-3">
-          <Link
-            href="/login"
-            className="text-sm text-white/70 hover:text-white transition-colors hidden md:inline"
-          >
+          <Link href="/demo" className="text-sm text-white/70 hover:text-white transition-colors hidden md:inline">
+            Live demo
+          </Link>
+          <Link href="/login" className="text-sm text-white/70 hover:text-white transition-colors hidden md:inline">
             Sign in
           </Link>
           <Link
@@ -226,11 +226,7 @@ function Hero() {
             income tax to the last decimal, minimazing spreadsheet work and compliance overhead.
           </motion.p>
 
-          <motion.div
-            variants={fadeUp}
-            custom={3}
-            className="flex flex-col sm:flex-row gap-4"
-          >
+          <motion.div variants={fadeUp} custom={3} className="flex flex-col sm:flex-row gap-4">
             <Link
               href="/login"
               className="inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-em text-navy font-semibold rounded-xl hover-em transition-colors text-base"
@@ -238,17 +234,17 @@ function Hero() {
               Run your first payroll free
               <ArrowRight className="w-4 h-4" />
             </Link>
-            <a
-              href="#features"
-              className="inline-flex items-center justify-center gap-2 px-7 py-3.5 border border-white/20 text-white rounded-xl hover:bg-white/5 transition-colors text-base"
+            <Link
+              href="/demo"
+              className="inline-flex items-center justify-center gap-2 px-7 py-3.5 border border-emerald-500/40 text-emerald-400 rounded-xl hover:bg-emerald-500/10 transition-colors text-base"
             >
-              See how it works
+              Try interactive demo
               <ChevronRight className="w-4 h-4" />
-            </a>
+            </Link>
           </motion.div>
 
           <motion.p variants={fadeUp} custom={4} className="mt-8 text-white/35 text-sm font-mono">
-            No setup fees · Cancel anytime · $0.75 per employee/month
+           No setup fees · Cancel anytime · Flat monthly fee from $50
           </motion.p>
         </motion.div>
 
@@ -503,7 +499,7 @@ const STATS = [
   { value: "2",     unit: "currencies",       label: "USD & LRD, always in sync"              },
   { value: "4",     unit: "tax brackets",     label: "LRA income tax brackets, applied right" },
   { value: "<1s",   unit: "recalc",           label: "Real-time grid recalculation"           },
-  { value: "$0.75", unit: "/ emp / mo",       label: "No hidden fees."                  },
+  { value: "Flat", unit: "monthly fee",       label: "No hidden fees."                  },
 ];
 
 function Stats() {
@@ -537,75 +533,48 @@ function Stats() {
 // ─── Pricing ──────────────────────────────────────────────────────────────────
 
 function Pricing() {
-  const included = [
-    "Unlimited pay runs per month",
-    "Dual-currency USD & LRD support",
-    "Automatic LRA income tax calculation",
-    "NASSCORP compliance built-in",
-    "Bulk CSV / Excel import",
-    "PDF payslip generation",
-    "Offline-resilient data persistence",
-    "Priority email support",
+  const tiers = [
+    { name: 'Basic', price: 50, maxEmployees: 80, description: 'Perfect for small businesses' },
+    { name: 'Standard', price: 300, maxEmployees: 499, description: 'For growing teams' },
+    { name: 'Premium', price: 500, maxEmployees: 'Unlimited', description: 'Full-scale operations' },
   ];
+
   return (
     <section id="pricing" className="py-20 sm:py-28 bg-slate-50">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
         <AnimateIn className="text-center mb-14">
           <p className="text-em font-mono text-xs uppercase tracking-widest mb-3">Pricing</p>
           <h2 className="font-serif text-navy text-3xl sm:text-4xl mb-4">
-            Transparent. Predictable. Fair.
+            Simple, flat monthly fees
           </h2>
           <p className="text-slate-500 max-w-md mx-auto text-sm sm:text-base">
-            One simple model, you pay only for the employees you actually run payroll for.
+            No per‑employee surprises. Pay one price based on your team size.
           </p>
         </AnimateIn>
-        <AnimateIn delay={1} className="max-w-lg mx-auto">
-          <div className="bg-navy rounded-3xl overflow-hidden shadow-2xl border border-white/5">
-            <div className="px-6 sm:px-8 pt-10 pb-8 text-white">
-              <div className="flex items-end gap-2 mb-1">
-                <span className="font-serif text-5xl sm:text-6xl font-bold">$0.75</span>
-                <div className="mb-2 text-white/50 font-mono text-xs sm:text-sm">
-                  <p>per employee</p>
-                  <p>per month</p>
-                </div>
+        <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+          {tiers.map((tier, idx) => (
+            <AnimateIn key={tier.name} delay={idx * 0.1} className="bg-white rounded-2xl shadow-lg border border-slate-100 p-6 text-center hover:shadow-xl transition-all">
+              <h3 className="font-serif text-navy text-xl font-bold mb-2">{tier.name}</h3>
+              <div className="mt-4 mb-4">
+                <span className="text-4xl font-black text-navy">${tier.price}</span>
+                <span className="text-slate-400">/month</span>
               </div>
-              <p className="text-em font-mono text-sm">No setup fees. No annual lock-in.</p>
-            </div>
-            <div className="mx-6 sm:mx-8 mb-8 bg-white/5 rounded-2xl p-4 sm:p-5 font-mono text-sm text-white/70">
-              <p className="text-white/40 text-[10px] uppercase tracking-widest mb-3">Example</p>
-              {[
-                { label: "10 employees",  cost: "$7.50 / mo"  },
-                { label: "25 employees",  cost: "$18.75 / mo"  },
-                { label: "100 employees", cost: "$75.00 / mo" },
-              ].map((e) => (
-                <div key={e.label} className="flex justify-between py-1.5 border-b border-white/10 last:border-0">
-                  <span>{e.label}</span>
-                  <span className="text-em font-semibold">{e.cost}</span>
-                </div>
-              ))}
-            </div>
-            <div className="px-6 sm:px-8 pb-10">
-              <p className="text-white/40 text-[10px] font-mono uppercase tracking-widest mb-4">
-                Everything included
+              <p className="text-sm text-slate-500 mb-4">
+                Up to {tier.maxEmployees === 'Unlimited' ? 'unlimited' : `${tier.maxEmployees} employees`}
               </p>
-              <div className="grid grid-cols-1 gap-2.5">
-                {included.map((f) => (
-                  <div key={f} className="flex items-center gap-3">
-                    <CheckCircle2 className="w-4 h-4 text-em flex-shrink-0" />
-                    <span className="text-white/70 text-sm">{f}</span>
-                  </div>
-                ))}
-              </div>
+              <p className="text-xs text-slate-400 mb-6">{tier.description}</p>
               <Link
                 href="/login"
-                className="mt-8 flex items-center justify-center gap-2 w-full py-4 bg-em text-navy font-bold rounded-xl hover-em transition-colors text-base"
+                className="inline-block w-full py-2.5 rounded-lg bg-em text-navy font-semibold hover:bg-em-dark transition-colors"
               >
-                Start free, no credit card needed
-                <ArrowRight className="w-4 h-4" />
+                Get started
               </Link>
-            </div>
-          </div>
-        </AnimateIn>
+            </AnimateIn>
+          ))}
+        </div>
+        <p className="text-center text-slate-400 text-sm mt-8">
+          All plans include LRA & NASSCORP compliance, dual‑currency, and PDF payslips.
+        </p>
       </div>
     </section>
   );

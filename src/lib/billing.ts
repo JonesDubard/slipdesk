@@ -24,7 +24,23 @@ export const FLUTTERWAVE_CONFIG = {
 
 // ─── PEPM pricing ─────────────────────────────────────────────────────────────
 // Early adopter rate — will move to $1.00 once traction is established
-export const PEPM_RATE_USD   = 0.75;
+export const TIERED_PRICING = {
+  basic:    { maxEmployees: 80,       price: 50  },
+  standard: { maxEmployees: 499,      price: 300 },
+  premium:  { maxEmployees: Infinity, price: 500 },
+} as const;
+
+export type PricingTier = keyof typeof TIERED_PRICING;
+
+export function getPricingTier(employeeCount: number): PricingTier {
+  if (employeeCount <= TIERED_PRICING.basic.maxEmployees)    return "basic";
+  if (employeeCount <= TIERED_PRICING.standard.maxEmployees) return "standard";
+  return "premium";
+}
+
+export function calculateMonthlyFee(employeeCount: number): number {
+  return TIERED_PRICING[getPricingTier(employeeCount)].price;
+}
 export const TRIAL_RUNS      = 1;
 export const FREE_TRIAL_DAYS = 30;
 
@@ -72,19 +88,6 @@ export interface CheckoutPayload {
 // ─── Calculations ─────────────────────────────────────────────────────────────
 
 /** $0.75 per active employee — no minimum floor during early adopter phase */
-export function calcMonthlyFee(activeEmployees: number): number {
-  return Math.round(activeEmployees * PEPM_RATE_USD * 100) / 100;
-}
-
-export function calcFeeBreakdown(activeEmployees: number) {
-  const total = calcMonthlyFee(activeEmployees);
-  return {
-    activeEmployees,
-    ratePerEmployee: PEPM_RATE_USD,
-    totalUSD:        total,
-    totalLRD:        Math.round(total * 185.44 * 100) / 100,
-  };
-}
 
 export function isOnTrial(profile: BillingProfile): boolean {
   if (profile.planId !== "trial") return false;

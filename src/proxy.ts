@@ -43,8 +43,35 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
+  // Inside your existing proxy function, after getting user
+if (user && isDashboard) {
+  // Get user's company subscription status
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("company_id")
+    .eq("id", user.id)
+    .single();
+
+  if (profile?.company_id) {
+    const { data: company } = await supabase
+      .from("companies")
+      .select("subscription_status, trial_expires_at")
+      .eq("id", profile.company_id)
+      .single();
+
+    const isTrialValid = company?.subscription_status === "trial" && new Date(company.trial_expires_at) > new Date();
+    const isActive = company?.subscription_status === "active";
+
+    if (!isTrialValid && !isActive && pathname !== "/billing") {
+      return NextResponse.redirect(new URL("/billing", request.url));
+    }
+  }
+}
+
   return response;
 }
+
+
 
 export const config = {
   matcher: [

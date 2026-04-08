@@ -1669,6 +1669,7 @@ import { useApp } from "@/context/AppContext";
 import { useToast } from "@/components/Toast";
 import PageSkeleton from "@/components/PageSkeleton";
 import { createClient } from "@/lib/supabase/client";
+import { canUse, getEffectiveTier } from "@/lib/plan-features";
 
 function parseDateToISO(dateStr: string | undefined): string {
   if (!dateStr) return "";
@@ -1940,10 +1941,11 @@ function Sel({ value, onChange, children }: {
 
 type DrawerTab = "basic" | "pay" | "payment";
 
-function EmployeeDrawer({ employee, onClose, onSave }: {
+function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
   employee?: Employee;
   onClose: () => void;
   onSave: (data: Omit<Employee, "id" | "fullName" | "isArchived">) => Promise<void>;
+  allowLRD?: boolean;
 }) {
   const isEdit = !!employee;
   const [form, setForm] = useState<Omit<Employee, "id" | "fullName" | "isArchived">>(
@@ -2083,9 +2085,18 @@ function EmployeeDrawer({ employee, onClose, onSave }: {
                 <Field label="Currency">
                   <Sel value={form.currency} onChange={(v) => set("currency", v as Currency)}>
                     <option value="USD">USD – US Dollar</option>
-                    <option value="LRD">LRD – Liberian Dollar</option>
+                    {allowLRD
+                      ? <option value="LRD">LRD – Liberian Dollar</option>
+                      : <option value="LRD" disabled>LRD – Liberian Dollar (Standard plan+)</option>
+                    }
                   </Sel>
                 </Field>
+                {!allowLRD && form.currency === "LRD" && (
+                  <p style={{ fontSize: 11, color: "#D97706", margin: "4px 0 0" }}>
+                    ⚠ LRD payroll requires Standard plan or above.{" "}
+                    <a href="/billing" style={{ color: "var(--primary)", textDecoration: "underline" }}>Upgrade</a>
+                  </p>
+                )}
                 <Field label={`Rate / hr (${form.currency})`}>
                   <Inp type="number" value={form.rate} onChange={(v) => set("rate", parseFloat(v) || 0)} placeholder="8.50"/>
                 </Field>
@@ -2715,7 +2726,10 @@ function BulkBar({ count, isArchiveView, onArchive, onDelete, onClear }: {
 }
 
 export default function EmployeesPage() {
-  const { employees, archivedEmployees, addEmployee, updateEmployee, archiveEmployee, hardDeleteEmployee, restoreEmployee, refreshEmployees, loading } = useApp();
+  const { employees, archivedEmployees, addEmployee, updateEmployee, archiveEmployee, hardDeleteEmployee, restoreEmployee, refreshEmployees, loading, company } = useApp();
+  const effectiveTier = getEffectiveTier(company.subscriptionTier, company.billingBypass);
+  const allowLRD = canUse("dualCurrency", effectiveTier);
+
   const { toast } = useToast();
 
   const sbRef = useRef<ReturnType<typeof createClient> | null>(null);
@@ -3187,6 +3201,7 @@ export default function EmployeesPage() {
           employee={drawerEmp}
           onClose={() => setShowDrawer(false)}
           onSave={handleSaveEmployee}
+          allowLRD={allowLRD}
         />
       )}
       {showUpload && (

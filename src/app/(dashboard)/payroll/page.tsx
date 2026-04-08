@@ -20,6 +20,7 @@ import { useApp } from "@/context/AppContext";
 import PageSkeleton from "@/components/PageSkeleton";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
+import { canUse, getEffectiveTier } from "@/lib/plan-features";
 
 const PDF_NAVY    = "#002147";
 const PDF_EMERALD = "#50C878";
@@ -472,7 +473,14 @@ export default function PayrollPage(){
 
   if(loading) return <PageSkeleton/>;
 
-  const pdfCompany:PdfCompany={name:company.name,tin:company.tin,nasscorpRegNo:company.nasscorpRegNo,address:company.address,phone:company.phone,email:company.email,logoUrl:company.logoUrl};
+
+  
+  const effectiveTier = getEffectiveTier(company.subscriptionTier, company.billingBypass);
+  const pdfCompany:PdfCompany={
+    name:company.name, tin:company.tin, nasscorpRegNo:company.nasscorpRegNo,
+    address:company.address, phone:company.phone, email:company.email,
+    logoUrl: canUse("companyLogo", effectiveTier) ? company.logoUrl : null,
+  };
   const defaultPeriod=getCurrentPeriod();
 
   const [periodLabel,setPeriodLabel]=useState(defaultPeriod.label);

@@ -378,6 +378,7 @@ function Features() {
             <motion.div
               key={f.title}
               variants={fadeUp}
+              suppressHydrationWarning
               className="bg-white rounded-2xl p-6 sm:p-7 border border-slate-100 hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-50 transition-all group"
             >
               <div className="flex items-start justify-between mb-5">

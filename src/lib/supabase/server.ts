@@ -1,14 +1,27 @@
-import { createClient as createSupabaseClient, SupabaseClient } from "@supabase/supabase-js";
+// src/lib/supabase/server.ts
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 
-// These should be in your .env.local
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-/**
- * Returns a Supabase client with service role (server-side)
- */
-export function createClient(): SupabaseClient {
-  return createSupabaseClient(supabaseUrl, supabaseKey, {
-    auth: { persistSession: false },
-  });
+export async function createClient() {
+  const cookieStore = await cookies();
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
+          } catch {
+            // Handle errors silently
+          }
+        },
+      },
+    }
+  );
 }

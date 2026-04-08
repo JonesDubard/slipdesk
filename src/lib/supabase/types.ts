@@ -4,21 +4,30 @@
 
 export type Json = string | number | boolean | null | { [key: string]: Json } | Json[];
 
-// ─── Row shapes (used in Insert/Update below) ─────────────────────────────────
+// ─── Row shapes ───────────────────────────────────────────────────────────────
 
 type CompanyRow = {
-  id:              string;
-  owner_id:        string;
-  name:            string;
-  tin:             string;
-  nasscorp_reg_no: string;
-  address:         string;
-  phone:           string;
-  email:           string;
-  logo_url:        string | null;
-  billing_bypass:  boolean;
-  created_at:      string;
-  updated_at:      string;
+  id:                     string;
+  owner_id:               string;
+  name:                   string;
+  tin:                    string;
+  nasscorp_reg_no:        string;
+  address:                string;
+  phone:                  string;
+  email:                  string;
+  logo_url:               string | null;
+  billing_bypass:         boolean;
+  subscription_tier:      "basic" | "standard" | "premium";
+  subscription_status:    "trial" | "active" | "past_due" | "cancelled";
+  subscription_expires_at: string | null;
+  trial_expires_at:       string | null;
+  is_locked:              boolean;
+  locked_reason:          string | null;
+  mtn_momo_phone:         string | null;
+  admin_email:            string | null;
+  pricing_model:          string;
+  created_at:             string;
+  updated_at:             string;
 };
 
 type EmployeeRow = {
@@ -27,7 +36,7 @@ type EmployeeRow = {
   employee_number:  string;
   first_name:       string;
   last_name:        string;
-  full_name:        string; // generated column — omit on insert
+  full_name:        string;
   job_title:        string;
   department:       string;
   email:            string;
@@ -48,7 +57,6 @@ type EmployeeRow = {
   is_archived:      boolean;
   created_at:       string;
   updated_at:       string;
-  // --- ADDED PENDING OVERRIDES ---
   pending_regular_hours:  number | null;
   pending_overtime_hours: number | null;
   pending_holiday_hours:  number | null;
@@ -111,35 +119,69 @@ type BillingEventRow = {
   created_at:      string;
 };
 
+type PaymentRow = {
+  id:              string;
+  company_id:      string;
+  amount:          number;
+  month:           string;
+  status:          "pending" | "confirmed" | "rejected";
+  tier_requested:  "basic" | "standard" | "premium";
+  receipt_note:    string | null;
+  confirmed_by:    string | null;
+  confirmed_at:    string | null;
+  rejected_reason: string | null;
+  created_at:      string;
+};
+
+type FaqRow = {
+  id:         string;
+  question:   string;
+  answer:     string;
+  sort_order: number;
+  is_active:  boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 // ─── Database interface ───────────────────────────────────────────────────────
 
 export interface Database {
   public: {
     Tables: {
       companies: {
-        Row: CompanyRow;
+        Row:    CompanyRow;
         Insert: Omit<CompanyRow, "id" | "created_at" | "updated_at"> & { id?: string };
         Update: Partial<Omit<CompanyRow, "id" | "created_at" | "updated_at">>;
       };
       employees: {
-        Row: EmployeeRow;
+        Row:    EmployeeRow;
         Insert: Omit<EmployeeRow, "id" | "full_name" | "created_at" | "updated_at"> & { id?: string };
         Update: Partial<Omit<EmployeeRow, "id" | "company_id" | "full_name" | "created_at" | "updated_at">>;
       };
       pay_runs: {
-        Row: PayRunRow;
+        Row:    PayRunRow;
         Insert: Omit<PayRunRow, "id" | "created_at" | "updated_at"> & { id?: string };
         Update: Partial<Omit<PayRunRow, "id" | "created_at" | "updated_at">>;
       };
       pay_run_lines: {
-        Row: PayRunLineRow;
+        Row:    PayRunLineRow;
         Insert: Omit<PayRunLineRow, "id" | "created_at"> & { id?: string };
         Update: Partial<Omit<PayRunLineRow, "id" | "created_at">>;
       };
       billing_events: {
-        Row: BillingEventRow;
+        Row:    BillingEventRow;
         Insert: Omit<BillingEventRow, "id" | "created_at"> & { id?: string };
         Update: Partial<Omit<BillingEventRow, "id" | "created_at">>;
+      };
+      payments: {
+        Row:    PaymentRow;
+        Insert: Omit<PaymentRow, "id" | "created_at"> & { id?: string };
+        Update: Partial<Omit<PaymentRow, "id" | "created_at">>;
+      };
+      faqs: {
+        Row:    FaqRow;
+        Insert: Omit<FaqRow, "id" | "created_at" | "updated_at"> & { id?: string };
+        Update: Partial<Omit<FaqRow, "id" | "created_at" | "updated_at">>;
       };
     };
     Functions: {
@@ -148,10 +190,11 @@ export interface Database {
   };
 }
 
-// ─── Exported row types used across the app ───────────────────────────────────
-
+// ─── Exported row types ───────────────────────────────────────────────────────
 export type DbCompany      = CompanyRow;
 export type DbEmployee     = EmployeeRow;
 export type DbPayRun       = PayRunRow;
 export type DbPayRunLine   = PayRunLineRow;
 export type DbBillingEvent = BillingEventRow;
+export type DbPayment      = PaymentRow;
+export type DbFaq          = FaqRow;

@@ -9,16 +9,12 @@ import {
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { calculatePayroll } from "@/lib/slipdesk-payroll-engine";
+import { calculateMonthlyFee, getPricingTier, TIERED_PRICING } from "@/lib/billing";
 
 const EXCHANGE_RATE = 185.44;
-const RATE_PER_EMPLOYEE = 0.75;
 
 const fmt = (n: number) =>
   `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-function calcFee(count: number) {
-  return Math.round(count * RATE_PER_EMPLOYEE * 100) / 100;
-}
 
 function StatCard({
   label, value, sub, accent = false, warning = false, icon,
@@ -127,13 +123,13 @@ export default function DashboardPage() {
     const active = employees.filter((e) => e.isActive);
     const results = active.map((emp) =>
       calculatePayroll({
-        employeeId: emp.id,
-        currency: emp.currency,
-        rate: emp.rate,
-        regularHours: emp.standardHours,
-        overtimeHours: 0,
-        holidayHours: 0,
-        exchangeRate: EXCHANGE_RATE,
+        employeeId:         emp.id,
+        currency:           emp.currency,
+        rate:               emp.rate,
+        regularHours:       emp.standardHours,
+        overtimeHours:      0,
+        holidayHours:       0,
+        exchangeRate:       EXCHANGE_RATE,
         additionalEarnings: emp.allowances ?? 0,
       }),
     );
@@ -142,19 +138,25 @@ export default function DashboardPage() {
     let gross = 0, net = 0, incomeTax = 0, nasscorp = 0, warnings = 0;
     results.forEach((r, i) => {
       const ccy = active[i].currency;
-      gross += toUSD(r.grossPay, ccy);
-      net += toUSD(r.netPay, ccy);
-      incomeTax += toUSD(r.Paye.taxInBase, ccy);
-      nasscorp += toUSD(r.nasscorp.employeeContribution, ccy);
+      gross     += toUSD(r.grossPay,                    ccy);
+      net       += toUSD(r.netPay,                      ccy);
+      incomeTax += toUSD(r.Paye.taxInBase,              ccy);
+      nasscorp  += toUSD(r.nasscorp.employeeContribution, ccy);
       if (r.warnings.length > 0) warnings++;
     });
 
     return { results, active, gross, net, incomeTax, nasscorp, warnings };
   }, [employees]);
 
-  const platformFee = calcFee(preview.active.length);
+  // ── Pricing (now uses billing.ts tiers) ──────────────────────────────────────
+  const platformFee   = calculateMonthlyFee(preview.active.length);
+  const currentTier   = getPricingTier(preview.active.length);
+  const tierPrice     = TIERED_PRICING[currentTier].price;
+  const tierLabel     = currentTier.charAt(0).toUpperCase() + currentTier.slice(1); // "basic" → "Basic"
+
   const isSetupIncomplete = !company?.name || !company?.tin;
 
+  // ── Empty state ───────────────────────────────────────────────────────────────
   if (!loading && employees.length === 0) {
     return (
       <div style={{ padding: "32px", minHeight: "100vh", background: "var(--background)", fontFamily: "'DM Sans',sans-serif" }}>
@@ -246,9 +248,9 @@ export default function DashboardPage() {
             <Sparkles size={14} color="var(--primary)" /> Getting started
           </h3>
           {[
-            { done: !!company?.name && !!company?.tin, label: "Complete company profile", href: "/settings" },
-            { done: employees.length > 0, label: "Add your first employee", href: "/employees" },
-            { done: false, label: "Run your first payroll", href: "/payroll" },
+            { done: !!company?.name && !!company?.tin, label: "Complete company profile", href: "/settings"  },
+            { done: employees.length > 0,              label: "Add your first employee",  href: "/employees" },
+            { done: false,                             label: "Run your first payroll",   href: "/payroll"   },
           ].map((step) => (
             <Link key={step.label} href={step.href} style={{
               display: "flex",
@@ -281,6 +283,7 @@ export default function DashboardPage() {
     );
   }
 
+  // ── Main dashboard ────────────────────────────────────────────────────────────
   return (
     <div style={{ padding: "32px", minHeight: "100vh", background: "var(--background)", fontFamily: "'DM Sans',sans-serif" }}>
       <style>{`
@@ -293,6 +296,7 @@ export default function DashboardPage() {
         .checklist-item:hover { border-color: color-mix(in oklch, var(--primary) 40%, transparent) !important; background: color-mix(in oklch, var(--primary) 6%, transparent) !important; }
       `}</style>
 
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 28, flexWrap: "wrap", gap: 12, animation: "fadeUp 0.3s ease" }}>
         <div>
           <h1 style={{ color: "var(--foreground)", fontSize: 26, fontWeight: 800, margin: 0, letterSpacing: "-0.02em" }}>Dashboard</h1>
@@ -320,6 +324,7 @@ export default function DashboardPage() {
         </Link>
       </div>
 
+      {/* ── Setup incomplete banner ─────────────────────────────────────────── */}
       {isSetupIncomplete && !loading && (
         <Link href="/settings" style={{
           display: "flex",
@@ -343,6 +348,7 @@ export default function DashboardPage() {
         </Link>
       )}
 
+      {/* ── Compliance warning banner ───────────────────────────────────────── */}
       {preview.warnings > 0 && (
         <div style={{
           display: "flex",
@@ -363,6 +369,7 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* ── Getting started checklist ───────────────────────────────────────── */}
       {!checklistDismissed && !loading && (
         <div style={{
           background: "var(--card)",
@@ -403,10 +410,10 @@ export default function DashboardPage() {
           </h3>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {[
-              { done: !!company?.name && !!company?.tin, label: "Complete company profile", href: "/settings" },
-              { done: employees.length > 0, label: "Add your first employee", href: "/employees" },
-              { done: employees.some((e) => e.isActive), label: "Activate an employee", href: "/employees" },
-              { done: false, label: "Run your first payroll", href: "/payroll" },
+              { done: !!company?.name && !!company?.tin,    label: "Complete company profile", href: "/settings"  },
+              { done: employees.length > 0,                 label: "Add your first employee",  href: "/employees" },
+              { done: employees.some((e) => e.isActive),   label: "Activate an employee",     href: "/employees" },
+              { done: false,                                label: "Run your first payroll",   href: "/payroll"   },
             ].map((step) => (
               <Link key={step.label} href={step.href} className="checklist-item" style={{
                 display: "flex",
@@ -439,28 +446,65 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* ── Stat cards ──────────────────────────────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 20, animation: "fadeUp 0.4s ease 0.1s both" }}>
-        <StatCard label="Active Employees" value={preview.active.length} sub={`${employees.length} total`} icon={<Users size={13} color="var(--primary)" />} />
-        <StatCard label="Est. Gross Payroll" value={fmt(preview.gross)} sub="USD equivalent" accent icon={<DollarSign size={13} color="var(--primary)" />} />
-        <StatCard label="Income Tax (LRA)" value={fmt(preview.incomeTax)} sub="Employee deduction" icon={<FileText size={13} color="var(--muted-foreground)" />} />
-        <StatCard label="NASSCORP (EE)" value={fmt(preview.nasscorp)} sub="4% of base salary" icon={<ShieldCheck size={13} color="var(--muted-foreground)" />} />
-        <StatCard label="Est. Net Payroll" value={fmt(preview.net)} sub="After all deductions" icon={<TrendingUp size={13} color="var(--primary)" />} />
-        <StatCard label="NASSCORP (ER)" value="6%" sub="Employer contribution" icon={<ShieldCheck size={13} color="var(--muted-foreground)" />} />
+        <StatCard
+          label="Active Employees"
+          value={preview.active.length}
+          sub={`${employees.length} total`}
+          icon={<Users size={13} color="var(--primary)" />}
+        />
+        <StatCard
+          label="Est. Gross Payroll"
+          value={fmt(preview.gross)}
+          sub="USD equivalent"
+          accent
+          icon={<DollarSign size={13} color="var(--primary)" />}
+        />
+        <StatCard
+          label="Income Tax (LRA)"
+          value={fmt(preview.incomeTax)}
+          sub="Employee deduction"
+          icon={<FileText size={13} color="var(--muted-foreground)" />}
+        />
+        <StatCard
+          label="NASSCORP (EE)"
+          value={fmt(preview.nasscorp)}
+          sub="4% of base salary"
+          icon={<ShieldCheck size={13} color="var(--muted-foreground)" />}
+        />
+        <StatCard
+          label="Est. Net Payroll"
+          value={fmt(preview.net)}
+          sub="After all deductions"
+          icon={<TrendingUp size={13} color="var(--primary)" />}
+        />
+        <StatCard
+          label="NASSCORP (ER)"
+          value="6%"
+          sub="Employer contribution"
+          icon={<ShieldCheck size={13} color="var(--muted-foreground)" />}
+        />
         <StatCard
           label="Compliance Warnings"
           value={preview.warnings}
           sub={preview.warnings === 0 ? "All clear ✓" : "Below minimum wage"}
           warning={preview.warnings > 0}
-          icon={preview.warnings > 0 ? <AlertTriangle size={13} color="var(--warning)" /> : <CheckCircle2 size={13} color="var(--primary)" />}
+          icon={preview.warnings > 0
+            ? <AlertTriangle size={13} color="var(--warning)" />
+            : <CheckCircle2 size={13} color="var(--primary)" />}
         />
         <StatCard
           label="Platform Fee"
-          value={platformFee > 0 ? fmt(platformFee) : "$0.00"}
-          sub={preview.active.length > 0 ? `${preview.active.length} emp × $${RATE_PER_EMPLOYEE.toFixed(2)}` : "No active employees"}
+          value={preview.active.length > 0 ? fmt(platformFee) : "$0.00"}
+          sub={preview.active.length > 0
+            ? `${tierLabel} plan · $${tierPrice}/mo`
+            : "No active employees"}
           icon={<Zap size={13} color="var(--muted-foreground)" />}
         />
       </div>
 
+      {/* ── Employee snapshot table ─────────────────────────────────────────── */}
       <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden", marginBottom: 20, animation: "fadeUp 0.45s ease 0.15s both" }}>
         <div style={{
           background: "color-mix(in oklch, var(--primary) 15%, var(--card))",
@@ -530,8 +574,8 @@ export default function DashboardPage() {
               </thead>
               <tbody>
                 {preview.results.slice(0, 8).map((result, i) => {
-                  const emp = preview.active[i];
-                  const sym = emp.currency === "USD" ? "$" : "L$";
+                  const emp     = preview.active[i];
+                  const sym     = emp.currency === "USD" ? "$" : "L$";
                   const hasWarn = result.warnings.length > 0;
                   return (
                     <tr key={result.employeeId} className="emp-row" style={{
@@ -570,7 +614,9 @@ export default function DashboardPage() {
                           fontWeight: 700,
                           padding: "2px 7px",
                           borderRadius: 10,
-                          background: emp.currency === "USD" ? "color-mix(in oklch, var(--secondary) 30%, transparent)" : "color-mix(in oklch, var(--warning) 20%, transparent)",
+                          background: emp.currency === "USD"
+                            ? "color-mix(in oklch, var(--secondary) 30%, transparent)"
+                            : "color-mix(in oklch, var(--warning) 20%, transparent)",
                           color: emp.currency === "USD" ? "var(--secondary)" : "var(--warning)",
                         }}>
                           {emp.currency}
@@ -604,11 +650,27 @@ export default function DashboardPage() {
         )}
       </div>
 
+      {/* ── Quick action links ──────────────────────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, animation: "fadeUp 0.5s ease 0.2s both" }}>
         {[
-          { href: "/payroll", icon: <Play size={18} color="var(--muted-foreground)" />, label: "Start Pay Run", sub: "Process this month's payroll" },
-          { href: "/employees", icon: <Users size={18} color="var(--muted-foreground)" />, label: "Manage Employees", sub: `${employees.length} total employees` },
-          { href: "/billing", icon: <TrendingUp size={18} color="var(--muted-foreground)" />, label: "View Billing", sub: `${fmt(platformFee)}/month · $0.75/emp` },
+          {
+            href:  "/payroll",
+            icon:  <Play size={18} color="var(--muted-foreground)" />,
+            label: "Start Pay Run",
+            sub:   "Process this month's payroll",
+          },
+          {
+            href:  "/employees",
+            icon:  <Users size={18} color="var(--muted-foreground)" />,
+            label: "Manage Employees",
+            sub:   `${employees.length} total employees`,
+          },
+          {
+            href:  "/billing",
+            icon:  <TrendingUp size={18} color="var(--muted-foreground)" />,
+            label: "View Billing",
+            sub:   `${fmt(platformFee)}/month · ${tierLabel} plan`,
+          },
         ].map((action) => (
           <Link key={action.href} href={action.href} className="dash-link" style={{
             display: "flex",

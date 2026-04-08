@@ -1,10 +1,5 @@
 "use client";
 
-/**
- * Slipdesk — App Context (Supabase-backed)
- * Place at: src/context/AppContext.tsx
- */
-
 import {
   createContext, useContext, useEffect, useState,
   useCallback, useRef, type ReactNode,
@@ -16,6 +11,8 @@ import type { DbEmployee, DbCompany } from "@/lib/supabase/types";
 export type Currency       = "USD" | "LRD";
 export type EmploymentType = "full_time" | "part_time" | "contractor" | "casual";
 export type PaymentMethod  = "bank_transfer" | "mtn_momo" | "orange_money" | "cash";
+export type SubscriptionTier   = "basic" | "standard" | "premium";
+export type SubscriptionStatus = "trial" | "active" | "past_due" | "cancelled";
 
 export interface Employee {
   id:             string;
@@ -48,20 +45,34 @@ export interface Employee {
 }
 
 export interface CompanyProfile {
-  id:            string;
-  name:          string;
-  tin:           string;
-  nasscorpRegNo: string;
-  address:       string;
-  phone:         string;
-  email:         string;
-  logoUrl:       string | null;
-  billingBypass: boolean;
+  id:                   string;
+  name:                 string;
+  tin:                  string;
+  nasscorpRegNo:        string;
+  address:              string;
+  phone:                string;
+  email:                string;
+  logoUrl:              string | null;
+  billingBypass:        boolean;
+  // ── NEW billing fields ──
+  subscriptionTier:     SubscriptionTier;
+  subscriptionStatus:   SubscriptionStatus;
+  subscriptionExpiresAt: string | null;
+  trialExpiresAt:       string | null;
+  isLocked:             boolean;
+  lockedReason:         string | null;
 }
 
 export const EMPTY_COMPANY: CompanyProfile = {
-  id:"", name:"", tin:"", nasscorpRegNo:"",
-  address:"", phone:"", email:"", logoUrl:null, billingBypass:false,
+  id: "", name: "", tin: "", nasscorpRegNo: "",
+  address: "", phone: "", email: "", logoUrl: null,
+  billingBypass: false,
+  subscriptionTier: "basic",
+  subscriptionStatus: "trial",
+  subscriptionExpiresAt: null,
+  trialExpiresAt: null,
+  isLocked: false,
+  lockedReason: null,
 };
 
 function dbToEmployee(row: DbEmployee): Employee {
@@ -98,15 +109,21 @@ function dbToEmployee(row: DbEmployee): Employee {
 
 function dbToCompany(row: DbCompany): CompanyProfile {
   return {
-    id:            row.id,
-    name:          row.name,
-    tin:           row.tin,
-    nasscorpRegNo: row.nasscorp_reg_no,
-    address:       row.address,
-    phone:         row.phone,
-    email:         row.email,
-    logoUrl:       row.logo_url,
-    billingBypass: row.billing_bypass ?? false,
+    id:                   row.id,
+    name:                 row.name,
+    tin:                  row.tin,
+    nasscorpRegNo:        row.nasscorp_reg_no,
+    address:              row.address,
+    phone:                row.phone,
+    email:                row.email,
+    logoUrl:              row.logo_url,
+    billingBypass:        row.billing_bypass ?? false,
+    subscriptionTier:     (row.subscription_tier as SubscriptionTier) ?? "basic",
+    subscriptionStatus:   (row.subscription_status as SubscriptionStatus) ?? "trial",
+    subscriptionExpiresAt: row.subscription_expires_at ?? null,
+    trialExpiresAt:       row.trial_expires_at ?? null,
+    isLocked:             row.is_locked ?? false,
+    lockedReason:         row.locked_reason ?? null,
   };
 }
 
@@ -133,7 +150,6 @@ const AppContext = createContext<AppState | null>(null);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(supabase: ReturnType<typeof createClient>): any { return supabase as any; }
 
-// Module-level boot flag — survives Next.js App Router navigations
 let _hasBooted = false;
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -153,7 +169,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let mounted = true;
 
     async function boot() {
-      const { data:{ user:currentUser } } = await supabase.auth.getUser();
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
       if (!mounted) return;
       setUser(currentUser);
       if (currentUser) {
@@ -166,12 +182,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     boot();
 
-    const { data:{ subscription } } = supabase.auth.onAuthStateChange(
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event: AuthChangeEvent, session: Session | null) => {
         if (!mounted) return;
         const newUser = session?.user ?? null;
         setUser(newUser);
-
         if (newUser) {
           if (event === "SIGNED_IN" || event === "USER_UPDATED") {
             setDataLoading(true);
@@ -190,11 +205,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function loadData(retries = 3) {
-    const [{ data:companies }, { data:emps }] = await Promise.all([
-      db(supabase).from("companies").select("*").order("created_at", { ascending:false }),
-      db(supabase).from("employees").select("*").order("employee_number"),
+    const { data: { user: currentUser } } = await supabase.auth.getUser();
+    if (!currentUser) return;
+
+    const [{ data: companies }, { data: emps }] = await Promise.all([
+      db(supabase)
+        .from("companies")
+        .select("*")
+        .eq("owner_id", currentUser.id)
+        .order("created_at", { ascending: false }),
+      db(supabase)
+        .from("employees")
+        .select("*")
+        .order("employee_number"),
     ]);
-    const co = (companies as any[])?.find((c: any) => c.name) ?? companies?.[0] ?? null;
+
+    const co = companies?.[0] ?? null;
     if (!co && retries > 0) {
       await new Promise((r) => setTimeout(r, 800));
       return loadData(retries - 1);
@@ -221,15 +247,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const { data } = await db(supabase).from("companies").select("*").eq("id", company.id).single();
       if (data) setCompanyState(dbToCompany(data as DbCompany));
     } else {
-      const { data:{ user } } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      await db(supabase).from("companies").upsert({ owner_id:user.id, email:user.email ?? "", ...payload });
+      await db(supabase).from("companies").upsert({ owner_id: user.id, email: user.email ?? "", ...payload });
       await loadData();
     }
   }, [company.id, supabase]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // FIX: accepts an optional currentList snapshot so bulk callers can pass a
-  // stable list and avoid reading stale React state across concurrent saves.
   const nextEmpNumber = useCallback((currentList: Employee[] = allEmployees) => {
     const nums = currentList
       .map((e) => parseInt(e.employeeNumber.replace(/\D/g, ""), 10))
@@ -237,66 +261,66 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return `EMP-${String(nums.length ? Math.max(...nums) + 1 : 1).padStart(3, "0")}`;
   }, [allEmployees]);
 
-  // FIX: accepts an optional pre-assigned employeeNumber so bulk import callers
-  // can compute all numbers upfront before any async work begins, preventing
-  // stale-state collisions that caused the upsert conflict to overwrite rows.
-  // src/context/AppContext.tsx
-const addEmployee = useCallback(async (
-  data: Omit<Employee, "id" | "fullName" | "isArchived">,
-  employeeNumber?: string,
-): Promise<Employee> => { // now returns Employee (never null)
-  const { data:co, error:coErr } = await db(supabase)
-    .from("companies")
-    .select("id")
-    .single();
+  const addEmployee = useCallback(async (
+    data: Omit<Employee, "id" | "fullName" | "isArchived">,
+    employeeNumber?: string,
+  ): Promise<Employee | null> => {
+    const { data: { user: currentUser } } = await supabase.auth.getUser();
+    if (!currentUser) throw new Error("Not authenticated");
 
-  if (coErr || !co) throw new Error("Company not found. Please set up your company profile first.");
+    const { data: co, error: coErr } = await db(supabase)
+      .from("companies")
+      .select("id")
+      .eq("owner_id", currentUser.id)
+      .single();
 
-  const finalNumber = employeeNumber || data.employeeNumber || nextEmpNumber();
+    if (coErr || !co) throw new Error("Company not found. Please set up your company profile first.");
 
-  const { data:row, error } = await db(supabase)
-    .from("employees")
-    .insert({
-      company_id:      co.id,
-      employee_number: finalNumber,
-      first_name:      data.firstName,
-      last_name:       data.lastName,
-      job_title:       data.jobTitle,
-      department:      data.department,
-      email:           data.email,
-      phone:           data.phone,
-      county:          data.county,
-      start_date:      data.startDate || null,
-      employment_type: data.employmentType,
-      currency:        data.currency,
-      rate:            data.rate,
-      standard_hours:  data.standardHours,
-      allowances:      data.allowances,
-      nasscorp_number: data.nasscorpNumber,
-      payment_method:  data.paymentMethod,
-      bank_name:       data.bankName,
-      account_number:  data.accountNumber,
-      momo_number:     data.momoNumber,
-      is_active:       data.isActive,
-      is_archived:     false,
-      ...(data.pendingRegularHours  !== undefined && { pending_regular_hours:  data.pendingRegularHours  }),
-      ...(data.pendingOvertimeHours !== undefined && { pending_overtime_hours: data.pendingOvertimeHours }),
-      ...(data.pendingHolidayHours  !== undefined && { pending_holiday_hours:  data.pendingHolidayHours  }),
-      ...(data.pendingDeductions    !== undefined && { pending_deductions:     data.pendingDeductions    }),
-    })
-    .select()
-    .single();
+    const finalNumber = employeeNumber || data.employeeNumber || nextEmpNumber();
 
-  if (error) throw error; // e.g., duplicate key violation
-  if (!row) throw new Error("Failed to insert employee – no row returned.");
+    const { data: row, error } = await db(supabase)
+      .from("employees")
+      .insert({
+        company_id:      co.id,
+        employee_number: finalNumber,
+        first_name:      data.firstName,
+        last_name:       data.lastName,
+        job_title:       data.jobTitle,
+        department:      data.department,
+        email:           data.email,
+        phone:           data.phone,
+        county:          data.county,
+        start_date:      data.startDate || null,
+        employment_type: data.employmentType,
+        currency:        data.currency,
+        rate:            data.rate,
+        standard_hours:  data.standardHours,
+        allowances:      data.allowances,
+        nasscorp_number: data.nasscorpNumber,
+        payment_method:  data.paymentMethod,
+        bank_name:       data.bankName,
+        account_number:  data.accountNumber,
+        momo_number:     data.momoNumber,
+        is_active:       data.isActive,
+        is_archived:     false,
+        ...(data.pendingRegularHours  !== undefined && { pending_regular_hours:  data.pendingRegularHours  }),
+        ...(data.pendingOvertimeHours !== undefined && { pending_overtime_hours: data.pendingOvertimeHours }),
+        ...(data.pendingHolidayHours  !== undefined && { pending_holiday_hours:  data.pendingHolidayHours  }),
+        ...(data.pendingDeductions    !== undefined && { pending_deductions:     data.pendingDeductions    }),
+      })
+      .select()
+      .single();
 
-  const mapped = dbToEmployee(row as DbEmployee);
-  setAllEmployees((prev) => [...prev, mapped]);
-  return mapped;
-}, [supabase, nextEmpNumber]);
+    if (error) throw error;
+    if (!row) throw new Error("Failed to insert employee – no row returned.");
+
+    const mapped = dbToEmployee(row as DbEmployee);
+    setAllEmployees((prev) => [...prev, mapped]);
+    return mapped;
+  }, [supabase, nextEmpNumber]);
 
   const updateEmployee = useCallback(async (id: string, data: Partial<Employee>) => {
-    const { data:row } = await db(supabase).from("employees").update({
+    const { data: row } = await db(supabase).from("employees").update({
       ...(data.firstName      !== undefined && { first_name:      data.firstName      }),
       ...(data.lastName       !== undefined && { last_name:       data.lastName       }),
       ...(data.jobTitle       !== undefined && { job_title:       data.jobTitle       }),
@@ -325,10 +349,7 @@ const addEmployee = useCallback(async (
   }, [supabase]);
 
   const archiveEmployee = useCallback(async (id: string) => {
-    if (!id) return;
-    // Use the already-loaded company id from state instead of re-fetching,
-    // which avoids a silent failure when the session is briefly stale.
-    if (!company.id) throw new Error("Company not loaded");
+    if (!id || !company.id) throw new Error("Company not loaded");
     await db(supabase)
       .from("employees")
       .update({ is_archived: true, is_active: false })
@@ -340,8 +361,7 @@ const addEmployee = useCallback(async (
   }, [supabase, company.id]);
 
   const restoreEmployee = useCallback(async (id: string) => {
-    if (!id) return;
-    if (!company.id) throw new Error("Company not loaded");
+    if (!id || !company.id) throw new Error("Company not loaded");
     await db(supabase)
       .from("employees")
       .update({ is_archived: false, is_active: true })
@@ -353,8 +373,7 @@ const addEmployee = useCallback(async (
   }, [supabase, company.id]);
 
   const hardDeleteEmployee = useCallback(async (id: string) => {
-    if (!id) return;
-    if (!company.id) throw new Error("Company not loaded");
+    if (!id || !company.id) throw new Error("Company not loaded");
     await db(supabase)
       .from("employees")
       .delete()
