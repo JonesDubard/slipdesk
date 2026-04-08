@@ -2,7 +2,6 @@ import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
@@ -90,10 +89,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Payment confirmed but failed to update company" }, { status: 500 });
   }
 
+  
+
   // ── Send confirmation email (after DB is updated — failure here is non-fatal) ──
   const recipientEmail = co?.admin_email || co?.email;
   if (recipientEmail) {
     try {
+      const resend = new Resend(process.env.RESEND_API_KEY);
       const tierLabel = payment.tier_requested.charAt(0).toUpperCase() + payment.tier_requested.slice(1);
       const expiryFormatted = base.toLocaleDateString("en-LR", {
         year: "numeric", month: "long", day: "numeric",
