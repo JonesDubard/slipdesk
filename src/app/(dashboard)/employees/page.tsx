@@ -1662,7 +1662,7 @@ import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import {
   Search, Plus, X, Upload, Download, FileText, Loader,
   Archive, Edit3, RotateCcw, Trash2,
-  Users, UserCheck, UserX, Filter, ChevronDown, Save, CheckSquare,
+  Users, UserCheck, UserX, Filter, ChevronDown, Save, CheckSquare, AlertTriangle,
 } from "lucide-react";
 import type { Employee, EmploymentType, Currency, PaymentMethod } from "@/context/AppContext";
 import { useApp } from "@/context/AppContext";
@@ -2779,6 +2779,12 @@ export default function EmployeesPage() {
     archived: employees.filter((e) => e.isArchived).length,
   }), [employees]);
 
+  const activeCount   = employees.filter(e => e.isActive && !e.isArchived).length;
+  const tierLimits    = { basic: 80, standard: 499, premium: Infinity } as const;
+  const currentLimit  = tierLimits[effectiveTier] ?? 80;
+  const nearLimit     = currentLimit !== Infinity && activeCount >= currentLimit * 0.9;
+  const atLimit       = currentLimit !== Infinity && activeCount >= currentLimit;
+
   async function handleBulkImport(rows: Partial<Employee>[]): Promise<ImportResult> {
     const existingNums = allEmployees
       .map((e) => parseInt(e.employeeNumber.replace(/\D/g, ""), 10))
@@ -2991,6 +2997,34 @@ export default function EmployeesPage() {
           </div>
         ))}
       </div>
+
+      {/* Employee limit alerts */}
+{atLimit && (
+  <div style={{
+    background: "#FEF2F2", border: "1px solid #FCA5A5",
+    borderRadius: 12, padding: "12px 18px", marginBottom: 16,
+    display: "flex", alignItems: "center", gap: 10,
+  }}>
+    <AlertTriangle size={16} color="#EF4444" style={{ flexShrink: 0 }} />
+    <p style={{ margin: 0, fontSize: 13, color: "#991B1B" }}>
+      <strong>Employee limit reached.</strong> Your {effectiveTier} plan allows up to {currentLimit} employees.{" "}
+      <a href="/billing" style={{ color: "#991B1B", fontWeight: 700 }}>Upgrade your plan →</a>
+    </p>
+  </div>
+)}
+{nearLimit && !atLimit && (
+  <div style={{
+    background: "#FFFBEB", border: "1px solid #FCD34D",
+    borderRadius: 12, padding: "12px 18px", marginBottom: 16,
+    display: "flex", alignItems: "center", gap: 10,
+  }}>
+    <AlertTriangle size={16} color="#D97706" style={{ flexShrink: 0 }} />
+    <p style={{ margin: 0, fontSize: 13, color: "#92400E" }}>
+      <strong>Approaching limit.</strong> {activeCount} of {currentLimit} employees used on your {effectiveTier} plan.{" "}
+      <a href="/billing" style={{ color: "#92400E", fontWeight: 700 }}>Upgrade before you hit the cap →</a>
+    </p>
+  </div>
+)}
 
       <div style={{ display: "flex", gap: 10, marginBottom: 18, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{
