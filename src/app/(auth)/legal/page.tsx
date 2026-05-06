@@ -140,7 +140,7 @@ function LegalContent() {
               <p>We use the following third-party services to operate the platform:</p>
               <ul>
                 <li><strong>Supabase</strong> — database, authentication, and file storage</li>
-                <li><strong>Flutterwave</strong> — payment processing (billing only, not payroll)</li>
+                <li><strong>MTN Mobile Money</strong> — payment processing (billing only, not payroll)</li>
                 <li><strong>Vercel</strong> — application hosting</li>
               </ul>
               <p>Each of these providers has their own privacy policy. We select providers that meet appropriate data protection standards.</p>

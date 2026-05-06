@@ -249,7 +249,7 @@ export default function DemoPage() {
   const [downloadedAll, setDownloadedAll] = useState(false);
   const [loadingAll,   setLoadingAll]   = useState(false);
 
-  const period = "June 2025";
+  const period = "March 2026";
   const displayName = companyName || "Demo Company Ltd";
 
   const calcs = DEMO_EMPLOYEES.map(emp => ({
@@ -330,7 +330,7 @@ export default function DemoPage() {
           padding: "7px 18px", borderRadius: 8,
           fontWeight: 700, fontSize: 13, textDecoration: "none",
         }}>
-          Start free account <ArrowRight size={13} />
+          Get Started <ArrowRight size={13} />
         </Link>
       </div>
 
@@ -466,7 +466,7 @@ export default function DemoPage() {
                   <p style={{ margin: 0, fontSize: 13, color: "#15803D", fontWeight: 600 }}>
                     {DEMO_EMPLOYEES.length} payslips downloaded! This is exactly what your employees receive each month.
                     <Link href="/signup" style={{ color: "#002147", fontWeight: 700, marginLeft: 8, textDecoration: "underline" }}>
-                      Start your free account →
+                      Sign up and start today →
                     </Link>
                   </p>
                 </div>
@@ -709,10 +709,11 @@ export default function DemoPage() {
         }}>
           <div>
             <p style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#fff" }}>
-              Ready to run real payroll for {displayName}?
+              Like what you see, {displayName}?
             </p>
             <p style={{ margin: "6px 0 0", fontSize: 13, color: "rgba(255,255,255,0.5)" }}>
-              30-day free trial · No credit card · Your data, your control.
+              Generate real LRA‑compliant payslips on the go.<br />
+              No setup fees · Cancel anytime · Plans from $50/month
             </p>
           </div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -722,7 +723,7 @@ export default function DemoPage() {
               padding: "13px 28px", borderRadius: 12,
               fontWeight: 800, fontSize: 14, textDecoration: "none",
             }}>
-              Get started free <ArrowRight size={14} />
+              Get started today <ArrowRight size={14} />
             </Link>
           </div>
         </div>

@@ -183,6 +183,29 @@ export interface Database {
         Insert: Omit<FaqRow, "id" | "created_at" | "updated_at"> & { id?: string };
         Update: Partial<Omit<FaqRow, "id" | "created_at" | "updated_at">>;
       };
+      // ═══ ADD THIS NEW TABLE ═══
+      payslip_generations: {
+        Row: {
+          id: string;
+          company_id: string;
+          employee_id: string;
+          billing_period_start: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          employee_id: string;
+          billing_period_start: string;
+          created_at?: string;
+        };
+        Update: Partial<{
+          company_id: string;
+          employee_id: string;
+          billing_period_start: string;
+          created_at: string;
+        }>;
+      };
     };
     Functions: {
       my_company_id: { Args: Record<string, never>; Returns: string };

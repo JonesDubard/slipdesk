@@ -1,20 +1,11 @@
-/**
- * Slipdesk — Billing Logic & Mock Flutterwave Integration
- * =========================================================
- * HOW TO GO LIVE:
- * 1. Sign up at https://flutterwave.com and get your API keys
- * 2. Replace FLUTTERWAVE_CONFIG.publicKey with your real public key
- * 3. Set MOCK_MODE = false
- * 4. Add your secret key to .env.local as FLUTTERWAVE_SECRET_KEY
- * 5. That's it — all the logic below stays the same.
- *
- * Paste into: src/lib/billing.ts
- */
+// lib/billing.ts (complete, with limit helpers added)
 
-// ─── Toggle this to go live ───────────────────────────────────────────────────
+import { createClient } from '@/lib/supabase/client';
+
+// ─── Toggle this to go live ───────────────────────────────────────────────
 export const MOCK_MODE = true;
 
-// ─── Flutterwave config ───────────────────────────────────────────────────────
+// ─── Flutterwave config ───────────────────────────────────────────────────
 export const FLUTTERWAVE_CONFIG = {
   publicKey:   MOCK_MODE ? "FLWPUBK_TEST-MOCK-KEY" : process.env.NEXT_PUBLIC_FLUTTERWAVE_PUBLIC_KEY!,
   redirectUrl: typeof window !== "undefined" ? `${window.location.origin}/billing/callback` : "",
@@ -22,8 +13,7 @@ export const FLUTTERWAVE_CONFIG = {
   country:     "LR"  as const,
 };
 
-// ─── PEPM pricing ─────────────────────────────────────────────────────────────
-// Early adopter rate — will move to $1.00 once traction is established
+// ─── Tiered pricing ───────────────────────────────────────────────────────
 export const TIERED_PRICING = {
   basic:    { maxEmployees: 80,       price: 50  },
   standard: { maxEmployees: 499,      price: 300 },
@@ -41,11 +31,11 @@ export function getPricingTier(employeeCount: number): PricingTier {
 export function calculateMonthlyFee(employeeCount: number): number {
   return TIERED_PRICING[getPricingTier(employeeCount)].price;
 }
+
 export const TRIAL_RUNS      = 1;
 export const FREE_TRIAL_DAYS = 30;
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
+// ─── Types ────────────────────────────────────────────────────────────────
 export type PlanId = "trial" | "active" | "past_due" | "cancelled";
 
 export interface BillingProfile {
@@ -85,10 +75,7 @@ export interface CheckoutPayload {
   periodLabel:  string;
 }
 
-// ─── Calculations ─────────────────────────────────────────────────────────────
-
-/** $0.75 per active employee — no minimum floor during early adopter phase */
-
+// ─── Trial logic ──────────────────────────────────────────────────────────
 export function isOnTrial(profile: BillingProfile): boolean {
   if (profile.planId !== "trial") return false;
   const expiry = new Date(profile.trialExpiresAt);
@@ -108,8 +95,7 @@ export function generateReference(prefix = "SLIP"): string {
   return `${prefix}-${ts}-${rand}`;
 }
 
-// ─── Mock Flutterwave ─────────────────────────────────────────────────────────
-
+// ─── Mock Flutterwave ─────────────────────────────────────────────────────
 export interface FlwPaymentResponse {
   status:         "successful" | "cancelled" | "failed";
   tx_ref:         string;
@@ -159,8 +145,7 @@ export async function verifyTransaction(
   }
 }
 
-// ─── Mock billing profile ─────────────────────────────────────────────────────
-
+// ─── Mock billing profile ─────────────────────────────────────────────────
 const TRIAL_EXPIRY = new Date();
 TRIAL_EXPIRY.setDate(TRIAL_EXPIRY.getDate() + FREE_TRIAL_DAYS);
 
@@ -177,7 +162,7 @@ export const MOCK_BILLING_PROFILE: BillingProfile = {
   paymentHistory:     [],
 };
 
-// ─── Payment methods available in Liberia via Flutterwave ────────────────────
+// ─── Payment methods ──────────────────────────────────────────────────────
 export const LIBERIA_PAYMENT_METHODS = [
   { id: "card",                label: "Credit / Debit Card", note: "Visa, Mastercard",        icon: "💳" },
   { id: "mobile_money_franco", label: "Orange Money",        note: "Liberia mobile money",    icon: "📱" },
@@ -186,4 +171,126 @@ export const LIBERIA_PAYMENT_METHODS = [
 
 export function hasBillingBypass(profile: { billing_bypass?: boolean }): boolean {
   return profile?.billing_bypass === true;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// PAYSLIP GENERATION LIMIT HELPERS (added for fraud prevention)
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Returns the first and last day of the current calendar month as ISO strings.
+ */
+function getCurrentBillingPeriod() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+  const end   = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+  return { start, end };
+}
+
+/**
+ * Fetch all distinct employee IDs that have had at least one payslip
+ * generated in the current calendar month.
+ */
+export async function getDistinctEmployeeIdsGeneratedThisMonth(
+  companyId: string
+): Promise<string[]> {
+  const supabase = createClient();
+  const { start, end } = getCurrentBillingPeriod();
+
+  const { data, error } = await (supabase as any)
+    .from('payslip_generations')
+    .select('employee_id')
+    .eq('company_id', companyId)
+    .gte('billing_period_start', start)
+    .lte('billing_period_start', end);
+
+  if (error) {
+    console.error('Failed to fetch payslip generations:', error);
+    return [];
+  }
+
+  // Extract employee IDs and narrow to string[]
+  const ids: string[] = data?.map((d: any) => d.employee_id as string) ?? [];
+  const uniqueIds = Array.from(new Set(ids));
+  return uniqueIds;
+}
+
+export async function canGeneratePayslips(
+  companyId: string,
+  tier: 'basic' | 'standard' | 'premium',
+  billingBypass: boolean,
+  requestedEmployeeIds: string[]
+): Promise<{
+  allowed: boolean;
+  currentCount: number;
+  limit: number;
+  blockedIds: string[];
+  message?: string;
+}> {
+  if (billingBypass) {
+    return { allowed: true, currentCount: 0, limit: Infinity, blockedIds: [] };
+  }
+
+  const limit = tier === 'basic' ? 80 : tier === 'standard' ? 499 : Infinity;
+
+  // Who has already had a payslip generated this month?
+  const alreadyGenerated = await getDistinctEmployeeIdsGeneratedThisMonth(companyId);
+  const currentSet = new Set(alreadyGenerated);
+
+  // Which of the requested employees are NOT already counted?
+  const newIds = requestedEmployeeIds.filter((id) => !currentSet.has(id));
+
+  // How many spots are left?
+  const spotsLeft = limit - currentSet.size;
+
+  if (newIds.length <= spotsLeft) {
+    return {
+      allowed: true,
+      currentCount: currentSet.size,
+      limit,
+      blockedIds: [],
+    };
+  }
+
+  // Which specific employees are blocked?
+  const blockedIds = newIds.slice(spotsLeft);
+  const allowedNewIds = newIds.slice(0, spotsLeft);
+
+  return {
+    allowed: false,
+    currentCount: currentSet.size,
+    limit,
+    blockedIds,
+    message: spotsLeft <= 0
+      ? `You've reached your ${tier} plan limit of ${limit} employees this month. Upgrade to generate more payslips.`
+      : `You can only generate payslips for ${spotsLeft} more employee(s) this month (${currentSet.size} already done, limit ${limit}). Upgrade to continue.`,
+  };
+}
+
+/**
+ * Record that a payslip was generated for an employee.
+ * Call this AFTER a successful PDF download.
+ */
+export async function recordPayslipGeneration(
+  companyId: string,
+  employeeId: string
+): Promise<void> {
+  const supabase = createClient();
+  const { start } = getCurrentBillingPeriod();
+
+  const { error } = await (supabase as any)
+    .from('payslip_generations')
+    .upsert(
+      {
+        company_id: companyId,
+        employee_id: employeeId,
+        billing_period_start: start,
+        created_at: new Date().toISOString(),
+      },
+      { onConflict: 'company_id,employee_id,billing_period_start' }
+    );
+
+  if (error) {
+    console.error('Failed to record payslip generation:', error);
+  }
 }

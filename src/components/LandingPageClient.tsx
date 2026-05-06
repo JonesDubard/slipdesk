@@ -1367,7 +1367,7 @@ function Pricing() {
           <p className="text-center text-slate-400 text-xs font-mono mt-8">
             All plans include unlimited payslip runs, LRA & NASSCORP compliance, dual‑currency, and PDF generation.
             <br />
-            Payroll management tools (automatic deductions, multi‑period reporting, direct deposit) coming later this year.
+            Payroll management tools (multi‑period reporting, direct deposit, disbursements) coming later this year.
           </p>
         </AnimateIn>
       </div>
@@ -1388,7 +1388,7 @@ function CTA() {
           </h2>
           <p className="text-white/50 mb-8 leading-relaxed text-sm sm:text-base">
             Join Liberian businesses that have replaced messy spreadsheets with Slipdesk.
-            No free trial, no shenanigans — just a tool you can rely on from day one.
+           Just a tool you can rely on from day one.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link

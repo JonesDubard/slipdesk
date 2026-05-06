@@ -21,12 +21,14 @@ import PageSkeleton from "@/components/PageSkeleton";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
+import { canGeneratePayslips, recordPayslipGeneration, getDistinctEmployeeIdsGeneratedThisMonth } from '@/lib/billing';
 
 const PDF_NAVY    = "#002147";
 const PDF_EMERALD = "#50C878";
 const PDF_SLATE   = "#64748b";
 const PDF_LIGHT   = "#f8fafc";
 const PDF_BORDER  = "#e2e8f0";
+
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -49,6 +51,7 @@ interface PdfCompany {
   name:string; tin:string; nasscorpRegNo:string;
   address:string; phone:string; email:string; logoUrl:string|null;
 }
+
 
 // ─── Number → words ───────────────────────────────────────────────────────────
 
@@ -302,55 +305,200 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
 
 function buildFilename(fullName:string,periodLabel:string){return `${fullName.trim().replace(/\s+/g,"_")}_Payslip_${safePeriod(periodLabel)}.pdf`;}
 
-function DownloadSlipButton({line,periodLabel,payDate,company}:{line:PayRunLine;periodLabel:string;payDate:string;company:PdfCompany;}){
-  const {toast}=useToast();
-  const [loading,setLoading]=useState(false);
-  async function handle(){
-    if(!line.calc) return;
+function DownloadSlipButton({
+  line,
+  periodLabel,
+  payDate,
+  company,
+}: {
+  line: PayRunLine;
+  periodLabel: string;
+  payDate: string;
+  company: PdfCompany;
+}) {
+  const { toast } = useToast();
+  const { company: appCompany } = useApp();
+  const [loading, setLoading] = useState(false);
+  const [wasCounted, setWasCounted] = useState(false); // track if already counted this session
+
+  async function handle() {
+    if (!line.calc) return;
     setLoading(true);
-    try{
-      const blob=await generatePayslipBlob({line,periodLabel,payDate,company});
-      const url=URL.createObjectURL(blob); const a=document.createElement("a");
-      a.href=url; a.download=buildFilename(line.fullName,periodLabel); a.click(); URL.revokeObjectURL(url);
-    }catch(e){console.error(e);toast.error("Could not generate payslip.");}
-    finally{setLoading(false);}
+    try {
+      // ── Check limit before generating (only if not already counted for this employee this session) ──
+      if (!wasCounted) {
+        const { allowed, message } = await canGeneratePayslips(
+          appCompany.id,
+          appCompany.subscriptionTier,
+          appCompany.billingBypass,
+          [line.employeeId]
+        );
+
+        if (!allowed) {
+          toast.error(message || 'Monthly payslip limit reached. Please upgrade your plan.');
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Generate PDF
+      const blob = await generatePayslipBlob({ line, periodLabel, payDate, company });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = buildFilename(line.fullName, periodLabel);
+      a.click();
+      URL.revokeObjectURL(url);
+
+      // ── Record generation (idempotent — safe to call multiple times) ──
+      if (!wasCounted) {
+        await recordPayslipGeneration(appCompany.id, line.employeeId);
+        setWasCounted(true);
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error("Could not generate payslip.");
+    } finally {
+      setLoading(false);
+    }
   }
-  return(
-    <button onClick={handle} disabled={loading||!line.calc}
-      style={{display:"flex",alignItems:"center",gap:4,padding:"5px 9px",borderRadius:7,border:"1px solid var(--border)",background:"transparent",color:line.calc?"var(--primary)":"var(--muted-foreground)",fontSize:11,fontWeight:600,cursor:line.calc?"pointer":"not-allowed",transition:"all 0.15s"}}
-      onMouseEnter={e=>{if(line.calc){e.currentTarget.style.background="color-mix(in oklch, var(--primary) 15%, transparent)";}}}
-      onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
-      {loading?<Loader style={{animation:"spin 1s linear infinite"}} size={12}/>:<FileDown size={12}/>}
+
+  return (
+    <button
+      onClick={handle}
+      disabled={loading || !line.calc}
+      style={{
+        display: "flex", alignItems: "center", gap: 4,
+        padding: "5px 9px", borderRadius: 7,
+        border: "1px solid var(--border)",
+        background: "transparent",
+        color: line.calc ? "var(--primary)" : "var(--muted-foreground)",
+        fontSize: 11, fontWeight: 600,
+        cursor: line.calc ? "pointer" : "not-allowed",
+        transition: "all 0.15s",
+      }}
+      onMouseEnter={(e) => {
+        if (line.calc) {
+          e.currentTarget.style.background = "color-mix(in oklch, var(--primary) 15%, transparent)";
+        }
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+      }}
+    >
+      {loading ? (
+        <Loader style={{ animation: "spin 1s linear infinite" }} size={12} />
+      ) : (
+        <FileDown size={12} />
+      )}
       PDF
     </button>
   );
 }
 
-function BulkDownloadButton({lines,periodLabel,payDate,company}:{lines:PayRunLine[];periodLabel:string;payDate:string;company:PdfCompany;}){
-  const {toast}=useToast();
-  const [loading,setLoading]=useState(false);
-  const [progress,setProgress]=useState({done:0,total:0});
-  const valid=lines.filter(l=>l.calc!==null);
-  async function handleAll(){
-    if(!valid.length) return;
-    setLoading(true); setProgress({done:0,total:valid.length});
-    try{
-      for(let i=0;i<valid.length;i++){
-        const blob=await generatePayslipBlob({line:valid[i],periodLabel,payDate,company});
-        const url=URL.createObjectURL(blob); const a=document.createElement("a");
-        a.href=url; a.download=buildFilename(valid[i].fullName,periodLabel); a.click(); URL.revokeObjectURL(url);
-        setProgress({done:i+1,total:valid.length});
-        await new Promise(r=>setTimeout(r,350));
+function BulkDownloadButton({
+  lines,
+  periodLabel,
+  payDate,
+  company,
+}: {
+  lines: PayRunLine[];
+  periodLabel: string;
+  payDate: string;
+  company: PdfCompany;
+}) {
+  const { toast } = useToast();
+  const { company: appCompany } = useApp();
+  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const valid = lines.filter((l) => l.calc !== null);
+
+  async function handleAll() {
+    if (!valid.length) return;
+
+    setLoading(true);
+
+    try {
+      // ── Check limit before bulk generation ──
+      const employeeIds = valid.map((l) => l.employeeId);
+      const { allowed, message, blockedIds } = await canGeneratePayslips(
+        appCompany.id,
+        appCompany.subscriptionTier,
+        appCompany.billingBypass,
+        employeeIds
+      );
+
+      if (!allowed) {
+        toast.error(
+          message || `Cannot generate payslips for all employees. Plan limit reached.`
+        );
+        setLoading(false);
+        return;
       }
-    }catch(e){console.error(e);toast.error("Some payslips could not be generated.");}
-    finally{setLoading(false);setProgress({done:0,total:0});}
+
+      // Generate PDFs sequentially
+      setProgress({ done: 0, total: valid.length });
+      for (let i = 0; i < valid.length; i++) {
+        const line = valid[i];
+        const blob = await generatePayslipBlob({ line, periodLabel, payDate, company });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = buildFilename(line.fullName, periodLabel);
+        a.click();
+        URL.revokeObjectURL(url);
+
+        // Record generation for this employee
+        await recordPayslipGeneration(appCompany.id, line.employeeId);
+
+        setProgress({ done: i + 1, total: valid.length });
+        await new Promise((r) => setTimeout(r, 350));
+      }
+
+      toast.success(`${valid.length} payslip(s) generated.`);
+    } catch (e) {
+      console.error(e);
+      toast.error("Some payslips could not be generated.");
+    } finally {
+      setLoading(false);
+      setProgress({ done: 0, total: 0 });
+    }
   }
-  return(
-    <button onClick={handleAll} disabled={loading||!valid.length}
-      style={{display:"flex",alignItems:"center",gap:7,padding:"9px 16px",borderRadius:10,cursor:"pointer",background:valid.length?"var(--primary)":"color-mix(in oklch, var(--primary) 45%, transparent)",border:"none",color:"var(--primary-foreground)",fontSize:12,fontWeight:700,transition:"all 0.15s"}}
-      onMouseEnter={e=>{if(valid.length&&!loading) e.currentTarget.style.opacity="0.88";}}
-      onMouseLeave={e=>{e.currentTarget.style.opacity="1";}}>
-      {loading?<><Loader style={{animation:"spin 1s linear infinite"}} size={13}/>{progress.total>0?`${progress.done}/${progress.total}…`:"Generating…"}</> : <><Download size={13}/>All Payslips ({valid.length})</>}
+
+  return (
+    <button
+      onClick={handleAll}
+      disabled={loading || !valid.length}
+      style={{
+        display: "flex", alignItems: "center", gap: 7,
+        padding: "9px 16px", borderRadius: 10,
+        cursor: "pointer",
+        background: valid.length
+          ? "var(--primary)"
+          : "color-mix(in oklch, var(--primary) 45%, transparent)",
+        border: "none",
+        color: "var(--primary-foreground)",
+        fontSize: 12, fontWeight: 700,
+        transition: "all 0.15s",
+      }}
+      onMouseEnter={(e) => {
+        if (valid.length && !loading) e.currentTarget.style.opacity = "0.88";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.opacity = "1";
+      }}
+    >
+      {loading ? (
+        <>
+          <Loader style={{ animation: "spin 1s linear infinite" }} size={13} />
+          {progress.total > 0 ? `${progress.done}/${progress.total}…` : "Generating…"}
+        </>
+      ) : (
+        <>
+          <Download size={13} />
+          All Payslips ({valid.length})
+        </>
+      )}
     </button>
   );
 }
@@ -467,207 +615,527 @@ function StatusStepper({current,onAdvance,saving=false}:{current:RunStatus;onAdv
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function PayrollPage(){
-  const {employees,company,addEmployee,refreshEmployees,loading}=useApp();
-  const {toast}=useToast();
+export default function PayrollPage() {
+  const { employees, company, addEmployee, refreshEmployees, loading } = useApp();
+  const { toast } = useToast();
 
-  if(loading) return <PageSkeleton/>;
+  if (loading) return <PageSkeleton />;
 
-
-  
   const effectiveTier = getEffectiveTier(company.subscriptionTier, company.billingBypass);
-  const pdfCompany:PdfCompany={
-    name:company.name, tin:company.tin, nasscorpRegNo:company.nasscorpRegNo,
-    address:company.address, phone:company.phone, email:company.email,
+  const pdfCompany: PdfCompany = {
+    name: company.name,
+    tin: company.tin,
+    nasscorpRegNo: company.nasscorpRegNo,
+    address: company.address,
+    phone: company.phone,
+    email: company.email,
     logoUrl: canUse("companyLogo", effectiveTier) ? company.logoUrl : null,
   };
-  const defaultPeriod=getCurrentPeriod();
 
-  const [periodLabel,setPeriodLabel]=useState(defaultPeriod.label);
-  const [payDate,setPayDate]=useState(defaultPeriod.payDate);
-  const [exchangeRate,setExchangeRate]=useState(185.44);
-  const [runStarted,setRunStarted]=useState(false);
-  const [lines,dispatch]=useReducer(gridReducer,[]);
-  const [status,setStatus]=useState<RunStatus>("draft");
-  const [showUpload,setShowUpload]=useState(false);
-  const [history,setHistory]=useState<SavedRun[]>([]);
-  const [saving,setSaving]=useState(false);
+  const defaultPeriod = getCurrentPeriod();
 
-  const sbRef=useRef<ReturnType<typeof createClient>|null>(null);
-  if(!sbRef.current) sbRef.current=createClient();
-  const supabase=sbRef.current;
+  const [periodLabel, setPeriodLabel] = useState(defaultPeriod.label);
+  const [payDate, setPayDate] = useState(defaultPeriod.payDate);
+  const [exchangeRate, setExchangeRate] = useState(185.44);
+  const [runStarted, setRunStarted] = useState(false);
+  const [lines, dispatch] = useReducer(gridReducer, []);
+  const [status, setStatus] = useState<RunStatus>("draft");
+  const [showUpload, setShowUpload] = useState(false);
+  const [history, setHistory] = useState<SavedRun[]>([]);
+  const [saving, setSaving] = useState(false);
 
-  useEffect(()=>{
-    async function loadHistory(){
-      const {data}=await (supabase as any).from("pay_runs").select("*").eq("status","paid").order("created_at",{ascending:false}).limit(20);
-      if(!data) return;
-      setHistory(data.map((r:any)=>({id:r.id,periodLabel:r.period_label,payDate:r.pay_date,status:r.status,employeeCount:r.employee_count,totalGross:r.total_gross,totalNet:r.total_net,totalTax:r.total_income_tax,totalNasscorp:r.total_nasscorp,exchangeRate:r.exchange_rate,lines:[],createdAt:r.created_at})));
+  // ═══ USAGE STATE ═══
+  const [usage, setUsage] = useState<{ current: number; limit: number } | null>(null);
+
+  const sbRef = useRef<ReturnType<typeof createClient> | null>(null);
+  if (!sbRef.current) sbRef.current = createClient();
+  const supabase = sbRef.current;
+
+  // ── History loading ─────────────────────────────────────────────────────
+  useEffect(() => {
+    async function loadHistory() {
+      const { data } = await (supabase as any)
+        .from("pay_runs")
+        .select("*")
+        .eq("status", "paid")
+        .order("created_at", { ascending: false })
+        .limit(20);
+      if (!data) return;
+      setHistory(
+        data.map((r: any) => ({
+          id: r.id,
+          periodLabel: r.period_label,
+          payDate: r.pay_date,
+          status: r.status,
+          employeeCount: r.employee_count,
+          totalGross: r.total_gross,
+          totalNet: r.total_net,
+          totalTax: r.total_income_tax,
+          totalNasscorp: r.total_nasscorp,
+          exchangeRate: r.exchange_rate,
+          lines: [],
+          createdAt: r.created_at,
+        }))
+      );
     }
     loadHistory();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const isLocked=status==="approved"||status==="paid";
-  const warningCount=lines.filter(l=>l.calc&&l.calc.warnings.length>0).length;
-  const activeEmployees=employees.filter(e=>e.isActive);
+  // ═══ USAGE FETCHING (inside component, once per company / tier change) ═══
+  useEffect(() => {
+    if (!company.billingBypass) {
+      getDistinctEmployeeIdsGeneratedThisMonth(company.id).then((ids) => {
+        const limit =
+          company.subscriptionTier === "basic"
+            ? 80
+            : company.subscriptionTier === "standard"
+            ? 499
+            : Infinity;
+        setUsage({ current: ids.length, limit });
+      });
+    }
+  }, [company.id, company.subscriptionTier, company.billingBypass]);
+
+  const isLocked = status === "approved" || status === "paid";
+  const warningCount = lines.filter((l) => l.calc && l.calc.warnings.length > 0).length;
+  const activeEmployees = employees.filter((e) => e.isActive);
 
   function handleStartRun() {
-    const rows: PayRunLine[] = activeEmployees.map(emp => ({
-      id: emp.id, employeeId: emp.id, employeeNumber: emp.employeeNumber,
-      fullName: emp.fullName, jobTitle: emp.jobTitle, department: emp.department,
-      currency: emp.currency, rate: emp.rate,
-      regularHours:  emp.pendingRegularHours  ?? emp.standardHours,
+    const rows: PayRunLine[] = activeEmployees.map((emp) => ({
+      id: emp.id,
+      employeeId: emp.id,
+      employeeNumber: emp.employeeNumber,
+      fullName: emp.fullName,
+      jobTitle: emp.jobTitle,
+      department: emp.department,
+      currency: emp.currency,
+      rate: emp.rate,
+      regularHours: emp.pendingRegularHours ?? emp.standardHours,
       overtimeHours: emp.pendingOvertimeHours ?? 0,
-      holidayHours:  emp.pendingHolidayHours  ?? 0,
+      holidayHours: emp.pendingHolidayHours ?? 0,
       additionalEarnings: emp.allowances ?? 0,
-      deductions:     emp.pendingDeductions ?? 0,
+      deductions: emp.pendingDeductions ?? 0,
       deductionItems: [],
-      exchangeRate, calc: null,
+      exchangeRate,
+      calc: null,
       paymentMethod: emp.paymentMethod,
-      bankName: emp.bankName, accountNumber: emp.accountNumber,
-      mobileNumber: emp.momoNumber, mobileProvider: undefined,
+      bankName: emp.bankName,
+      accountNumber: emp.accountNumber,
+      mobileNumber: emp.momoNumber,
+      mobileProvider: undefined,
     }));
     dispatch({ type: "SET_ROWS", rows });
     setRunStarted(true);
   }
 
-  async function advanceStatus(){
-    const idx=STATUS_STEPS.indexOf(status);
-    if(idx>=STATUS_STEPS.length-1) return;
-    const next=STATUS_STEPS[idx+1]; setStatus(next);
-    if(next==="paid"){
+  async function advanceStatus() {
+    const idx = STATUS_STEPS.indexOf(status);
+    if (idx >= STATUS_STEPS.length - 1) return;
+    const next = STATUS_STEPS[idx + 1];
+    setStatus(next);
+
+    if (next === "paid") {
       setSaving(true);
-      try{
-        const FX=exchangeRate;
-        const toUSD=(n:number,ccy:string)=>ccy==="USD"?n:n/FX;
-        const totalGross=lines.reduce((s,l)=>s+(l.calc?toUSD(l.calc.grossPay,l.currency):0),0);
-        const totalNet=lines.reduce((s,l)=>s+(l.calc?toUSD(l.calc.netPay,l.currency):0),0);
-        const totalTax=lines.reduce((s,l)=>s+(l.calc?toUSD(l.calc.Paye.taxInBase,l.currency):0),0);
-        const totalNasscorp=lines.reduce((s,l)=>s+(l.calc?toUSD(l.calc.nasscorp.employeeContribution,l.currency):0),0);
-        const {data:coRow}=await (supabase as any).from("companies").select("id").single();
-        const companyId:string|null=coRow?.id??null;
-        const {data:run,error:runErr}=await (supabase as any).from("pay_runs").insert({
-          ...(companyId?{company_id:companyId}:{}),
-          period_label:periodLabel,pay_period_start:payDate,pay_period_end:payDate,pay_date:payDate,
-          exchange_rate:FX,status:"paid",employee_count:lines.length,
-          total_gross:totalGross,total_net:totalNet,total_income_tax:totalTax,total_nasscorp:totalNasscorp,
-        }).select().single();
-        if(runErr) throw runErr;
-        if(run&&lines.length>0){
-          const lineRows=lines.filter(l=>l.calc!==null).map(l=>({
-            pay_run_id:run.id,...(companyId?{company_id:companyId}:{}),
-            employee_id:l.employeeId,employee_number:l.employeeNumber,full_name:l.fullName,
-            job_title:l.jobTitle,department:l.department,currency:l.currency,rate:l.rate,
-            regular_hours:l.regularHours,overtime_hours:l.overtimeHours,holiday_hours:l.holidayHours,
-            additional_earnings:l.additionalEarnings,deductions:l.deductions??0,exchange_rate:l.exchangeRate,
-            gross_pay:l.calc!.grossPay,income_tax:l.calc!.Paye.taxInBase,
-            nasscorp_ee:l.calc!.nasscorp.employeeContribution,nasscorp_er:l.calc!.nasscorp.employerContribution,net_pay:l.calc!.netPay,
-          }));
-          const {error:lineErr}=await (supabase as any).from("pay_run_lines").insert(lineRows);
-          if(lineErr){console.error("pay_run_lines insert error:",lineErr);toast.error("Pay run saved but some line items failed.");}
+      try {
+        const FX = exchangeRate;
+        const toUSD = (n: number, ccy: string) => (ccy === "USD" ? n : n / FX);
+        const totalGross = lines.reduce(
+          (s, l) => s + (l.calc ? toUSD(l.calc.grossPay, l.currency) : 0),
+          0
+        );
+        const totalNet = lines.reduce(
+          (s, l) => s + (l.calc ? toUSD(l.calc.netPay, l.currency) : 0),
+          0
+        );
+        const totalTax = lines.reduce(
+          (s, l) => s + (l.calc ? toUSD(l.calc.Paye.taxInBase, l.currency) : 0),
+          0
+        );
+        const totalNasscorp = lines.reduce(
+          (s, l) =>
+            s + (l.calc ? toUSD(l.calc.nasscorp.employeeContribution, l.currency) : 0),
+          0
+        );
+        const { data: coRow } = await (supabase as any)
+          .from("companies")
+          .select("id")
+          .single();
+        const companyId: string | null = coRow?.id ?? null;
+        const { data: run, error: runErr } = await (supabase as any)
+          .from("pay_runs")
+          .insert({
+            ...(companyId ? { company_id: companyId } : {}),
+            period_label: periodLabel,
+            pay_period_start: payDate,
+            pay_period_end: payDate,
+            pay_date: payDate,
+            exchange_rate: FX,
+            status: "paid",
+            employee_count: lines.length,
+            total_gross: totalGross,
+            total_net: totalNet,
+            total_income_tax: totalTax,
+            total_nasscorp: totalNasscorp,
+          })
+          .select()
+          .single();
+        if (runErr) throw runErr;
+        if (run && lines.length > 0) {
+          const lineRows = lines
+            .filter((l) => l.calc !== null)
+            .map((l) => ({
+              pay_run_id: run.id,
+              ...(companyId ? { company_id: companyId } : {}),
+              employee_id: l.employeeId,
+              employee_number: l.employeeNumber,
+              full_name: l.fullName,
+              job_title: l.jobTitle,
+              department: l.department,
+              currency: l.currency,
+              rate: l.rate,
+              regular_hours: l.regularHours,
+              overtime_hours: l.overtimeHours,
+              holiday_hours: l.holidayHours,
+              additional_earnings: l.additionalEarnings,
+              deductions: l.deductions ?? 0,
+              exchange_rate: l.exchangeRate,
+              gross_pay: l.calc!.grossPay,
+              income_tax: l.calc!.Paye.taxInBase,
+              nasscorp_ee: l.calc!.nasscorp.employeeContribution,
+              nasscorp_er: l.calc!.nasscorp.employerContribution,
+              net_pay: l.calc!.netPay,
+            }));
+          const { error: lineErr } = await (supabase as any)
+            .from("pay_run_lines")
+            .insert(lineRows);
+          if (lineErr) {
+            console.error("pay_run_lines insert error:", lineErr);
+            toast.error("Pay run saved but some line items failed.");
+          }
         }
-        setHistory(prev=>[{id:run?.id??`LOCAL-${Date.now()}`,periodLabel,payDate,status:"paid",employeeCount:lines.length,totalGross,totalNet,totalTax,totalNasscorp,exchangeRate:FX,lines:[...lines],createdAt:new Date().toISOString()},...prev]);
-        toast.success(`${periodLabel} pay run saved. ${lines.length} employee${lines.length!==1?"s":""} paid.`);
-      }catch(err){console.error("Failed to save pay run:",err);toast.error("Pay run marked paid locally but could not save to Supabase.");}
-      finally{setSaving(false);}
+        setHistory((prev) => [
+          {
+            id: run?.id ?? `LOCAL-${Date.now()}`,
+            periodLabel,
+            payDate,
+            status: "paid",
+            employeeCount: lines.length,
+            totalGross,
+            totalNet,
+            totalTax,
+            totalNasscorp,
+            exchangeRate: FX,
+            lines: [...lines],
+            createdAt: new Date().toISOString(),
+          },
+          ...prev,
+        ]);
+        toast.success(
+          `${periodLabel} pay run saved. ${lines.length} employee${
+            lines.length !== 1 ? "s" : ""
+          } paid.`
+        );
+      } catch (err) {
+        console.error("Failed to save pay run:", err);
+        toast.error("Pay run marked paid locally but could not save to Supabase.");
+      } finally {
+        setSaving(false);
+      }
     }
   }
 
-  function startNewRun(){
-    dispatch({type:"CLEAR"});setStatus("draft");
-    const p=getCurrentPeriod();setPeriodLabel(p.label);setPayDate(p.payDate);setRunStarted(false);
+  function startNewRun() {
+    dispatch({ type: "CLEAR" });
+    setStatus("draft");
+    const p = getCurrentPeriod();
+    setPeriodLabel(p.label);
+    setPayDate(p.payDate);
+    setRunStarted(false);
   }
 
-  async function handleBulkImport(bulkRows:BulkRow[]){
-    const payRunLines:PayRunLine[]=[];
-    for(const r of bulkRows){
-      try{
-        const saved=await addEmployee({...r.employee,isActive:true});
-        payRunLines.push(bulkRowToPayRunLine(r,exchangeRate,saved?.id));
-      }catch(err){
-        console.error("Failed to save bulk employee:",r.employee.employeeNumber,err);
-        payRunLines.push(bulkRowToPayRunLine(r,exchangeRate));
+  async function handleBulkImport(bulkRows: BulkRow[]) {
+    const payRunLines: PayRunLine[] = [];
+    for (const r of bulkRows) {
+      try {
+        const saved = await addEmployee({ ...r.employee, isActive: true });
+        payRunLines.push(bulkRowToPayRunLine(r, exchangeRate, saved?.id));
+      } catch (err) {
+        console.error("Failed to save bulk employee:", r.employee.employeeNumber, err);
+        payRunLines.push(bulkRowToPayRunLine(r, exchangeRate));
       }
     }
     await refreshEmployees();
-    dispatch({type:"IMPORT_ROWS",rows:payRunLines});
+    dispatch({ type: "IMPORT_ROWS", rows: payRunLines });
     setShowUpload(false);
-    toast.success(`${payRunLines.length} employee${payRunLines.length!==1?"s":""} imported and saved.`);
+    toast.success(
+      `${payRunLines.length} employee${
+        payRunLines.length !== 1 ? "s" : ""
+      } imported and saved.`
+    );
   }
 
   // ── Columns ───────────────────────────────────────────────────────────────
-  const col=createColumnHelper<PayRunLine>();
-  const columns=useMemo(()=>[
-    col.accessor("employeeNumber",{header:"#",size:64,
-      cell:c=><span style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"var(--muted-foreground)"}}>{c.getValue()}</span>}),
-    col.accessor("fullName",{header:"Employee",size:150,
-      cell:c=>(
-        <div>
-          <p style={{fontSize:13,fontWeight:600,color:"var(--foreground)",margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130}}>{c.getValue()}</p>
-          <p style={{fontSize:10,color:"var(--muted-foreground)",margin:"2px 0 0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130}}>{c.row.original.department}</p>
-        </div>
-      )}),
-    col.accessor("currency",{header:"CCY",size:50,
-      cell:c=>(
-        <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:10,
-          background:c.getValue()==="USD"?"color-mix(in oklch, var(--secondary) 30%, transparent)":"color-mix(in oklch, var(--warning) 20%, transparent)",
-          color:c.getValue()==="USD"?"var(--secondary)":"var(--warning)"}}>
-          {c.getValue()}
-        </span>
-      )}),
-    col.accessor("rate",{header:"Rate",size:80,
-      cell:c=><EditableCell value={c.getValue()} lineId={c.row.original.id} field="rate" dispatch={dispatch} isLocked={isLocked} prefix={c.row.original.currency==="USD"?"$":"L$"}/>}),
-    col.accessor("regularHours",{header:"Reg",size:64,
-      cell:c=><EditableCell value={c.getValue()} lineId={c.row.original.id} field="regularHours" dispatch={dispatch} isLocked={isLocked}/>}),
-    col.accessor("overtimeHours",{header:"OT",size:60,
-      cell:c=><EditableCell value={c.getValue()} lineId={c.row.original.id} field="overtimeHours" dispatch={dispatch} isLocked={isLocked}/>}),
-    col.accessor("holidayHours",{header:"Hol",size:60,
-      cell:c=><EditableCell value={c.getValue()} lineId={c.row.original.id} field="holidayHours" dispatch={dispatch} isLocked={isLocked}/>}),
-    col.accessor("additionalEarnings",{header:"Extras",size:74,
-      cell:c=><EditableCell value={c.getValue()} lineId={c.row.original.id} field="additionalEarnings" dispatch={dispatch} isLocked={isLocked} prefix={c.row.original.currency==="USD"?"$":"L$"}/>}),
-    col.accessor("deductions",{header:"Ded.",size:80,
-      cell:c=><EditableCell value={c.row.original.deductions??0} lineId={c.row.original.id} field="deductions" dispatch={dispatch} isLocked={isLocked} prefix={c.row.original.currency==="USD"?"-$":"-L$"}/>}),
-    col.display({id:"gross",header:"Gross",size:90,
-      cell:c=>{
-        const sym=c.row.original.currency==="USD"?"$":"L$";
-        return <span style={{display:"block",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:700,color:"var(--foreground)"}}>{c.row.original.calc?`${sym}${c.row.original.calc.grossPay.toFixed(2)}`:"—"}</span>;
-      }}),
-    col.display({id:"tax",header:"Tax",size:80,
-      cell:c=>{
-        const sym=c.row.original.currency==="USD"?"$":"L$";
-        return <span style={{display:"block",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:12,color:"var(--destructive)"}}>{c.row.original.calc?`${sym}${c.row.original.calc.Paye.taxInBase.toFixed(2)}`:"—"}</span>;
-      }}),
-    col.display({id:"net",header:"Net Pay",size:96,
-      cell:c=>{
-        const sym=c.row.original.currency==="USD"?"$":"L$";
-        return <span style={{display:"block",textAlign:"right",fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:800,color:"var(--primary)"}}>{c.row.original.calc?`${sym}${c.row.original.calc.netPay.toFixed(2)}`:"—"}</span>;
-      }}),
-    col.display({id:"slip",header:"",size:70,
-      cell:c=><DownloadSlipButton line={c.row.original} periodLabel={periodLabel} payDate={payDate} company={pdfCompany}/>}),
-    col.display({id:"warn",header:"",size:28,
-      cell:c=>{
-        const warnings=c.row.original.calc?.warnings??[];
-        if(!warnings.length) return <CheckCircle2 size={14} color="color-mix(in oklch, var(--primary) 60%, transparent)" style={{margin:"0 auto",display:"block"}}/>;
-        return(
-          <div style={{position:"relative"}} className="warn-group">
-            <AlertTriangle size={14} color="var(--warning)" style={{cursor:"pointer",display:"block",margin:"0 auto"}}/>
-            <div style={{position:"absolute",right:0,top:20,zIndex:50,display:"none",width:240,background:"var(--card)",border:"1px solid color-mix(in oklch, var(--warning) 30%, transparent)",borderRadius:10,padding:10,boxShadow:"0 8px 24px color-mix(in oklch, var(--foreground) 30%, transparent)"}} className="warn-tip">
-              {warnings.map((w,i)=><p key={i} style={{color:"var(--warning)",fontSize:11,margin:"2px 0"}}>{w}</p>)}
-            </div>
+  const col = createColumnHelper<PayRunLine>();
+  const columns = useMemo(
+    () => [
+      col.accessor("employeeNumber", {
+        header: "#",
+        size: 64,
+        cell: (c) => (
+          <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 11, color: "var(--muted-foreground)" }}>
+            {c.getValue()}
+          </span>
+        ),
+      }),
+      col.accessor("fullName", {
+        header: "Employee",
+        size: 150,
+        cell: (c) => (
+          <div>
+            <p style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 130 }}>
+              {c.getValue()}
+            </p>
+            <p style={{ fontSize: 10, color: "var(--muted-foreground)", margin: "2px 0 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 130 }}>
+              {c.row.original.department}
+            </p>
           </div>
-        );
-      }}),
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  ],[isLocked,periodLabel,payDate,pdfCompany.logoUrl]);
+        ),
+      }),
+      col.accessor("currency", {
+        header: "CCY",
+        size: 50,
+        cell: (c) => (
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              padding: "2px 7px",
+              borderRadius: 10,
+              background:
+                c.getValue() === "USD"
+                  ? "color-mix(in oklch, var(--secondary) 30%, transparent)"
+                  : "color-mix(in oklch, var(--warning) 20%, transparent)",
+              color:
+                c.getValue() === "USD"
+                  ? "var(--secondary)"
+                  : "var(--warning)",
+            }}
+          >
+            {c.getValue()}
+          </span>
+        ),
+      }),
+      col.accessor("rate", {
+        header: "Rate",
+        size: 80,
+        cell: (c) => (
+          <EditableCell
+            value={c.getValue()}
+            lineId={c.row.original.id}
+            field="rate"
+            dispatch={dispatch}
+            isLocked={isLocked}
+            prefix={c.row.original.currency === "USD" ? "$" : "L$"}
+          />
+        ),
+      }),
+      col.accessor("regularHours", {
+        header: "Reg",
+        size: 64,
+        cell: (c) => (
+          <EditableCell
+            value={c.getValue()}
+            lineId={c.row.original.id}
+            field="regularHours"
+            dispatch={dispatch}
+            isLocked={isLocked}
+          />
+        ),
+      }),
+      col.accessor("overtimeHours", {
+        header: "OT",
+        size: 60,
+        cell: (c) => (
+          <EditableCell
+            value={c.getValue()}
+            lineId={c.row.original.id}
+            field="overtimeHours"
+            dispatch={dispatch}
+            isLocked={isLocked}
+          />
+        ),
+      }),
+      col.accessor("holidayHours", {
+        header: "Hol",
+        size: 60,
+        cell: (c) => (
+          <EditableCell
+            value={c.getValue()}
+            lineId={c.row.original.id}
+            field="holidayHours"
+            dispatch={dispatch}
+            isLocked={isLocked}
+          />
+        ),
+      }),
+      col.accessor("additionalEarnings", {
+        header: "Extras",
+        size: 74,
+        cell: (c) => (
+          <EditableCell
+            value={c.getValue()}
+            lineId={c.row.original.id}
+            field="additionalEarnings"
+            dispatch={dispatch}
+            isLocked={isLocked}
+            prefix={c.row.original.currency === "USD" ? "$" : "L$"}
+          />
+        ),
+      }),
+      col.accessor("deductions", {
+        header: "Ded.",
+        size: 80,
+        cell: (c) => (
+          <EditableCell
+            value={c.row.original.deductions ?? 0}
+            lineId={c.row.original.id}
+            field="deductions"
+            dispatch={dispatch}
+            isLocked={isLocked}
+            prefix={c.row.original.currency === "USD" ? "-$" : "-L$"}
+          />
+        ),
+      }),
+      col.display({
+        id: "gross",
+        header: "Gross",
+        size: 90,
+        cell: (c) => {
+          const sym = c.row.original.currency === "USD" ? "$" : "L$";
+          return (
+            <span style={{ display: "block", textAlign: "right", fontFamily: "'DM Mono',monospace", fontSize: 12, fontWeight: 700, color: "var(--foreground)" }}>
+              {c.row.original.calc ? `${sym}${c.row.original.calc.grossPay.toFixed(2)}` : "—"}
+            </span>
+          );
+        },
+      }),
+      col.display({
+        id: "tax",
+        header: "Tax",
+        size: 80,
+        cell: (c) => {
+          const sym = c.row.original.currency === "USD" ? "$" : "L$";
+          return (
+            <span style={{ display: "block", textAlign: "right", fontFamily: "'DM Mono',monospace", fontSize: 12, color: "var(--destructive)" }}>
+              {c.row.original.calc ? `${sym}${c.row.original.calc.Paye.taxInBase.toFixed(2)}` : "—"}
+            </span>
+          );
+        },
+      }),
+      col.display({
+        id: "net",
+        header: "Net Pay",
+        size: 96,
+        cell: (c) => {
+          const sym = c.row.original.currency === "USD" ? "$" : "L$";
+          return (
+            <span style={{ display: "block", textAlign: "right", fontFamily: "'DM Mono',monospace", fontSize: 13, fontWeight: 800, color: "var(--primary)" }}>
+              {c.row.original.calc ? `${sym}${c.row.original.calc.netPay.toFixed(2)}` : "—"}
+            </span>
+          );
+        },
+      }),
+      col.display({
+        id: "slip",
+        header: "",
+        size: 70,
+        cell: (c) => (
+          <DownloadSlipButton
+            line={c.row.original}
+            periodLabel={periodLabel}
+            payDate={payDate}
+            company={pdfCompany}
+          />
+        ),
+      }),
+      col.display({
+        id: "warn",
+        header: "",
+        size: 28,
+        cell: (c) => {
+          const warnings = c.row.original.calc?.warnings ?? [];
+          if (!warnings.length)
+            return (
+              <CheckCircle2
+                size={14}
+                color="color-mix(in oklch, var(--primary) 60%, transparent)"
+                style={{ margin: "0 auto", display: "block" }}
+              />
+            );
+          return (
+            <div style={{ position: "relative" }} className="warn-group">
+              <AlertTriangle
+                size={14}
+                color="var(--warning)"
+                style={{ cursor: "pointer", display: "block", margin: "0 auto" }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  right: 0,
+                  top: 20,
+                  zIndex: 50,
+                  display: "none",
+                  width: 240,
+                  background: "var(--card)",
+                  border:
+                    "1px solid color-mix(in oklch, var(--warning) 30%, transparent)",
+                  borderRadius: 10,
+                  padding: 10,
+                  boxShadow:
+                    "0 8px 24px color-mix(in oklch, var(--foreground) 30%, transparent)",
+                }}
+                className="warn-tip"
+              >
+                {warnings.map((w, i) => (
+                  <p
+                    key={i}
+                    style={{ color: "var(--warning)", fontSize: 11, margin: "2px 0" }}
+                  >
+                    {w}
+                  </p>
+                ))}
+              </div>
+            </div>
+          );
+        },
+      }),
+    ],
+    [isLocked, periodLabel, payDate, pdfCompany.logoUrl]
+  );
 
-  const table=useReactTable({data:lines,columns,getCoreRowModel:getCoreRowModel(),getRowId:row=>row.id});
+  const table = useReactTable({
+    data: lines,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getRowId: (row) => row.id,
+  });
 
   // ── Setup screen ──────────────────────────────────────────────────────────
-
-  if(!runStarted){
-    const withHours=activeEmployees.filter(e=>(e.pendingOvertimeHours??0)>0||(e.pendingHolidayHours??0)>0).length;
-    return(
-      <div style={{minHeight:"100vh",background:"var(--background)",padding:"32px",fontFamily:"'DM Sans',sans-serif"}}>
+  if (!runStarted) {
+    const withHours = activeEmployees.filter(
+      (e) => (e.pendingOvertimeHours ?? 0) > 0 || (e.pendingHolidayHours ?? 0) > 0
+    ).length;
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "var(--background)",
+          padding: "32px",
+          fontFamily: "'DM Sans',sans-serif",
+        }}
+      >
         <style>{`
           @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500;600&display=swap');
           @keyframes spin{to{transform:rotate(360deg)}}
@@ -675,135 +1143,509 @@ export default function PayrollPage(){
           input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
         `}</style>
 
-        <div style={{marginBottom:28,animation:"fadeUp 0.3s ease"}}>
-          <h1 style={{fontSize:26,fontWeight:800,color:"var(--foreground)",letterSpacing:"-0.02em",margin:0}}>Payroll</h1>
-          <p style={{color:"var(--muted-foreground)",fontSize:13,marginTop:5}}>Configure and start a new pay run</p>
+        <div style={{ marginBottom: 28, animation: "fadeUp 0.3s ease" }}>
+          <h1
+            style={{
+              fontSize: 26,
+              fontWeight: 800,
+              color: "var(--foreground)",
+              letterSpacing: "-0.02em",
+              margin: 0,
+            }}
+          >
+            Payroll
+          </h1>
+          <p style={{ color: "var(--muted-foreground)", fontSize: 13, marginTop: 5 }}>
+            Configure and start a new pay run
+          </p>
         </div>
 
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,maxWidth:920}}>
-
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, maxWidth: 920 }}>
           {/* Left: config form */}
-          <div style={{display:"flex",flexDirection:"column",gap:16}}>
-
-            {activeEmployees.length===0&&(
-              <div style={{background:"color-mix(in oklch, var(--warning) 12%, transparent)",border:"1px solid color-mix(in oklch, var(--warning) 30%, transparent)",borderRadius:14,padding:"14px 18px",display:"flex",gap:12,alignItems:"flex-start",animation:"fadeUp 0.3s ease"}}>
-                <AlertTriangle size={16} color="var(--warning)" style={{flexShrink:0,marginTop:2}}/>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {activeEmployees.length === 0 && (
+              <div
+                style={{
+                  background:
+                    "color-mix(in oklch, var(--warning) 12%, transparent)",
+                  border:
+                    "1px solid color-mix(in oklch, var(--warning) 30%, transparent)",
+                  borderRadius: 14,
+                  padding: "14px 18px",
+                  display: "flex",
+                  gap: 12,
+                  alignItems: "flex-start",
+                  animation: "fadeUp 0.3s ease",
+                }}
+              >
+                <AlertTriangle
+                  size={16}
+                  color="var(--warning)"
+                  style={{ flexShrink: 0, marginTop: 2 }}
+                />
                 <div>
-                  <p style={{color:"var(--warning)",fontWeight:700,fontSize:13,margin:"0 0 3px"}}>No active employees</p>
-                  <p style={{color:"var(--muted-foreground)",fontSize:12,margin:0}}>Add employees on the <strong style={{color:"var(--foreground)"}}>Employees</strong> page first.</p>
+                  <p
+                    style={{
+                      color: "var(--warning)",
+                      fontWeight: 700,
+                      fontSize: 13,
+                      margin: "0 0 3px",
+                    }}
+                  >
+                    No active employees
+                  </p>
+                  <p style={{ color: "var(--muted-foreground)", fontSize: 12, margin: 0 }}>
+                    Add employees on the{" "}
+                    <strong style={{ color: "var(--foreground)" }}>Employees</strong> page first.
+                  </p>
                 </div>
               </div>
             )}
 
-            <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:16,padding:"24px",display:"flex",flexDirection:"column",gap:18,animation:"fadeUp 0.35s ease 0.05s both"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
-                <div style={{width:32,height:32,borderRadius:10,background:"color-mix(in oklch, var(--primary) 20%, transparent)",border:"1px solid color-mix(in oklch, var(--primary) 40%, transparent)",display:"flex",alignItems:"center",justifyContent:"center"}}>
-                  <Calendar size={15} color="var(--primary)"/>
+            <div
+              style={{
+                background: "var(--card)",
+                border: "1px solid var(--border)",
+                borderRadius: 16,
+                padding: "24px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 18,
+                animation: "fadeUp 0.35s ease 0.05s both",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  marginBottom: 4,
+                }}
+              >
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 10,
+                    background:
+                      "color-mix(in oklch, var(--primary) 20%, transparent)",
+                    border:
+                      "1px solid color-mix(in oklch, var(--primary) 40%, transparent)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Calendar size={15} color="var(--primary)" />
                 </div>
-                <span style={{color:"var(--foreground)",fontWeight:700,fontSize:15}}>New Pay Run</span>
+                <span style={{ color: "var(--foreground)", fontWeight: 700, fontSize: 15 }}>
+                  New Pay Run
+                </span>
               </div>
 
-              <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                <label style={{fontSize:11,fontWeight:600,color:"var(--muted-foreground)",letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace"}}>Pay Period Label</label>
-                <input value={periodLabel} onChange={e=>setPeriodLabel(e.target.value)} placeholder="e.g. July 2025"
-                  style={{padding:"10px 12px",background:"var(--background)",border:"1px solid var(--border)",borderRadius:9,color:"var(--foreground)",fontSize:13,outline:"none",transition:"border-color 0.2s"}}
-                  onFocus={e=>{e.target.style.borderColor="var(--primary)";}} onBlur={e=>{e.target.style.borderColor="var(--border)";}}/>
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                <label
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "var(--muted-foreground)",
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    fontFamily: "'DM Mono',monospace",
+                  }}
+                >
+                  Pay Period Label
+                </label>
+                <input
+                  value={periodLabel}
+                  onChange={(e) => setPeriodLabel(e.target.value)}
+                  placeholder="e.g. July 2025"
+                  style={{
+                    padding: "10px 12px",
+                    background: "var(--background)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 9,
+                    color: "var(--foreground)",
+                    fontSize: 13,
+                    outline: "none",
+                    transition: "border-color 0.2s",
+                  }}
+                  onFocus={(e) => {
+                    e.target.style.borderColor = "var(--primary)";
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = "var(--border)";
+                  }}
+                />
               </div>
 
-              <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                <label style={{fontSize:11,fontWeight:600,color:"var(--muted-foreground)",letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace"}}>Pay Date</label>
-                <input type="date" value={payDate} onChange={e=>setPayDate(e.target.value)}
-                  style={{padding:"10px 12px",background:"var(--background)",border:"1px solid var(--border)",borderRadius:9,color:"var(--foreground)",fontSize:13,outline:"none",transition:"border-color 0.2s"}}
-                  onFocus={e=>{e.target.style.borderColor="var(--primary)";}} onBlur={e=>{e.target.style.borderColor="var(--border)";}}/>
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                <label
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "var(--muted-foreground)",
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    fontFamily: "'DM Mono',monospace",
+                  }}
+                >
+                  Pay Date
+                </label>
+                <input
+                  type="date"
+                  value={payDate}
+                  onChange={(e) => setPayDate(e.target.value)}
+                  style={{
+                    padding: "10px 12px",
+                    background: "var(--background)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 9,
+                    color: "var(--foreground)",
+                    fontSize: 13,
+                    outline: "none",
+                    transition: "border-color 0.2s",
+                  }}
+                  onFocus={(e) => {
+                    e.target.style.borderColor = "var(--primary)";
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = "var(--border)";
+                  }}
+                />
               </div>
 
-              <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                <label style={{fontSize:11,fontWeight:600,color:"var(--muted-foreground)",letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace"}}>LRD / USD Exchange Rate</label>
-                <div style={{position:"relative"}}>
-                  <DollarSign size={14} color="var(--muted-foreground)" style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}}/>
-                  <input type="number" value={exchangeRate} onChange={e=>setExchangeRate(parseFloat(e.target.value)||185.44)} placeholder="185.44"
-                    style={{width:"100%",padding:"10px 12px 10px 32px",background:"var(--background)",border:"1px solid var(--border)",borderRadius:9,color:"var(--foreground)",fontSize:13,outline:"none",boxSizing:"border-box",transition:"border-color 0.2s"}}
-                    onFocus={e=>{e.target.style.borderColor="var(--primary)";}} onBlur={e=>{e.target.style.borderColor="var(--border)";}}/>
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                <label
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "var(--muted-foreground)",
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    fontFamily: "'DM Mono',monospace",
+                  }}
+                >
+                  LRD / USD Exchange Rate
+                </label>
+                <div style={{ position: "relative" }}>
+                  <DollarSign
+                    size={14}
+                    color="var(--muted-foreground)"
+                    style={{
+                      position: "absolute",
+                      left: 12,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      pointerEvents: "none",
+                    }}
+                  />
+                  <input
+                    type="number"
+                    value={exchangeRate}
+                    onChange={(e) =>
+                      setExchangeRate(parseFloat(e.target.value) || 185.44)
+                    }
+                    placeholder="185.44"
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px 10px 32px",
+                      background: "var(--background)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 9,
+                      color: "var(--foreground)",
+                      fontSize: 13,
+                      outline: "none",
+                      boxSizing: "border-box",
+                      transition: "border-color 0.2s",
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = "var(--primary)";
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = "var(--border)";
+                    }}
+                  />
                 </div>
-                <p style={{color:"var(--muted-foreground)",fontSize:11,margin:0}}>Used for income tax calculation on LRD salaries</p>
+                <p style={{ color: "var(--muted-foreground)", fontSize: 11, margin: 0 }}>
+                  Used for income tax calculation on LRD salaries
+                </p>
               </div>
 
-              <button onClick={handleStartRun} disabled={activeEmployees.length===0}
-                style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"13px",borderRadius:11,border:"none",
-                  cursor:activeEmployees.length===0?"not-allowed":"pointer",
-                  background:activeEmployees.length===0?"color-mix(in oklch, var(--primary) 30%, transparent)":"var(--primary)",
-                  color:"var(--primary-foreground)",fontSize:14,fontWeight:800,transition:"all 0.15s",marginTop:4}}
-                onMouseEnter={e=>{if(activeEmployees.length>0) e.currentTarget.style.opacity="0.88";}}
-                onMouseLeave={e=>{e.currentTarget.style.opacity="1";}}>
-                <Zap size={15}/> Start Pay Run · {activeEmployees.length} employees
+              <button
+                onClick={handleStartRun}
+                disabled={activeEmployees.length === 0}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  padding: "13px",
+                  borderRadius: 11,
+                  border: "none",
+                  cursor: activeEmployees.length === 0 ? "not-allowed" : "pointer",
+                  background:
+                    activeEmployees.length === 0
+                      ? "color-mix(in oklch, var(--primary) 30%, transparent)"
+                      : "var(--primary)",
+                  color: "var(--primary-foreground)",
+                  fontSize: 14,
+                  fontWeight: 800,
+                  transition: "all 0.15s",
+                  marginTop: 4,
+                }}
+                onMouseEnter={(e) => {
+                  if (activeEmployees.length > 0)
+                    e.currentTarget.style.opacity = "0.88";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.opacity = "1";
+                }}
+              >
+                <Zap size={15} /> Start Pay Run · {activeEmployees.length} employees
               </button>
             </div>
           </div>
 
           {/* Right: summary + history */}
-          <div style={{display:"flex",flexDirection:"column",gap:16}}>
-
-            {activeEmployees.length>0&&(
-              <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:16,padding:"20px 22px",animation:"fadeUp 0.4s ease 0.1s both"}}>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-                  <span style={{color:"var(--foreground)",fontWeight:700,fontSize:13}}>Employee Preview</span>
-                  <span style={{background:"color-mix(in oklch, var(--primary) 20%, transparent)",color:"var(--primary)",border:"1px solid color-mix(in oklch, var(--primary) 40%, transparent)",borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700}}>{activeEmployees.length} Active</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {activeEmployees.length > 0 && (
+              <div
+                style={{
+                  background: "var(--card)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 16,
+                  padding: "20px 22px",
+                  animation: "fadeUp 0.4s ease 0.1s both",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: 14,
+                  }}
+                >
+                  <span style={{ color: "var(--foreground)", fontWeight: 700, fontSize: 13 }}>
+                    Employee Preview
+                  </span>
+                  <span
+                    style={{
+                      background:
+                        "color-mix(in oklch, var(--primary) 20%, transparent)",
+                      color: "var(--primary)",
+                      border:
+                        "1px solid color-mix(in oklch, var(--primary) 40%, transparent)",
+                      borderRadius: 20,
+                      padding: "2px 10px",
+                      fontSize: 11,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {activeEmployees.length} Active
+                  </span>
                 </div>
-                <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                  {activeEmployees.slice(0,5).map(emp=>(
-                    <div key={emp.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 10px",borderRadius:8,background:"var(--background)"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:9}}>
-                        <div style={{width:28,height:28,borderRadius:"50%",background:"color-mix(in oklch, var(--primary) 20%, transparent)",border:"1px solid color-mix(in oklch, var(--primary) 40%, transparent)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:"var(--primary)",fontFamily:"'DM Mono',monospace",flexShrink:0}}>
-                          {emp.firstName.charAt(0)}{emp.lastName.charAt(0)}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {activeEmployees.slice(0, 5).map((emp) => (
+                    <div
+                      key={emp.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        background: "var(--background)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 9,
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: "50%",
+                            background:
+                              "color-mix(in oklch, var(--primary) 20%, transparent)",
+                            border:
+                              "1px solid color-mix(in oklch, var(--primary) 40%, transparent)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: "var(--primary)",
+                            fontFamily: "'DM Mono',monospace",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {emp.firstName.charAt(0)}
+                          {emp.lastName.charAt(0)}
                         </div>
                         <div>
-                          <p style={{fontSize:12,fontWeight:600,color:"var(--foreground)",margin:0}}>{emp.firstName} {emp.lastName}</p>
-                          <p style={{fontSize:10,color:"var(--muted-foreground)",margin:0,fontFamily:"'DM Mono',monospace"}}>{emp.department}</p>
+                          <p style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)", margin: 0 }}>
+                            {emp.firstName} {emp.lastName}
+                          </p>
+                          <p
+                            style={{
+                              fontSize: 10,
+                              color: "var(--muted-foreground)",
+                              margin: 0,
+                              fontFamily: "'DM Mono',monospace",
+                            }}
+                          >
+                            {emp.department}
+                          </p>
                         </div>
                       </div>
-                      <div style={{textAlign:"right"}}>
-                        <p style={{fontSize:12,fontWeight:700,color:"var(--primary)",margin:0,fontFamily:"'DM Mono',monospace"}}>
-                          {emp.currency==="LRD"?"L$":"$"}{emp.rate.toFixed(2)}
+                      <div style={{ textAlign: "right" }}>
+                        <p
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 700,
+                            color: "var(--primary)",
+                            margin: 0,
+                            fontFamily: "'DM Mono',monospace",
+                          }}
+                        >
+                          {emp.currency === "LRD" ? "L$" : "$"}
+                          {emp.rate.toFixed(2)}
                         </p>
-                        {((emp.pendingOvertimeHours??0)>0||(emp.pendingHolidayHours??0)>0)&&(
-                          <p style={{fontSize:9,color:"var(--secondary)",margin:0}}>hours imported</p>
+                        {((emp.pendingOvertimeHours ?? 0) > 0 ||
+                          (emp.pendingHolidayHours ?? 0) > 0) && (
+                          <p style={{ fontSize: 9, color: "var(--secondary)", margin: 0 }}>
+                            hours imported
+                          </p>
                         )}
                       </div>
                     </div>
                   ))}
-                  {activeEmployees.length>5&&(
-                    <p style={{textAlign:"center",color:"var(--muted-foreground)",fontSize:11,fontFamily:"'DM Mono',monospace",margin:"4px 0 0"}}>
-                      +{activeEmployees.length-5} more employees
+                  {activeEmployees.length > 5 && (
+                    <p
+                      style={{
+                        textAlign: "center",
+                        color: "var(--muted-foreground)",
+                        fontSize: 11,
+                        fontFamily: "'DM Mono',monospace",
+                        margin: "4px 0 0",
+                      }}
+                    >
+                      +{activeEmployees.length - 5} more employees
                     </p>
                   )}
                 </div>
-                {withHours>0&&(
-                  <div style={{marginTop:12,padding:"8px 12px",borderRadius:8,background:"color-mix(in oklch, var(--secondary) 15%, transparent)",border:"1px solid color-mix(in oklch, var(--secondary) 30%, transparent)",display:"flex",alignItems:"center",gap:8}}>
-                    <RefreshCw size={12} color="var(--secondary)"/>
-                    <p style={{color:"var(--secondary)",fontSize:11,margin:0,fontWeight:600}}>{withHours} employee{withHours!==1?"s":""} have CSV-imported hours ready</p>
+                {withHours > 0 && (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      background:
+                        "color-mix(in oklch, var(--secondary) 15%, transparent)",
+                      border:
+                        "1px solid color-mix(in oklch, var(--secondary) 30%, transparent)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <RefreshCw size={12} color="var(--secondary)" />
+                    <p style={{ color: "var(--secondary)", fontSize: 11, margin: 0, fontWeight: 600 }}>
+                      {withHours} employee{withHours !== 1 ? "s" : ""} have CSV-imported hours ready
+                    </p>
                   </div>
                 )}
               </div>
             )}
 
-            {history.length>0&&(
-              <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:16,padding:"20px 22px",animation:"fadeUp 0.45s ease 0.15s both"}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
-                  <Clock size={14} color="var(--muted-foreground)"/>
-                  <span style={{color:"var(--foreground)",fontWeight:700,fontSize:13}}>Pay Run History</span>
+            {history.length > 0 && (
+              <div
+                style={{
+                  background: "var(--card)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 16,
+                  padding: "20px 22px",
+                  animation: "fadeUp 0.45s ease 0.15s both",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                  <Clock size={14} color="var(--muted-foreground)" />
+                  <span style={{ color: "var(--foreground)", fontWeight: 700, fontSize: 13 }}>
+                    Pay Run History
+                  </span>
                 </div>
-                <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                  {history.slice(0,5).map(run=>(
-                    <div key={run.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 12px",borderRadius:10,background:"var(--background)",gap:8}}>
-                      <div style={{minWidth:0,flex:1}}>
-                        <p style={{fontSize:13,fontWeight:600,color:"var(--foreground)",margin:"0 0 2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{run.periodLabel}</p>
-                        <p style={{fontSize:10,color:"var(--muted-foreground)",margin:0,fontFamily:"'DM Mono',monospace"}}>
-                          {run.employeeCount} emp · Net ${run.totalNet.toLocaleString("en-US",{minimumFractionDigits:2})}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {history.slice(0, 5).map((run) => (
+                    <div
+                      key={run.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "10px 12px",
+                        borderRadius: 10,
+                        background: "var(--background)",
+                        gap: 8,
+                      }}
+                    >
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <p
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: "var(--foreground)",
+                            margin: "0 0 2px",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {run.periodLabel}
+                        </p>
+                        <p
+                          style={{
+                            fontSize: 10,
+                            color: "var(--muted-foreground)",
+                            margin: 0,
+                            fontFamily: "'DM Mono',monospace",
+                          }}
+                        >
+                          {run.employeeCount} emp · Net $
+                          {run.totalNet.toLocaleString("en-US", {
+                            minimumFractionDigits: 2,
+                          })}
                         </p>
                       </div>
-                      <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-                        {run.lines.length>0&&<BulkDownloadButton lines={run.lines} periodLabel={run.periodLabel} payDate={run.payDate} company={pdfCompany}/>}
-                        <span style={{fontSize:10,fontFamily:"'DM Mono',monospace",padding:"3px 8px",borderRadius:20,background:"color-mix(in oklch, var(--primary) 20%, transparent)",color:"var(--primary)",border:"1px solid color-mix(in oklch, var(--primary) 40%, transparent)"}}>paid</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                        {run.lines.length > 0 && (
+                          <BulkDownloadButton
+                            lines={run.lines}
+                            periodLabel={run.periodLabel}
+                            payDate={run.payDate}
+                            company={pdfCompany}
+                          />
+                        )}
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontFamily: "'DM Mono',monospace",
+                            padding: "3px 8px",
+                            borderRadius: 20,
+                            background:
+                              "color-mix(in oklch, var(--primary) 20%, transparent)",
+                            color: "var(--primary)",
+                            border:
+                              "1px solid color-mix(in oklch, var(--primary) 40%, transparent)",
+                          }}
+                        >
+                          paid
+                        </span>
                       </div>
                     </div>
                   ))}
@@ -817,9 +1659,15 @@ export default function PayrollPage(){
   }
 
   // ── Active pay run ────────────────────────────────────────────────────────
-
-  return(
-    <div style={{minHeight:"100vh",background:"var(--background)",padding:"32px",fontFamily:"'DM Sans',sans-serif"}}>
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "var(--background)",
+        padding: "32px",
+        fontFamily: "'DM Sans',sans-serif",
+      }}
+    >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500;600&display=swap');
         @keyframes spin{to{transform:rotate(360deg)}}
@@ -831,91 +1679,364 @@ export default function PayrollPage(){
         tr:hover td{background:color-mix(in oklch, var(--foreground) 5%, var(--card))}
       `}</style>
 
-      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:24,flexWrap:"wrap",gap:12,animation:"fadeUp 0.3s ease"}}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          marginBottom: 24,
+          flexWrap: "wrap",
+          gap: 12,
+          animation: "fadeUp 0.3s ease",
+        }}
+      >
         <div>
-          <h1 style={{fontSize:26,fontWeight:800,color:"var(--foreground)",letterSpacing:"-0.02em",margin:0}}>Payroll</h1>
-          <p style={{color:"var(--muted-foreground)",fontSize:13,marginTop:5,display:"flex",alignItems:"center",gap:8}}>
-            <Calendar size={12} color="var(--muted-foreground)"/>{periodLabel}
-            <span style={{color:"var(--border)"}}>·</span>
-            <Users size={12} color="var(--muted-foreground)"/>{lines.length} employees
-            <span style={{color:"var(--border)"}}>·</span>
-            <RefreshCw size={12} color="var(--muted-foreground)"/>L${exchangeRate}/$1
+          <h1
+            style={{
+              fontSize: 26,
+              fontWeight: 800,
+              color: "var(--foreground)",
+              letterSpacing: "-0.02em",
+              margin: 0,
+            }}
+          >
+            Payroll
+          </h1>
+          <p
+            style={{
+              color: "var(--muted-foreground)",
+              fontSize: 13,
+              marginTop: 5,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <Calendar size={12} color="var(--muted-foreground)" />
+            {periodLabel}
+            <span style={{ color: "var(--border)" }}>·</span>
+            <Users size={12} color="var(--muted-foreground)" />
+            {lines.length} employees
+            <span style={{ color: "var(--border)" }}>·</span>
+            <RefreshCw size={12} color="var(--muted-foreground)" />L$
+            {exchangeRate}/$1
           </p>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          {status==="paid"&&(
-            <button onClick={startNewRun}
-              style={{display:"flex",alignItems:"center",gap:7,padding:"9px 14px",borderRadius:10,border:"1px solid var(--border)",background:"transparent",color:"var(--muted-foreground)",fontSize:12,fontWeight:600,cursor:"pointer"}}
-              onMouseEnter={e=>{e.currentTarget.style.borderColor="color-mix(in oklch, var(--primary) 50%, transparent)";e.currentTarget.style.color="var(--foreground)";}}
-              onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.color="var(--muted-foreground)";}}>
-              <Plus size={13}/> New Pay Run
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {status === "paid" && (
+            <button
+              onClick={startNewRun}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 7,
+                padding: "9px 14px",
+                borderRadius: 10,
+                border: "1px solid var(--border)",
+                background: "transparent",
+                color: "var(--muted-foreground)",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor =
+                  "color-mix(in oklch, var(--primary) 50%, transparent)";
+                e.currentTarget.style.color = "var(--foreground)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = "var(--border)";
+                e.currentTarget.style.color = "var(--muted-foreground)";
+              }}
+            >
+              <Plus size={13} /> New Pay Run
             </button>
           )}
-          {!isLocked&&(
-            <button onClick={()=>setShowUpload(true)}
-              style={{display:"flex",alignItems:"center",gap:7,padding:"9px 14px",borderRadius:10,border:"1px solid var(--border)",background:"transparent",color:"var(--muted-foreground)",fontSize:12,fontWeight:600,cursor:"pointer"}}
-              onMouseEnter={e=>{e.currentTarget.style.borderColor="color-mix(in oklch, var(--primary) 50%, transparent)";e.currentTarget.style.color="var(--foreground)";}}
-              onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.color="var(--muted-foreground)";}}>
-              <Upload size={13}/> Import CSV
+          {!isLocked && (
+            <button
+              onClick={() => setShowUpload(true)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 7,
+                padding: "9px 14px",
+                borderRadius: 10,
+                border: "1px solid var(--border)",
+                background: "transparent",
+                color: "var(--muted-foreground)",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor =
+                  "color-mix(in oklch, var(--primary) 50%, transparent)";
+                e.currentTarget.style.color = "var(--foreground)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = "var(--border)";
+                e.currentTarget.style.color = "var(--muted-foreground)";
+              }}
+            >
+              <Upload size={13} /> Import CSV
             </button>
           )}
-          <BulkDownloadButton lines={lines} periodLabel={periodLabel} payDate={payDate} company={pdfCompany}/>
+          <BulkDownloadButton
+            lines={lines}
+            periodLabel={periodLabel}
+            payDate={payDate}
+            company={pdfCompany}
+          />
         </div>
       </div>
 
-      <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:14,padding:"16px 20px",marginBottom:16,animation:"fadeUp 0.35s ease 0.05s both"}}>
-        <StatusStepper current={status} onAdvance={advanceStatus} saving={saving}/>
+      <div
+        style={{
+          background: "var(--card)",
+          border: "1px solid var(--border)",
+          borderRadius: 14,
+          padding: "16px 20px",
+          marginBottom: 16,
+          animation: "fadeUp 0.35s ease 0.05s both",
+        }}
+      >
+        <StatusStepper current={status} onAdvance={advanceStatus} saving={saving} />
       </div>
 
-      {warningCount>0&&(
-        <div style={{background:"color-mix(in oklch, var(--warning) 12%, transparent)",border:"1px solid color-mix(in oklch, var(--warning) 30%, transparent)",borderRadius:12,padding:"12px 18px",display:"flex",alignItems:"center",gap:12,marginBottom:12,animation:"fadeUp 0.35s ease"}}>
-          <AlertTriangle size={14} color="var(--warning)"/>
-          <p style={{color:"var(--warning)",fontSize:13,margin:0,fontWeight:600}}>{warningCount} employee{warningCount>1?"s":""} have gross pay below the $150 USD minimum wage. Review before approving.</p>
-        </div>
-      )}
-      {isLocked&&(
-        <div style={{background:"color-mix(in oklch, var(--secondary) 15%, transparent)",border:"1px solid color-mix(in oklch, var(--secondary) 30%, transparent)",borderRadius:12,padding:"12px 18px",display:"flex",alignItems:"center",gap:12,marginBottom:12,animation:"fadeUp 0.35s ease"}}>
-          <Lock size={14} color="var(--secondary)"/>
-          <p style={{color:"var(--secondary)",fontSize:13,margin:0,fontWeight:600}}>Pay run is <strong>{status}</strong>. Figures are locked — you can still download payslips.</p>
+      {/* ═══ USAGE COUNTER ═══ */}
+      {usage && (
+        <div
+          style={{
+            marginBottom: 12,
+            padding: "8px 14px",
+            background: "var(--card)",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <span
+            style={{
+              fontSize: 11,
+              color: "var(--muted-foreground)",
+              fontFamily: "'DM Mono', monospace",
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+            }}
+          >
+            Payslips this month
+          </span>
+          <span
+            style={{
+              fontWeight: 700,
+              fontFamily: "'DM Mono', monospace",
+              fontSize: 14,
+              color: usage.current >= usage.limit ? "var(--warning)" : "var(--primary)",
+            }}
+          >
+            {usage.current} / {usage.limit === Infinity ? "∞" : usage.limit}
+          </span>
         </div>
       )}
 
-      {lines.length>0&&(
+      {/* ── Minimum‑wage warning ── */}
+      {warningCount > 0 && (
+        <div
+          style={{
+            background: "color-mix(in oklch, var(--warning) 12%, transparent)",
+            border: "1px solid color-mix(in oklch, var(--warning) 30%, transparent)",
+            borderRadius: 12,
+            padding: "12px 18px",
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            marginBottom: 12,
+            animation: "fadeUp 0.35s ease",
+          }}
+        >
+          <AlertTriangle size={14} color="var(--warning)" />
+          <p
+            style={{
+              color: "var(--warning)",
+              fontSize: 13,
+              margin: 0,
+              fontWeight: 600,
+            }}
+          >
+            {warningCount} employee{warningCount > 1 ? "s" : ""} have gross pay below the $150
+            USD minimum wage. Review before approving.
+          </p>
+        </div>
+      )}
+
+      {/* ── Locked‑run notice ── */}
+      {isLocked && (
+        <div
+          style={{
+            background: "color-mix(in oklch, var(--secondary) 15%, transparent)",
+            border: "1px solid color-mix(in oklch, var(--secondary) 30%, transparent)",
+            borderRadius: 12,
+            padding: "12px 18px",
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            marginBottom: 12,
+            animation: "fadeUp 0.35s ease",
+          }}
+        >
+          <Lock size={14} color="var(--secondary)" />
+          <p
+            style={{
+              color: "var(--secondary)",
+              fontSize: 13,
+              margin: 0,
+              fontWeight: 600,
+            }}
+          >
+            Pay run is <strong>{status}</strong>. Figures are locked — you can still download
+            payslips.
+          </p>
+        </div>
+      )}
+
+      {lines.length > 0 && (
         <>
-          <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:"16px 16px 0 0",overflow:"hidden",animation:"fadeUp 0.4s ease 0.1s both"}}>
-            <div style={{background:"color-mix(in oklch, var(--primary) 15%, var(--card))",padding:"13px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <FileText size={14} color="color-mix(in oklch, var(--foreground) 30%, transparent)"/>
-                <span style={{color:"var(--foreground)",fontWeight:700,fontSize:14}}>Review & Edit Payroll</span>
-                {!isLocked&&<span style={{color:"color-mix(in oklch, var(--foreground) 25%, transparent)",fontSize:10,fontFamily:"'DM Mono',monospace"}}>Click any cell to edit</span>}
+          <div
+            style={{
+              background: "var(--card)",
+              border: "1px solid var(--border)",
+              borderRadius: "16px 16px 0 0",
+              overflow: "hidden",
+              animation: "fadeUp 0.4s ease 0.1s both",
+            }}
+          >
+            <div
+              style={{
+                background: "color-mix(in oklch, var(--primary) 15%, var(--card))",
+                padding: "13px 20px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <FileText
+                  size={14}
+                  color="color-mix(in oklch, var(--foreground) 30%, transparent)"
+                />
+                <span style={{ color: "var(--foreground)", fontWeight: 700, fontSize: 14 }}>
+                  Review & Edit Payroll
+                </span>
+                {!isLocked && (
+                  <span
+                    style={{
+                      color: "color-mix(in oklch, var(--foreground) 25%, transparent)",
+                      fontSize: 10,
+                      fontFamily: "'DM Mono',monospace",
+                    }}
+                  >
+                    Click any cell to edit
+                  </span>
+                )}
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:12}}>
-                {warningCount>0&&<span style={{display:"flex",alignItems:"center",gap:5,color:"var(--warning)",fontSize:11,fontFamily:"'DM Mono',monospace"}}><AlertTriangle size={11}/>{warningCount} warning{warningCount>1?"s":""}</span>}
-                <span style={{color:"color-mix(in oklch, var(--foreground) 20%, transparent)",fontSize:11,fontFamily:"'DM Mono',monospace"}}>{lines.length} employees</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                {warningCount > 0 && (
+                  <span
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 5,
+                      color: "var(--warning)",
+                      fontSize: 11,
+                      fontFamily: "'DM Mono',monospace",
+                    }}
+                  >
+                    <AlertTriangle size={11} />
+                    {warningCount} warning{warningCount > 1 ? "s" : ""}
+                  </span>
+                )}
+                <span
+                  style={{
+                    color: "color-mix(in oklch, var(--foreground) 20%, transparent)",
+                    fontSize: 11,
+                    fontFamily: "'DM Mono',monospace",
+                  }}
+                >
+                  {lines.length} employees
+                </span>
               </div>
             </div>
 
-            <div style={{overflowX:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}>
+            <div style={{ overflowX: "auto" }}>
+              <table
+                style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}
+              >
                 <thead>
-                  {table.getHeaderGroups().map(hg=>(
+                  {table.getHeaderGroups().map((hg) => (
                     <tr key={hg.id}>
-                      {hg.headers.map(h=>(
-                        <th key={h.id} style={{width:h.getSize(),padding:"10px 12px",background:"var(--background)",borderBottom:"1px solid var(--border)",fontSize:10,fontWeight:700,color:"var(--muted-foreground)",letterSpacing:"0.08em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace",textAlign:"left",whiteSpace:"nowrap"}}>
-                          {flexRender(h.column.columnDef.header,h.getContext())}
+                      {hg.headers.map((h) => (
+                        <th
+                          key={h.id}
+                          style={{
+                            width: h.getSize(),
+                            padding: "10px 12px",
+                            background: "var(--background)",
+                            borderBottom: "1px solid var(--border)",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: "var(--muted-foreground)",
+                            letterSpacing: "0.08em",
+                            textTransform: "uppercase",
+                            fontFamily: "'DM Mono',monospace",
+                            textAlign: "left",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {flexRender(
+                            h.column.columnDef.header,
+                            h.getContext()
+                          )}
                         </th>
                       ))}
                     </tr>
                   ))}
                 </thead>
                 <tbody>
-                  {table.getRowModel().rows.map(row=>(
-                    <tr key={row.id} style={{borderLeft:`3px solid ${row.original.calc?.warnings.length?"var(--warning)":"transparent"}`,transition:"background 0.12s",cursor:"default"}}
-                      onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background="color-mix(in oklch, var(--foreground) 5%, var(--card))";}}
-                      onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background="transparent";}}>
-                      {row.getVisibleCells().map(cell=>(
-                        <td key={cell.id} style={{padding:"10px 12px",borderBottom:"1px solid var(--border)",width:cell.column.getSize()}}>
-                          {flexRender(cell.column.columnDef.cell,cell.getContext())}
+                  {table.getRowModel().rows.map((row) => (
+                    <tr
+                      key={row.id}
+                      style={{
+                        borderLeft: `3px solid ${
+                          row.original.calc?.warnings.length
+                            ? "var(--warning)"
+                            : "transparent"
+                        }`,
+                        transition: "background 0.12s",
+                        cursor: "default",
+                      }}
+                      onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLElement).style.background =
+                          "color-mix(in oklch, var(--foreground) 5%, var(--card))";
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLElement).style.background = "transparent";
+                      }}
+                    >
+                      {row.getVisibleCells().map((cell) => (
+                        <td
+                          key={cell.id}
+                          style={{
+                            padding: "10px 12px",
+                            borderBottom: "1px solid var(--border)",
+                            width: cell.column.getSize(),
+                          }}
+                        >
+                          {flexRender(
+                            cell.column.columnDef.cell,
+                            cell.getContext()
+                          )}
                         </td>
                       ))}
                     </tr>
@@ -924,31 +2045,97 @@ export default function PayrollPage(){
               </table>
             </div>
           </div>
-
-          <RunSummary lines={lines} exchangeRate={exchangeRate}/>
+          <RunSummary lines={lines} exchangeRate={exchangeRate} />
         </>
       )}
 
-      {history.length>0&&(
-        <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:16,padding:"20px 22px",marginTop:20,animation:"fadeUp 0.5s ease 0.2s both"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
-            <Clock size={14} color="var(--muted-foreground)"/>
-            <span style={{color:"var(--foreground)",fontWeight:700,fontSize:14}}>Pay Run History</span>
+      {history.length > 0 && (
+        <div
+          style={{
+            background: "var(--card)",
+            border: "1px solid var(--border)",
+            borderRadius: 16,
+            padding: "20px 22px",
+            marginTop: 20,
+            animation: "fadeUp 0.5s ease 0.2s both",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+            <Clock size={14} color="var(--muted-foreground)" />
+            <span style={{ color: "var(--foreground)", fontWeight: 700, fontSize: 14 }}>
+              Pay Run History
+            </span>
           </div>
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {history.map(run=>(
-              <div key={run.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 14px",borderRadius:10,background:"var(--background)",gap:10}}>
-                <div style={{minWidth:0,flex:1}}>
-                  <p style={{fontSize:13,fontWeight:600,color:"var(--foreground)",margin:"0 0 3px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{run.periodLabel}</p>
-                  <p style={{fontSize:11,color:"var(--muted-foreground)",margin:0,fontFamily:"'DM Mono',monospace"}}>
-                    {run.employeeCount} emp · Gross ${run.totalGross.toLocaleString("en-US",{minimumFractionDigits:2})} · Net ${run.totalNet.toLocaleString("en-US",{minimumFractionDigits:2})}
-                    {run.totalTax?` · Tax $${run.totalTax.toLocaleString("en-US",{minimumFractionDigits:2})}`:""} 
-                    {run.totalNasscorp?` · NASC $${run.totalNasscorp.toLocaleString("en-US",{minimumFractionDigits:2})}`:""} 
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {history.map((run) => (
+              <div
+                key={run.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "12px 14px",
+                  borderRadius: 10,
+                  background: "var(--background)",
+                  gap: 10,
+                }}
+              >
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <p
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "var(--foreground)",
+                      margin: "0 0 3px",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {run.periodLabel}
+                  </p>
+                  <p
+                    style={{
+                      fontSize: 11,
+                      color: "var(--muted-foreground)",
+                      margin: 0,
+                      fontFamily: "'DM Mono',monospace",
+                    }}
+                  >
+                    {run.employeeCount} emp · Gross $
+                    {run.totalGross.toLocaleString("en-US", { minimumFractionDigits: 2 })} · Net $
+                    {run.totalNet.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                    {run.totalTax
+                      ? ` · Tax $${run.totalTax.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
+                      : ""}
+                    {run.totalNasscorp
+                      ? ` · NASC $${run.totalNasscorp.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
+                      : ""}
                   </p>
                 </div>
-                <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-                  {run.lines.length>0&&<BulkDownloadButton lines={run.lines} periodLabel={run.periodLabel} payDate={run.payDate} company={pdfCompany}/>}
-                  <span style={{fontSize:10,fontFamily:"'DM Mono',monospace",padding:"3px 10px",borderRadius:20,background:"color-mix(in oklch, var(--primary) 20%, transparent)",color:"var(--primary)",border:"1px solid color-mix(in oklch, var(--primary) 40%, transparent)",fontWeight:700}}>paid</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                  {run.lines.length > 0 && (
+                    <BulkDownloadButton
+                      lines={run.lines}
+                      periodLabel={run.periodLabel}
+                      payDate={run.payDate}
+                      company={pdfCompany}
+                    />
+                  )}
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontFamily: "'DM Mono',monospace",
+                      padding: "3px 10px",
+                      borderRadius: 20,
+                      background: "color-mix(in oklch, var(--primary) 20%, transparent)",
+                      color: "var(--primary)",
+                      border: "1px solid color-mix(in oklch, var(--primary) 40%, transparent)",
+                      fontWeight: 700,
+                    }}
+                  >
+                    paid
+                  </span>
                 </div>
               </div>
             ))}
@@ -956,8 +2143,11 @@ export default function PayrollPage(){
         </div>
       )}
 
-      {showUpload&&(
-        <BulkUpload onClose={()=>setShowUpload(false)} onImport={handleBulkImport}/>
+      {showUpload && (
+        <BulkUpload
+          onClose={() => setShowUpload(false)}
+          onImport={handleBulkImport}
+        />
       )}
     </div>
   );
