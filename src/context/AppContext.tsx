@@ -61,6 +61,7 @@ export interface CompanyProfile {
   trialExpiresAt:       string | null;
   isLocked:             boolean;
   lockedReason:         string | null;
+  mtnMomoPhone: string | null;
 }
 
 export const EMPTY_COMPANY: CompanyProfile = {
@@ -73,6 +74,7 @@ export const EMPTY_COMPANY: CompanyProfile = {
   trialExpiresAt: null,
   isLocked: false,
   lockedReason: null,
+  mtnMomoPhone: null,
 };
 
 function dbToEmployee(row: DbEmployee): Employee {
@@ -124,6 +126,7 @@ function dbToCompany(row: DbCompany): CompanyProfile {
     trialExpiresAt:       row.trial_expires_at ?? null,
     isLocked:             row.is_locked ?? false,
     lockedReason:         row.locked_reason ?? null,
+    mtnMomoPhone: row.mtn_momo_phone ?? null,
   };
 }
 
@@ -143,6 +146,7 @@ interface AppState {
   hardDeleteEmployee: (id: string) => Promise<void>;
   setEmployees: React.Dispatch<React.SetStateAction<Employee[]>>;
   signOut: () => Promise<void>;
+  refreshCompany: () => Promise<void>;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -165,6 +169,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const loading = !booted;
 
+  // ── Boot & auth state listener ──────────────────────────────────────────
   useEffect(() => {
     let mounted = true;
 
@@ -241,6 +246,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...(profile.phone         !== undefined && { phone:           profile.phone         }),
       ...(profile.email         !== undefined && { email:           profile.email         }),
       ...(profile.logoUrl       !== undefined && { logo_url:        profile.logoUrl       }),
+      ...(profile.mtnMomoPhone  !== undefined && { mtn_momo_phone:  profile.mtnMomoPhone  }),
     };
     if (company.id) {
       await db(supabase).from("companies").update(payload).eq("id", company.id);
@@ -397,6 +403,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return [...archived, ...next];
     });
   }, []);
+  
+const refreshCompany = useCallback(async () => {
+    const { data: { user: currentUser } } = await supabase.auth.getUser();
+    if (!currentUser) return;
+    const { data: companies } = await db(supabase)
+      .from("companies")
+      .select("*")
+      .eq("owner_id", currentUser.id)
+      .order("created_at", { ascending: false });
+    const co = companies?.[0] ?? null;
+    if (co) setCompanyState(dbToCompany(co as DbCompany));
+  }, [supabase]);
 
   return (
     <AppContext.Provider value={{
@@ -408,6 +426,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addEmployee, refreshEmployees, updateEmployee,
       archiveEmployee, restoreEmployee, hardDeleteEmployee,
       setEmployees, signOut,
+      refreshCompany,
     }}>
       {children}
     </AppContext.Provider>

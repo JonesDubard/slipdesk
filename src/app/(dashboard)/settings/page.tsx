@@ -216,6 +216,8 @@ export default function SettingsPage() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
               <Inp label="Phone" value={form.phone} onChange={(v) => update("phone", v)} placeholder="+231 770 000 000"/>
               <Inp label="Email" value={form.email} onChange={(v) => update("email", v)} placeholder="hr@company.lr" type="email"/>
+              <Inp label="MTN MoMo Number" value={form.mtnMomoPhone ?? ""} onChange={(v) => update("mtnMomoPhone", v || null)} placeholder="0881234567"
+/>
             </div>
             {dirty && (
               <button onClick={handleSave} disabled={saving} style={{

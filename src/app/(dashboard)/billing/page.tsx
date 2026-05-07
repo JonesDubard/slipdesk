@@ -1,21 +1,21 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { useApp } from "@/context/AppContext";
 import PageSkeleton from "@/components/PageSkeleton";
 import {
   CheckCircle2, Users, DollarSign, ShieldCheck,
   Clock, AlertTriangle, Lock, ChevronDown, ChevronUp,
-  Copy, Check, Loader2, ExternalLink,
+  Copy, Check, Loader2, ExternalLink, Smartphone,
 } from "lucide-react";
 
-// ─── Plan definitions with CORRECT per-tier features ─────────────────────────
+// ─── Plan definitions ────────────────────────────────────────────────────────
 const PLANS = [
   {
-    id:    "basic" as const,
-    name:  "Basic",
+    id: "basic" as const,
+    name: "Basic",
     price: 50,
-    max:   80,
+    max: 80,
     label: "Up to 80 employees",
     color: "#3B82F6",
     popular: false,
@@ -30,10 +30,10 @@ const PLANS = [
     ],
   },
   {
-    id:    "standard" as const,
-    name:  "Standard",
+    id: "standard" as const,
+    name: "Standard",
     price: 300,
-    max:   499,
+    max: 499,
     label: "Up to 499 employees",
     color: "#50C878",
     popular: true,
@@ -48,10 +48,10 @@ const PLANS = [
     ],
   },
   {
-    id:    "premium" as const,
-    name:  "Premium",
+    id: "premium" as const,
+    name: "Premium",
     price: 500,
-    max:   Infinity,
+    max: Infinity,
     label: "Unlimited employees",
     color: "#8B5CF6",
     popular: false,
@@ -69,8 +69,7 @@ const PLANS = [
 
 type PlanId = "basic" | "standard" | "premium";
 
-// ─── MTN MoMo number (yours — update this) ────────────────────────────────────
-const SLIPDESK_MOMO_NUMBER = "0881936033"; // Dee's MTN MoMo number for testing — replace with my own when I have MTN
+const SLIPDESK_MOMO_NUMBER = "0881936033";
 const SLIPDESK_MOMO_NAME   = "Slipdesk";
 
 const fmt = (n: number) =>
@@ -105,10 +104,10 @@ function CopyButton({ text }: { text: string }) {
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { bg: string; color: string; label: string }> = {
-    trial:      { bg: "#FEF3C7", color: "#92400E", label: "Trial"      },
-    active:     { bg: "#D1FAE5", color: "#065F46", label: "Active"     },
-    past_due:   { bg: "#FEE2E2", color: "#991B1B", label: "Past Due"   },
-    cancelled:  { bg: "#F3F4F6", color: "#6B7280", label: "Cancelled"  },
+    trial:     { bg: "#FEF3C7", color: "#92400E", label: "Trial"     },
+    active:    { bg: "#D1FAE5", color: "#065F46", label: "Active"    },
+    past_due:  { bg: "#FEE2E2", color: "#991B1B", label: "Past Due"  },
+    cancelled: { bg: "#F3F4F6", color: "#6B7280", label: "Cancelled" },
   };
   const s = map[status] ?? map.trial;
   return (
@@ -125,25 +124,25 @@ function StatusBadge({ status }: { status: string }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function BillingPage() {
-  const { employees, company, loading } = useApp();
+  const { employees, company, loading, refreshCompany } = useApp();
 
   const activeCount = useMemo(
     () => employees.filter((e) => e.isActive).length,
     [employees]
   );
 
-  // Which plan card is selected in the UI (default to company's current tier)
   const [selectedPlan, setSelectedPlan] = useState<PlanId>(
     company.subscriptionTier ?? "basic"
   );
-  // Payment flow state
-  const [payStep,      setPayStep]      = useState<"idle" | "instructions" | "submitting" | "done">("idle");
-  const [receiptNote,  setReceiptNote]  = useState("");
-  const [submitError,  setSubmitError]  = useState("");
+  const [payStep, setPayStep] = useState<"idle" | "instructions" | "submitting" | "done" | "momo_pending">("idle");
+  const [receiptNote, setReceiptNote] = useState("");
+  const [submitError, setSubmitError] = useState("");
   const [pendingPayment, setPendingPayment] = useState<{ id: string; amount: number; month: string } | null>(null);
-  // FAQ accordion
-  const [openFaq,      setOpenFaq]      = useState<string | null>(null);
-  const [faqs,         setFaqs]         = useState<{ id: string; question: string; answer: string }[]>([]);
+  const [openFaq, setOpenFaq] = useState<string | null>(null);
+  const [faqs, setFaqs] = useState<{ id: string; question: string; answer: string }[]>([]);
+  const [momoReferenceId, setMomoReferenceId] = useState<string | null>(null);
+  const [momoPolling, setMomoPolling] = useState(false);
+  const [momoError, setMomoError] = useState("");
 
   // Load FAQs
   useEffect(() => {
@@ -153,10 +152,33 @@ export default function BillingPage() {
       .catch(() => {});
   }, []);
 
-  // Keep selectedPlan in sync once company loads
   useEffect(() => {
     if (company.subscriptionTier) setSelectedPlan(company.subscriptionTier);
   }, [company.subscriptionTier]);
+
+  // Polling for Momo payment status
+  useEffect(() => {
+    if (!momoPolling || !momoReferenceId) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/payments/momo/status?referenceId=${momoReferenceId}`);
+        const data = await res.json();
+        if (data.status === "confirmed") {
+          setPayStep("done");
+          setMomoPolling(false);
+          // Refresh company data so the UI updates with new plan
+          await refreshCompany();
+        } else if (data.status === "failed") {
+          setMomoError("Payment failed. Please try again.");
+          setPayStep("idle");
+          setMomoPolling(false);
+        }
+      } catch {
+        // ignore temporary network errors
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [momoPolling, momoReferenceId, refreshCompany]);
 
   if (loading) return <PageSkeleton />;
 
@@ -165,22 +187,20 @@ export default function BillingPage() {
   const isLocked       = company.isLocked;
   const currentPlan    = PLANS.find((p) => p.id === company.subscriptionTier) ?? PLANS[0];
   const chosenPlan     = PLANS.find((p) => p.id === selectedPlan) ?? PLANS[0];
-
-  // Trial expiry helpers
   const trialExpiry    = company.trialExpiresAt ? new Date(company.trialExpiresAt) : null;
   const trialDaysLeft  = trialExpiry
     ? Math.max(0, Math.ceil((trialExpiry.getTime() - Date.now()) / 86_400_000))
     : 0;
   const onTrial        = company.subscriptionStatus === "trial" && trialDaysLeft > 0;
 
-  // ── Handlers ────────────────────────────────────────────────────────────────
+  // ── Handlers ──────────────────────────────────────────────────────────────
   async function handleStartPayment() {
     setSubmitError("");
     setPayStep("instructions");
 
-    // Create a pending payment record immediately
     try {
-      const res = await fetch("/api/payments/manual", { method: "POST",
+      const res = await fetch("/api/payments/manual", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tierRequested: selectedPlan }),
       });
@@ -198,7 +218,8 @@ export default function BillingPage() {
     setPayStep("submitting");
     setSubmitError("");
     try {
-      const res = await fetch("/api/payments/confirm", { method: "POST",
+      const res = await fetch("/api/payments/confirm", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paymentId: pendingPayment.id, receiptNote }),
       });
@@ -208,6 +229,26 @@ export default function BillingPage() {
     } catch (err: unknown) {
       setSubmitError(err instanceof Error ? err.message : "Something went wrong");
       setPayStep("instructions");
+    }
+  }
+
+  async function handleMomoPayment() {
+    setMomoError("");
+    setPayStep("submitting");
+    try {
+      const res = await fetch("/api/payments/momo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tierRequested: selectedPlan }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to initiate payment");
+      setMomoReferenceId(data.referenceId);
+      setPayStep("momo_pending");
+      setMomoPolling(true);
+    } catch (err: unknown) {
+      setMomoError(err instanceof Error ? err.message : "Something went wrong");
+      setPayStep("idle");
     }
   }
 
@@ -249,6 +290,7 @@ export default function BillingPage() {
         @keyframes fadeUp { from { opacity:0; transform:translateY(10px) } to { opacity:1; transform:translateY(0) } }
         .plan-card { transition: all 0.18s ease; cursor: pointer; }
         .plan-card:hover { transform: translateY(-2px); }
+        @keyframes spin { to { transform: rotate(360deg) } }
       `}</style>
 
       {/* Header */}
@@ -441,11 +483,11 @@ export default function BillingPage() {
                     {chosenPlan.name} Plan — {fmt(chosenPlan.price)}/month
                   </p>
                   <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--muted-foreground)" }}>
-                    Pay via MTN Mobile Money · Manual confirmation within 24hrs
+                    Pay via MTN Mobile Money · Instant activation
                   </p>
                 </div>
                 <button
-                  onClick={handleStartPayment}
+                  onClick={handleMomoPayment}
                   style={{
                     padding: "12px 28px", borderRadius: 10,
                     background: chosenPlan.color, color: "#fff",
@@ -453,7 +495,7 @@ export default function BillingPage() {
                     cursor: "pointer", whiteSpace: "nowrap",
                   }}
                 >
-                  Pay with Mobile Money
+                  Pay with Mobile Money (Automatic)
                 </button>
               </div>
             </div>
@@ -468,16 +510,10 @@ export default function BillingPage() {
                 📱 Send your Mobile Money payment
               </h3>
 
-              {/* Step-by-step instructions */}
               {[
+                { n: "1", title: "Dial *126*1# on your phone", body: "Go to Send Money or Pay Merchant." },
                 {
-                  n: "1",
-                  title: "Dial *126*1# on your phone",
-                  body: "Go to Send Money or Pay Merchant.",
-                },
-                {
-                  n: "2",
-                  title: "Send payment to this number",
+                  n: "2", title: "Send payment to this number",
                   body: (
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
                       <code style={{
@@ -494,8 +530,7 @@ export default function BillingPage() {
                   ),
                 },
                 {
-                  n: "3",
-                  title: "Amount to send",
+                  n: "3", title: "Amount to send",
                   body: (
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
                       <code style={{
@@ -510,11 +545,7 @@ export default function BillingPage() {
                     </div>
                   ),
                 },
-                {
-                  n: "4",
-                  title: "Use your company name as the reference",
-                  body: `Type "${companyName}" in the note/reference field.`,
-                },
+                { n: "4", title: "Use your company name as the reference", body: `Type "${companyName}" in the note/reference field.` },
               ].map((step) => (
                 <div key={step.n} style={{ display: "flex", gap: 16, marginBottom: 20 }}>
                   <div style={{
@@ -587,11 +618,48 @@ export default function BillingPage() {
               borderRadius: 16, padding: 40, textAlign: "center",
             }}>
               <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
-                <Loader2 size={32} className="animate-spin" color="var(--primary)" />
+                <Loader2 size={32} style={{ animation: "spin 1s linear infinite", color: "var(--primary)" }} />
               </div>
               <p style={{ fontSize: 14, color: "var(--muted-foreground)", margin: 0 }}>
-                Submitting your payment notification…
+                Sending payment request…
               </p>
+            </div>
+          )}
+
+          {payStep === "momo_pending" && (
+            <div style={{
+              background: "var(--card)", border: "1px solid var(--border)",
+              borderRadius: 16, padding: 32, textAlign: "center",
+            }}>
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+                <Smartphone size={36} color="var(--primary)" />
+              </div>
+              <h3 style={{ margin: "0 0 10px", fontSize: 16, fontWeight: 800, color: "var(--foreground)" }}>
+                Check your phone to approve the payment
+              </h3>
+              <p style={{ color: "var(--muted-foreground)", fontSize: 13, margin: 0 }}>
+                A payment request of <strong>{fmt(chosenPlan.price)}</strong> has been sent to your MTN number.
+                Dial <strong>*126*1#</strong> and approve it.
+              </p>
+              {momoError && (
+                <p style={{ color: "#EF4444", fontSize: 12, marginTop: 12 }}>{momoError}</p>
+              )}
+              <div style={{ marginTop: 20 }}>
+                <Loader2 size={24} style={{ animation: "spin 1s linear infinite", color: "var(--primary)" }} />
+                <p style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 8 }}>
+                  Waiting for confirmation…
+                </p>
+              </div>
+              <button
+                onClick={() => { setMomoPolling(false); setPayStep("idle"); }}
+                style={{
+                  marginTop: 20, padding: "10px 18px", borderRadius: 10,
+                  border: "1px solid var(--border)", background: "none",
+                  color: "var(--muted-foreground)", fontSize: 13, cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
             </div>
           )}
 
@@ -602,10 +670,10 @@ export default function BillingPage() {
             }}>
               <CheckCircle2 size={40} color="#16A34A" style={{ margin: "0 auto 14px" }} />
               <h3 style={{ margin: "0 0 8px", fontSize: 18, fontWeight: 800, color: "#14532D" }}>
-                Payment notification sent!
+                Payment confirmed!
               </h3>
               <p style={{ color: "#166534", fontSize: 13, margin: "0 0 6px" }}>
-                We&apos;ll confirm your payment and activate your <strong>{chosenPlan.name}</strong> plan within <strong>24 hours</strong>.
+                Your <strong>{chosenPlan.name}</strong> plan is now active.
               </p>
               <p style={{ color: "#15803D", fontSize: 12, margin: 0 }}>
                 You&apos;ll receive a confirmation email at {company.email || "your registered email"}.
