@@ -3,11 +3,12 @@
 import { useState, useEffect } from "react";
 import {
   Save, AlertTriangle, CheckCircle2, Building2,
-  RotateCcw, Lock, Eye, EyeOff, Loader, User,
+  RotateCcw, Lock, Eye, EyeOff, Loader, User, Palette,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useApp, type CompanyProfile, EMPTY_COMPANY } from "@/context/AppContext";
 import LogoUploader from "@/components/LogoUploader";
+import { canUse, getEffectiveTier, PLAN_LABELS } from "@/lib/plan-features";
 
 const inputStyle: React.CSSProperties = {
   width: "100%", padding: "10px 13px",
@@ -47,6 +48,31 @@ function Inp({
         )}
       </div>
       {extra}
+    </div>
+  );
+}
+
+function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      <label style={{
+        fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)",
+        letterSpacing: "0.06em", textTransform: "uppercase", fontFamily: "'DM Mono',monospace",
+      }}>{label}</label>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <input
+          type="color"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ width: 44, height: 40, border: "1px solid var(--border)", borderRadius: 9, background: "var(--background)", cursor: "pointer", padding: 2 }}
+        />
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ ...inputStyle, textTransform: "uppercase" }}
+        />
+      </div>
     </div>
   );
 }
@@ -99,6 +125,7 @@ const PW_RULES = [
 export default function SettingsPage() {
   const { company, setCompany } = useApp();
   const supabase = createClient();
+  const brandingUnlocked = canUse("companyBranding", getEffectiveTier(company.subscriptionTier, company.billingBypass));
 
   const [form,   setForm]   = useState<CompanyProfile>({ ...company });
   const [saved,  setSaved]  = useState(false);
@@ -229,6 +256,42 @@ export default function SettingsPage() {
               }}>
                 {saving ? <><Loader size={13} style={{ animation: "spin 1s linear infinite" }}/> Saving…</> : <><Save size={13}/> Save Changes</>}
               </button>
+            )}
+          </SectionCard>
+        </div>
+
+        <div style={{ animation: "fadeUp 0.42s ease 0.12s both" }}>
+          <SectionCard title="Company Branding" icon={<Palette size={15} color="var(--primary)"/>}>
+            {!brandingUnlocked ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 10, background: "color-mix(in oklch, var(--primary) 8%, transparent)", border: "1px solid var(--border)" }}>
+                <Lock size={14} color="var(--muted-foreground)" />
+                <span style={{ fontSize: 12.5, color: "var(--muted-foreground)" }}>
+                  Company branding — colors and payslip footer — is available on the {PLAN_LABELS.standard} plan and above.
+                </span>
+              </div>
+            ) : (
+              <>
+                <p style={{ color: "var(--muted-foreground)", fontSize: 12, margin: 0 }}>
+                  Brand colors and footers applied to payslips and emails.
+                </p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                  <ColorField label="Primary Color"   value={form.brandPrimaryColor || "#002147"}   onChange={(v) => update("brandPrimaryColor", v)} />
+                  <ColorField label="Secondary Color" value={form.brandSecondaryColor || "#50C878"} onChange={(v) => update("brandSecondaryColor", v)} />
+                </div>
+                <Inp label="Payslip Footer" value={form.payslipFooter ?? ""} onChange={(v) => update("payslipFooter", v)} placeholder="e.g. Thank you for your service." />
+                <Inp label="Email Footer"   value={form.emailFooter ?? ""}   onChange={(v) => update("emailFooter", v)}   placeholder="e.g. Payroll Department · Acme Corp" />
+                {dirty && (
+                  <button onClick={handleSave} disabled={saving} style={{
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+                    padding: "12px", borderRadius: 11, border: "none",
+                    background: saving ? "color-mix(in oklch, var(--primary) 30%, transparent)" : "var(--primary)",
+                    color: "var(--primary-foreground)", fontWeight: 700, fontSize: 13,
+                    cursor: saving ? "not-allowed" : "pointer", transition: "all 0.15s",
+                  }}>
+                    {saving ? <><Loader size={13} style={{ animation: "spin 1s linear infinite" }}/> Saving…</> : <><Save size={13}/> Save Changes</>}
+                  </button>
+                )}
+              </>
             )}
           </SectionCard>
         </div>

@@ -16,7 +16,7 @@ export const FLUTTERWAVE_CONFIG = {
 // ─── Tiered pricing ───────────────────────────────────────────────────────
 export const TIERED_PRICING = {
   basic:    { maxEmployees: 80,       price: 50  },
-  standard: { maxEmployees: 499,      price: 300 },
+  standard: { maxEmployees: 500,      price: 300 },
   premium:  { maxEmployees: Infinity, price: 500 },
 } as const;
 
@@ -227,14 +227,21 @@ export async function canGeneratePayslips(
   blockedIds: string[];
   message?: string;
 }> {
-  if (billingBypass) {
+  if (billingBypass || !companyId) {
     return { allowed: true, currentCount: 0, limit: Infinity, blockedIds: [] };
   }
 
-  const limit = tier === 'basic' ? 80 : tier === 'standard' ? 499 : Infinity;
+  const limit = tier === 'basic' ? 80 : tier === 'standard' ? 500 : Infinity;
 
-  // Who has already had a payslip generated this month?
-  const alreadyGenerated = await getDistinctEmployeeIdsGeneratedThisMonth(companyId);
+  let alreadyGenerated: string[] = [];
+  try {
+    alreadyGenerated = await getDistinctEmployeeIdsGeneratedThisMonth(companyId);
+  } catch (err) {
+    // Fail open — never block payslip download because billing telemetry is unavailable.
+    console.warn('[billing] payslip limit check skipped:', err);
+    return { allowed: true, currentCount: 0, limit, blockedIds: [] };
+  }
+
   const currentSet = new Set(alreadyGenerated);
 
   // Which of the requested employees are NOT already counted?
@@ -275,22 +282,27 @@ export async function recordPayslipGeneration(
   companyId: string,
   employeeId: string
 ): Promise<void> {
-  const supabase = createClient();
-  const { start } = getCurrentBillingPeriod();
+  if (!companyId || !employeeId) return;
+  try {
+    const supabase = createClient();
+    const { start } = getCurrentBillingPeriod();
 
-  const { error } = await (supabase as any)
-    .from('payslip_generations')
-    .upsert(
-      {
-        company_id: companyId,
-        employee_id: employeeId,
-        billing_period_start: start,
-        created_at: new Date().toISOString(),
-      },
-      { onConflict: 'company_id,employee_id,billing_period_start' }
-    );
+    const { error } = await (supabase as any)
+      .from('payslip_generations')
+      .upsert(
+        {
+          company_id: companyId,
+          employee_id: employeeId,
+          billing_period_start: start,
+          created_at: new Date().toISOString(),
+        },
+        { onConflict: 'company_id,employee_id,billing_period_start' }
+      );
 
-  if (error) {
-    console.error('Failed to record payslip generation:', error);
+    if (error) {
+      console.warn('Failed to record payslip generation (non-blocking):', error);
+    }
+  } catch (err) {
+    console.warn('Failed to record payslip generation (non-blocking):', err);
   }
 }

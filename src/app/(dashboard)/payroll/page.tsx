@@ -22,6 +22,9 @@ import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
 import { canGeneratePayslips, recordPayslipGeneration, getDistinctEmployeeIdsGeneratedThisMonth } from '@/lib/billing';
+import { can, type Permission } from "@/lib/rbac";
+import { logAudit, type AuditAction } from "@/lib/audit";
+import { createNotification, sendEmailNotification, type NotificationType, type NotificationSeverity } from "@/lib/notifications";
 
 const PDF_NAVY    = "#002147";
 const PDF_EMERALD = "#50C878";
@@ -33,6 +36,11 @@ const PDF_BORDER  = "#e2e8f0";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type RunStatus = "draft"|"review"|"approved"|"paid";
+
+type RunType = "monthly"|"weekly"|"bi_weekly"|"bonus"|"off_cycle";
+const RUN_TYPE_LABELS: Record<RunType, string> = {
+  monthly: "Monthly", weekly: "Weekly", bi_weekly: "Bi-Weekly", bonus: "Bonus", off_cycle: "Off-Cycle",
+};
 
 interface SavedRun {
   id:string; periodLabel:string; payDate:string; status:RunStatus;
@@ -50,6 +58,7 @@ type GridAction =
 interface PdfCompany {
   name:string; tin:string; nasscorpRegNo:string;
   address:string; phone:string; email:string; logoUrl:string|null;
+  payslipFooter?:string;
 }
 
 
@@ -139,6 +148,8 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
   const {calc,currency}=line;
   if(!calc) throw new Error("No calculation data");
   const sym=currency==="USD"?"$":"L$";
+
+  const buildDoc = (logoSrc?: string) => {
   const S=StyleSheet.create({
     page:{fontFamily:"Helvetica",fontSize:9,color:"#1e293b",backgroundColor:"#fff",paddingHorizontal:36,paddingVertical:32},
     header:{flexDirection:"row",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,paddingBottom:16,borderBottomWidth:2,borderBottomColor:PDF_NAVY},
@@ -225,12 +236,14 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
   const payDateFmt=new Date(payDate).toLocaleDateString("en-LR",{year:"numeric",month:"long",day:"numeric"});
   const methodLabel:Record<string,string>={cash:"Cash",bank_transfer:"Bank Transfer",orange_money:"Orange Money",mtn_momo:"Mobile Money (MTN)"};
   const pm=line.paymentMethod as string|undefined;
-  const doc=(
+  const footerText = company.payslipFooter?.trim()
+    || "This payslip is computer-generated and is valid without a physical signature.";
+  return (
     <Document title={`Payslip - ${line.fullName} - ${periodLabel}`} author="Slipdesk">
       <Page size="A4" style={S.page}>
         <View style={S.header}>
           <View style={S.coLeft}>
-            {company.logoUrl&&<Image src={company.logoUrl} style={S.logo}/>}
+            {logoSrc&&<Image src={logoSrc} style={S.logo}/>}
             <View>
               <Text style={S.coName}>{company.name||"Company Name"}</Text>
               {company.address&&<Text style={S.coMeta}>{company.address}</Text>}
@@ -294,13 +307,24 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
           {["Authorised Signatory","Date","Employee Acknowledgement"].map(label=>(<View key={label} style={S.sigBox}><View style={S.sigLine}/><Text style={S.sigLabel}>{label}</Text></View>))}
         </View>
         <View style={S.footer}>
-          <Text style={S.footerTxt}>This payslip is computer-generated and is valid without a physical signature.</Text>
+          <Text style={S.footerTxt}>{footerText}</Text>
           <Text style={S.footerBrand}>Slipdesk · slipdesk.com</Text>
         </View>
       </Page>
     </Document>
   );
-  return await pdf(doc).toBlob();
+  };
+
+  const logo = company.logoUrl?.startsWith("http") ? company.logoUrl : undefined;
+  try {
+    return await pdf(buildDoc(logo)).toBlob();
+  } catch (err) {
+    if (logo) {
+      console.warn("Payslip PDF failed with logo, retrying without logo:", err);
+      return await pdf(buildDoc(undefined)).toBlob();
+    }
+    throw err;
+  }
 }
 
 function buildFilename(fullName:string,periodLabel:string){return `${fullName.trim().replace(/\s+/g,"_")}_Payslip_${safePeriod(periodLabel)}.pdf`;}
@@ -350,9 +374,9 @@ function DownloadSlipButton({
       a.click();
       URL.revokeObjectURL(url);
 
-      // ── Record generation (idempotent — safe to call multiple times) ──
+      // Record generation in background — must not block the download.
       if (!wasCounted) {
-        await recordPayslipGeneration(appCompany.id, line.employeeId);
+        void recordPayslipGeneration(appCompany.id, line.employeeId);
         setWasCounted(true);
       }
     } catch (e) {
@@ -449,7 +473,7 @@ function BulkDownloadButton({
         URL.revokeObjectURL(url);
 
         // Record generation for this employee
-        await recordPayslipGeneration(appCompany.id, line.employeeId);
+        void recordPayslipGeneration(appCompany.id, line.employeeId);
 
         setProgress({ done: i + 1, total: valid.length });
         await new Promise((r) => setTimeout(r, 350));
@@ -578,8 +602,30 @@ const STATUS_ICONS:Record<RunStatus,React.ReactNode>= {
   draft:<FileText size={12}/>, review:<Shield size={12}/>, approved:<CheckCircle2 size={12}/>, paid:<TrendingUp size={12}/>,
 };
 
-function StatusStepper({current,onAdvance,saving=false}:{current:RunStatus;onAdvance:()=>void;saving?:boolean;}){
+/**
+ * Approval workflow — each transition (keyed by the CURRENT stage) requires a
+ * granular permission and emits an audit entry + notification. This enforces
+ * the chain: Payroll Officer → Finance/HR Manager → Managing Director →
+ * Approved → Locked / Payslips Released.
+ */
+interface Transition {
+  permission: Permission;
+  audit: AuditAction;
+  notifyType: NotificationType;
+  notifySeverity: NotificationSeverity;
+  notifyTitle: string;
+  roleHint: string;
+}
+const TRANSITIONS: Record<RunStatus, Transition | null> = {
+  draft:    { permission: "payroll:submit",  audit: "payroll.submit",  notifyType: "payroll_due",       notifySeverity: "info",    notifyTitle: "Payroll submitted for review",              roleHint: "Payroll Officer" },
+  review:   { permission: "payroll:approve", audit: "payroll.approve", notifyType: "payroll_approved",  notifySeverity: "success", notifyTitle: "Payroll approved",                          roleHint: "Finance / HR Manager" },
+  approved: { permission: "payroll:release", audit: "payroll.release", notifyType: "payroll_completed", notifySeverity: "success", notifyTitle: "Payroll completed — payslips released",     roleHint: "Managing Director / Owner" },
+  paid:     null,
+};
+
+function StatusStepper({current,onAdvance,saving=false,allowed=true,roleHint}:{current:RunStatus;onAdvance:()=>void;saving?:boolean;allowed?:boolean;roleHint?:string;}){
   const idx=STATUS_STEPS.indexOf(current);
+  const blocked = current!=="paid" && !allowed;
   return(
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
       <div style={{display:"flex",alignItems:"center",gap:4}}>
@@ -601,13 +647,20 @@ function StatusStepper({current,onAdvance,saving=false}:{current:RunStatus;onAdv
         })}
       </div>
       {current!=="paid"&&(
-        <button onClick={onAdvance} disabled={saving}
-          style={{display:"flex",alignItems:"center",gap:7,padding:"9px 18px",borderRadius:10,cursor:saving?"not-allowed":"pointer",
-            background:"color-mix(in oklch, var(--primary) 15%, var(--card))",color:"var(--primary)",fontSize:12,fontWeight:700,border:"1px solid var(--border)",transition:"all 0.15s"}}
-          onMouseEnter={e=>{if(!saving){e.currentTarget.style.background="var(--primary)";e.currentTarget.style.color="var(--primary-foreground)";}}}
-          onMouseLeave={e=>{e.currentTarget.style.background="color-mix(in oklch, var(--primary) 15%, var(--card))";e.currentTarget.style.color="var(--primary)";}}>
-          {saving?<><Loader size={12} style={{animation:"spin 1s linear infinite"}}/> Saving…</>:<><Play size={12}/>{NEXT_LABELS[current]}</>}
-        </button>
+        blocked ? (
+          <div style={{display:"flex",alignItems:"center",gap:7,padding:"9px 16px",borderRadius:10,
+            background:"color-mix(in oklch, var(--muted-foreground) 8%, transparent)",color:"var(--muted-foreground)",fontSize:12,fontWeight:600,border:"1px solid var(--border)"}}>
+            <Lock size={12}/> Awaiting {roleHint || "authorized approver"}
+          </div>
+        ) : (
+          <button onClick={onAdvance} disabled={saving}
+            style={{display:"flex",alignItems:"center",gap:7,padding:"9px 18px",borderRadius:10,cursor:saving?"not-allowed":"pointer",
+              background:"color-mix(in oklch, var(--primary) 15%, var(--card))",color:"var(--primary)",fontSize:12,fontWeight:700,border:"1px solid var(--border)",transition:"all 0.15s"}}
+            onMouseEnter={e=>{if(!saving){e.currentTarget.style.background="var(--primary)";e.currentTarget.style.color="var(--primary-foreground)";}}}
+            onMouseLeave={e=>{e.currentTarget.style.background="color-mix(in oklch, var(--primary) 15%, var(--card))";e.currentTarget.style.color="var(--primary)";}}>
+            {saving?<><Loader size={12} style={{animation:"spin 1s linear infinite"}}/> Saving…</>:<><Play size={12}/>{NEXT_LABELS[current]}</>}
+          </button>
+        )
       )}
     </div>
   );
@@ -616,7 +669,7 @@ function StatusStepper({current,onAdvance,saving=false}:{current:RunStatus;onAdv
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PayrollPage() {
-  const { employees, company, addEmployee, refreshEmployees, loading } = useApp();
+  const { employees, company, role, addEmployee, refreshEmployees, loading } = useApp();
   const { toast } = useToast();
 
   if (loading) return <PageSkeleton />;
@@ -630,12 +683,14 @@ export default function PayrollPage() {
     phone: company.phone,
     email: company.email,
     logoUrl: canUse("companyLogo", effectiveTier) ? company.logoUrl : null,
+    payslipFooter: canUse("companyBranding", effectiveTier) ? company.payslipFooter : undefined,
   };
 
   const defaultPeriod = getCurrentPeriod();
 
   const [periodLabel, setPeriodLabel] = useState(defaultPeriod.label);
   const [payDate, setPayDate] = useState(defaultPeriod.payDate);
+  const [runType, setRunType] = useState<RunType>("monthly");
   const [exchangeRate, setExchangeRate] = useState(185.44);
   const [runStarted, setRunStarted] = useState(false);
   const [lines, dispatch] = useReducer(gridReducer, []);
@@ -733,7 +788,34 @@ export default function PayrollPage() {
     const idx = STATUS_STEPS.indexOf(status);
     if (idx >= STATUS_STEPS.length - 1) return;
     const next = STATUS_STEPS[idx + 1];
+
+    // Approval workflow gate — the transition from the current stage requires
+    // a specific permission (Payroll Officer → Finance/HR → Managing Director).
+    const transition = TRANSITIONS[status];
+    if (transition && !can(role, transition.permission)) {
+      toast.error(`This step requires ${transition.roleHint}. Your role can't ${STATUS_LABELS[status] === "Draft" ? "submit" : "approve"} this pay run.`);
+      return;
+    }
+
     setStatus(next);
+
+    // Audit + notify the transition (best-effort, non-blocking).
+    if (transition && company.id) {
+      logAudit({ companyId: company.id, action: transition.audit, entityType: "pay_run", entityId: periodLabel, newValue: { period: periodLabel, runType, from: status, to: next } });
+      createNotification({ companyId: company.id, type: transition.notifyType, title: transition.notifyTitle, body: `${periodLabel} — ${lines.length} employee${lines.length !== 1 ? "s" : ""}.`, severity: transition.notifySeverity, link: "/payroll" });
+      // Email the company on the high-signal approval / release milestones.
+      if ((transition.audit === "payroll.approve" || transition.audit === "payroll.release") && company.email) {
+        sendEmailNotification({
+          to: company.email,
+          subject: `${transition.notifyTitle} — ${periodLabel}`,
+          title: transition.notifyTitle,
+          message: `The ${RUN_TYPE_LABELS[runType]} pay run for ${periodLabel} covering ${lines.length} employee${lines.length !== 1 ? "s" : ""} has been ${next === "approved" ? "approved" : "completed and payslips released"}.`,
+          ctaUrl: "https://slipdesk.com/payroll",
+          ctaLabel: "View in Slipdesk",
+          footer: company.name || undefined,
+        });
+      }
+    }
 
     if (next === "paid") {
       setSaving(true);
@@ -757,29 +839,28 @@ export default function PayrollPage() {
             s + (l.calc ? toUSD(l.calc.nasscorp.employeeContribution, l.currency) : 0),
           0
         );
-        const { data: coRow } = await (supabase as any)
-          .from("companies")
-          .select("id")
-          .single();
-        const companyId: string | null = coRow?.id ?? null;
-        const { data: run, error: runErr } = await (supabase as any)
-          .from("pay_runs")
-          .insert({
-            ...(companyId ? { company_id: companyId } : {}),
-            period_label: periodLabel,
-            pay_period_start: payDate,
-            pay_period_end: payDate,
-            pay_date: payDate,
-            exchange_rate: FX,
-            status: "paid",
-            employee_count: lines.length,
-            total_gross: totalGross,
-            total_net: totalNet,
-            total_income_tax: totalTax,
-            total_nasscorp: totalNasscorp,
-          })
-          .select()
-          .single();
+        const companyId: string | null = company.id || null;
+        const baseRun = {
+          ...(companyId ? { company_id: companyId } : {}),
+          period_label: periodLabel,
+          pay_period_start: payDate,
+          pay_period_end: payDate,
+          pay_date: payDate,
+          exchange_rate: FX,
+          status: "paid",
+          employee_count: lines.length,
+          total_gross: totalGross,
+          total_net: totalNet,
+          total_income_tax: totalTax,
+          total_nasscorp: totalNasscorp,
+        };
+        // run_type comes from migration 0001 — retry without it if not present.
+        let runRes = await (supabase as any).from("pay_runs").insert({ ...baseRun, run_type: runType }).select().single();
+        if (runRes.error) {
+          runRes = await (supabase as any).from("pay_runs").insert(baseRun).select().single();
+        }
+        const run = runRes.data;
+        const runErr = runRes.error;
         if (runErr) throw runErr;
         if (run && lines.length > 0) {
           const lineRows = lines
@@ -845,9 +926,23 @@ export default function PayrollPage() {
     }
   }
 
+  function reopenRun() {
+    if (!can(role, "payroll:reopen")) {
+      toast.error("Only a Company Owner or Finance Manager can reopen an approved pay run.");
+      return;
+    }
+    setStatus("review");
+    if (company.id) {
+      logAudit({ companyId: company.id, action: "payroll.reopen", entityType: "pay_run", entityId: periodLabel, oldValue: { status: "approved" }, newValue: { status: "review" } });
+      createNotification({ companyId: company.id, type: "general", title: "Pay run reopened", body: `${periodLabel} was reopened for edits.`, severity: "warning", link: "/payroll" });
+    }
+    toast.success("Pay run reopened for editing.");
+  }
+
   function startNewRun() {
     dispatch({ type: "CLEAR" });
     setStatus("draft");
+    setRunType("monthly");
     const p = getCurrentPeriod();
     setPeriodLabel(p.label);
     setPayDate(p.payDate);
@@ -1290,6 +1385,39 @@ export default function PayrollPage() {
                     fontFamily: "'DM Mono',monospace",
                   }}
                 >
+                  Payroll Type
+                </label>
+                <select
+                  value={runType}
+                  onChange={(e) => setRunType(e.target.value as RunType)}
+                  style={{
+                    padding: "10px 12px",
+                    background: "var(--background)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 9,
+                    color: "var(--foreground)",
+                    fontSize: 13,
+                    outline: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  {(Object.keys(RUN_TYPE_LABELS) as RunType[]).map((t) => (
+                    <option key={t} value={t}>{RUN_TYPE_LABELS[t]}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                <label
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "var(--muted-foreground)",
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    fontFamily: "'DM Mono',monospace",
+                  }}
+                >
                   Pay Date
                 </label>
                 <input
@@ -1714,6 +1842,11 @@ export default function PayrollPage() {
           >
             <Calendar size={12} color="var(--muted-foreground)" />
             {periodLabel}
+            <span style={{
+              padding: "2px 8px", borderRadius: 999, fontSize: 10.5, fontWeight: 700,
+              color: "var(--primary)", background: "color-mix(in oklch, var(--primary) 12%, transparent)",
+              border: "1px solid color-mix(in oklch, var(--primary) 30%, transparent)", textTransform: "uppercase", letterSpacing: "0.04em",
+            }}>{RUN_TYPE_LABELS[runType]}</span>
             <span style={{ color: "var(--border)" }}>·</span>
             <Users size={12} color="var(--muted-foreground)" />
             {lines.length} employees
@@ -1800,7 +1933,25 @@ export default function PayrollPage() {
           animation: "fadeUp 0.35s ease 0.05s both",
         }}
       >
-        <StatusStepper current={status} onAdvance={advanceStatus} saving={saving} />
+        <StatusStepper
+          current={status}
+          onAdvance={advanceStatus}
+          saving={saving}
+          allowed={!TRANSITIONS[status] || can(role, TRANSITIONS[status]!.permission)}
+          roleHint={TRANSITIONS[status]?.roleHint}
+        />
+        {status === "approved" && (
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+            <span style={{ fontSize: 11.5, color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: 6 }}>
+              <Lock size={12} /> Approved runs are locked. Figures can only change after a reopen.
+            </span>
+            {can(role, "payroll:reopen") && (
+              <button onClick={reopenRun} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 9, background: "color-mix(in oklch, var(--warning) 12%, transparent)", color: "var(--warning)", fontSize: 12, fontWeight: 700, border: "1px solid color-mix(in oklch, var(--warning) 35%, transparent)", cursor: "pointer" }}>
+                <RefreshCw size={12} /> Reopen for editing
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ═══ USAGE COUNTER ═══ */}

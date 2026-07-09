@@ -10,6 +10,7 @@ import {
 import { useApp } from "@/context/AppContext";
 import { calculatePayroll } from "@/lib/slipdesk-payroll-engine";
 import { calculateMonthlyFee, getPricingTier, TIERED_PRICING } from "@/lib/billing";
+import { PLAN_LABELS } from "@/lib/plan-features";
 
 const EXCHANGE_RATE = 185.44;
 
@@ -152,7 +153,7 @@ export default function DashboardPage() {
   const platformFee   = calculateMonthlyFee(preview.active.length);
   const currentTier   = getPricingTier(preview.active.length);
   const tierPrice     = TIERED_PRICING[currentTier].price;
-  const tierLabel     = currentTier.charAt(0).toUpperCase() + currentTier.slice(1); // "basic" → "Basic"
+  const tierLabel     = PLAN_LABELS[currentTier]; // "basic" → "Starter"
 
   const isSetupIncomplete = !company?.name || !company?.tin;
 

@@ -683,11 +683,12 @@ import {
   Calculator,
   CheckCircle2,
   ChevronRight,
+  Clock,
   FileText,
   Globe2,
   Lock,
-  RefreshCw,
   ShieldCheck,
+  Users,
   Zap,
 } from "lucide-react";
 import Image from "next/image";
@@ -858,53 +859,52 @@ function Hero() {
           <motion.div variants={fadeUp} custom={0}>
             <span className="inline-flex items-center gap-2 text-xs font-mono text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 rounded-full px-4 py-1.5 mb-6">
               <span className="w-1.5 h-1.5 rounded-full bg-em animate-pulse" />
-              🇱🇷 Built in Liberia · For Liberian SMEs
+              Liberia&apos;s Payroll &amp; Compliance Platform
             </span>
           </motion.div>
 
-          {/* Headline — payslip‑first */}
+          {/* Headline — platform positioning */}
           <motion.h1
             variants={fadeUp}
             custom={1}
             className="font-serif text-white leading-[1.12] mb-6"
             style={{ fontSize: "clamp(2rem, 5.5vw, 4rem)" }}
           >
-            Clean payslips.{" "}
-            <em className="not-italic shimmer-text">No confusion.</em>
-            <br className="hidden sm:block" />
-            Less stress.
+            Payroll. Compliance.{" "}
+            <em className="not-italic shimmer-text">Confidence.</em>
           </motion.h1>
 
-          {/* Subtext — empathy + clear product scope */}
+          {/* Subtext — full platform scope */}
           <motion.p
             variants={fadeUp}
             custom={2}
             className="text-white/60 text-base sm:text-lg leading-relaxed mb-10 max-w-xl font-light"
           >
-            Generate LRA‑compliant, dual‑currency payslips in minutes.
-            No spreadsheets, no manual calculations, no after‑payday panic.
+            Manage payroll, automate LRA and NASSCORP compliance, generate professional
+            payslips, and simplify payroll operations from one secure platform built
+            specifically for Liberian businesses.
           </motion.p>
 
-          {/* CTAs — no free trial language */}
+          {/* CTAs */}
           <motion.div variants={fadeUp} custom={3} className="flex flex-col sm:flex-row gap-4">
             <Link
               href="/signup"
               className="inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-em text-navy font-semibold rounded-xl hover-em transition-colors text-base"
             >
-              Get started today
+              Start Free Demo
               <ArrowRight className="w-4 h-4" />
             </Link>
             <Link
-              href="/demo"
+              href="/support"
               className="inline-flex items-center justify-center gap-2 px-7 py-3.5 border border-emerald-500/40 text-emerald-400 rounded-xl hover:bg-emerald-500/10 transition-colors text-base"
             >
-              See a sample payslip
+              Book a Demo
               <ChevronRight className="w-4 h-4" />
             </Link>
           </motion.div>
 
           <motion.p variants={fadeUp} custom={4} className="mt-8 text-white/35 text-sm font-mono">
-            No setup fees · Cancel anytime · Plans from $50/month
+            Secure · LRA &amp; NASSCORP compliant · Plans from $50/month
           </motion.p>
         </motion.div>
 
@@ -1003,40 +1003,40 @@ function PainBanner() {
 
 const FEATURES = [
   {
-    icon: Globe2,
-    title: "Dual‑Currency Payslips",
-    desc: "Every payslip shows USD and LRD side by side. No manual conversion, no separate spreadsheets.",
-    tag: "USD ↔ LRD",
+    icon: Users,
+    title: "Employee Management",
+    desc: "Complete employee profiles — departments, branches, positions, tax IDs, NASSCORP numbers, bank details and salary history in one place.",
+    tag: "People",
   },
   {
     icon: Calculator,
-    title: "LRA Income Tax, Autopilot",
-    desc: "The four‑tier LRA tax schedule applied correctly on every payslip. Effective tax rate displayed per employee.",
-    tag: "LRA Compliant",
+    title: "Payroll Management",
+    desc: "Run monthly, weekly, bi-weekly, bonus and off-cycle payroll with salary, allowances, overtime, loans, advances and deductions handled automatically.",
+    tag: "Payroll Runs",
   },
   {
     icon: ShieldCheck,
-    title: "NASSCORP Deductions Built‑In",
-    desc: "Employee 4% and employer 6% contributions calculated from base salary, automatically separated from allowances.",
-    tag: "NASSCORP Ready",
+    title: "LRA & NASSCORP Compliance",
+    desc: "The four-tier LRA income tax schedule and NASSCORP 4%/6% contributions applied precisely on every run, with compliance validation built in.",
+    tag: "Compliant",
   },
   {
-    icon: FileText,
-    title: "Professional PDF Payslips",
-    desc: "One‑click PDF generation. Branded, dated, and auditable, ready to print, email, or file with LRA.",
-    tag: "PDF / Email",
+    icon: BarChart3,
+    title: "Analytics & Reporting",
+    desc: "Executive dashboards, payroll registers, department reports and tax summaries — exportable to PDF, Excel and CSV.",
+    tag: "Insights",
   },
   {
-    icon: RefreshCw,
-    title: "Instant Recalculation",
-    desc: "Edit an allowance, a rate, or hours, the whole payslip updates immediately. Catch errors before payday, not after.",
-    tag: "Live Preview",
+    icon: BadgeCheck,
+    title: "Approval Workflow",
+    desc: "Move payroll through review and approval with role-based sign-off. Approved payroll is locked and audit-tracked from end to end.",
+    tag: "Governance",
   },
   {
-    icon: Zap,
-    title: "From Zero to Payslip in Minutes",
-    desc: "Import employees, set their salaries, generate all payslips for the month. Average run: under 10 minutes.",
-    tag: "10‑Minute Setup",
+    icon: Globe2,
+    title: "Dual-Currency & Branding",
+    desc: "USD and LRD side by side on branded, professional payslips — ready to print, email or file with the LRA.",
+    tag: "USD ↔ LRD",
   },
 ];
 
@@ -1045,13 +1045,13 @@ function Features() {
     <section id="features" className="py-20 sm:py-28 bg-slate-50">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
         <AnimateIn className="text-center mb-16">
-          <p className="text-em font-mono text-xs uppercase tracking-widest mb-3">Features</p>
+          <p className="text-em font-mono text-xs uppercase tracking-widest mb-3">Platform</p>
           <h2 className="font-serif text-navy text-3xl sm:text-4xl leading-tight mb-4">
-            Everything you need,<br />nothing you don&apos;t.
+            Everything Your Payroll Team Needs
           </h2>
           <p className="text-slate-500 max-w-xl mx-auto text-sm sm:text-base">
-            Slipdesk is purpose-built for how Liberian businesses actually pay people,
-            dual currencies, complex tax rules, and patchy internet included.
+            Slipdesk brings employee management, payroll, compliance, analytics and
+            approvals together — purpose-built for how Liberian organizations operate.
           </p>
         </AnimateIn>
         <motion.div
@@ -1101,12 +1101,13 @@ function Compliance() {
           <AnimateIn>
             <p className="text-em font-mono text-xs uppercase tracking-widest mb-3">LRA · NASSCORP · Compliance</p>
             <h2 className="font-serif text-white text-3xl sm:text-4xl leading-tight mb-6">
-              The heavy lifting is done.<br />
-              <em className="not-italic text-em">Your payslips are always compliant.</em>
+              Built for Liberian<br />
+              <em className="not-italic text-em">Payroll Compliance.</em>
             </h2>
             <p className="text-white/60 leading-relaxed mb-8 text-sm sm:text-base">
-              Slipdesk embeds every LRA income tax bracket and NASSCORP contribution rule directly into the payslip engine.
-              Every payslip you generate is a precise, auditable record, no rounding errors, no forgotten thresholds.
+              Slipdesk embeds every LRA income tax bracket and NASSCORP contribution rule directly into the payroll engine,
+              validates your data before every run, and generates the employer summaries and contribution reports your
+              obligations require. Every run is a precise, auditable record — no rounding errors, no forgotten thresholds.
             </p>
             <div className="space-y-3">
               {[
@@ -1157,10 +1158,10 @@ function Compliance() {
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
 const STATS = [
-  { value: "2", unit: "currencies", label: "USD & LRD on every payslip" },
-  { value: "4", unit: "tax brackets", label: "LRA brackets, applied right" },
-  { value: "<10", unit: "minutes", label: "From zero to full payslip run" },
-  { value: "Zero", unit: "spreadsheets", label: "Manual sheets. Ever again." },
+  { value: "2", unit: "currencies", label: "USD & LRD, always in sync" },
+  { value: "4", unit: "tax brackets", label: "LRA income tax, applied right" },
+  { value: "10%", unit: "NASSCORP", label: "4% employee · 6% employer" },
+  { value: "1", unit: "platform", label: "Payroll, compliance & reporting" },
 ];
 
 function Stats() {
@@ -1195,49 +1196,63 @@ function Stats() {
 function Pricing() {
   const tiers = [
     {
-      name: "Basic",
+      name: "Starter",
       price: "$50",
       unit: "/ month",
       limit: "Up to 80 employees",
       color: "#3B82F6",
       features: [
-        "Unlimited pay runs",
-        "LRA income tax auto-calculation",
-        "NASSCORP compliance built-in",
-        "PDF payslip generation",
-        "CSV bulk employee import",
-        "Email support (48hr response)",
+        "Employee Management",
+        "Payroll Management",
+        "Unlimited Payroll Runs",
+        "Payroll History",
+        "PDF Payslips",
+        "LRA Calculations",
+        "NASSCORP Calculations",
+        "CSV Employee Import",
+        "Basic Dashboard",
+        "Email Support",
       ],
     },
     {
-      name: "Standard",
+      name: "Professional",
       price: "$300",
       unit: "/ month",
-      limit: "Up to 499 employees",
+      limit: "Up to 500 employees",
       color: "#50C878",
       popular: true,
       features: [
-        "Everything in Basic",
-        "Dual-currency USD & LRD payslips",
-        "Company logo on all payslips",
-        "Department-level reporting",
-        "Bulk payslip download",
-        "Priority email support (24hr)",
+        "Everything in Starter, plus:",
+        "Department Management",
+        "Branch Management",
+        "Payroll Approval Workflow",
+        "Payroll Analytics",
+        "Company Branding",
+        "Bulk Payslip Generation",
+        "Compliance Dashboard",
+        "Department Reports",
+        "Payroll Calendar",
+        "Priority Support",
       ],
     },
     {
-      name: "Premium",
+      name: "Enterprise",
       price: "$500",
       unit: "/ month",
       limit: "Unlimited employees",
       color: "#8B5CF6",
       features: [
-        "Everything in Standard",
-        "Unlimited active employees",
-        "Dedicated account manager",
-        "Custom onboarding session",
-        "Priority phone support",
-        "Custom report exports",
+        "Everything in Professional, plus:",
+        "Multi-branch Organizations",
+        "Advanced Role Permissions",
+        "Audit Trail",
+        "Executive Analytics",
+        "Compliance History",
+        "API Access",
+        "Custom Reports",
+        "Dedicated Onboarding",
+        "Dedicated Account Manager",
+        "Priority Phone Support",
       ],
     },
   ];
@@ -1248,11 +1263,11 @@ function Pricing() {
         <AnimateIn className="text-center mb-14">
           <p className="text-em font-mono text-xs uppercase tracking-widest mb-3">Pricing</p>
           <h2 className="font-serif text-navy text-3xl sm:text-4xl mb-4">
-            Simple, flat monthly plans
+            Plans That Grow With Your Organization
           </h2>
           <p className="text-slate-500 max-w-md mx-auto text-sm sm:text-base">
-            No free trial, but you can explore the interactive demo before you sign up.
-            All plans billed monthly, cancel anytime.
+            From your first hire to a multi-branch enterprise. All plans include LRA &amp;
+            NASSCORP compliance, dual-currency payroll and professional payslips.
           </p>
         </AnimateIn>
 
@@ -1307,11 +1322,63 @@ function Pricing() {
           </div>
 
           <p className="text-center text-slate-400 text-xs font-mono mt-8">
-            All plans include unlimited payslip runs, LRA & NASSCORP compliance, dual‑currency, and PDF generation.
+            All plans include unlimited payroll runs, LRA &amp; NASSCORP compliance, dual-currency payroll and PDF payslips.
             <br />
-            Payroll management tools (multi‑period reporting, direct deposit, disbursements) coming later this year.
+            Feature gating is enforced per plan. Cancel anytime.
           </p>
         </AnimateIn>
+      </div>
+    </section>
+  );
+}
+
+// ─── Coming Soon (roadmap) ──────────────────────────────────────────────────
+// Hidden from the public site by default. Set NEXT_PUBLIC_SHOW_ROADMAP=true in
+// .env.local only when you want to preview or validate the roadmap internally.
+
+const ROADMAP = [
+  "Employee Self-Service Portal",
+  "Leave Management",
+  "Time & Attendance",
+  "Bank Payroll Export",
+  "Mobile Money Payroll Export",
+  "Mobile App",
+  "Accounting Integrations",
+  "Attendance Integrations",
+];
+
+function ComingSoon() {
+  return (
+    <section id="roadmap" className="py-20 sm:py-24 bg-white">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6">
+        <AnimateIn className="text-center mb-12">
+          <p className="text-em font-mono text-xs uppercase tracking-widest mb-3">Roadmap</p>
+          <h2 className="font-serif text-navy text-3xl sm:text-4xl mb-4">Coming Soon</h2>
+          <p className="text-slate-500 max-w-md mx-auto text-sm sm:text-base">
+            We&apos;re building the complete payroll operating system for Liberian businesses.
+            Here&apos;s what&apos;s next.
+          </p>
+        </AnimateIn>
+        <motion.div
+          initial="hidden"
+          whileInView="show"
+          viewport={{ once: true, margin: "-60px" }}
+          variants={stagger}
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+        >
+          {ROADMAP.map((item) => (
+            <motion.div
+              key={item}
+              variants={fadeUp}
+              className="flex items-center gap-3 bg-slate-50 border border-slate-100 rounded-2xl p-5"
+            >
+              <div className="w-9 h-9 rounded-xl bg-navy/5 flex items-center justify-center flex-shrink-0">
+                <Clock className="w-4 h-4 text-navy/60" />
+              </div>
+              <span className="text-navy text-sm font-medium">{item}</span>
+            </motion.div>
+          ))}
+        </motion.div>
       </div>
     </section>
   );
@@ -1326,34 +1393,31 @@ function CTA() {
         <AnimateIn>
           <Zap className="w-10 h-10 text-em mx-auto mb-5" />
           <h2 className="font-serif text-white text-3xl sm:text-4xl mb-5 leading-tight">
-            Ready to generate accurate payslips?
+            Payroll and compliance, under control.
           </h2>
           <p className="text-white/50 mb-8 leading-relaxed text-sm sm:text-base">
-            Join Liberian businesses that have replaced messy spreadsheets with Slipdesk.
-             Just a tool you can rely on from day one.
+            Join Liberian businesses running payroll, automating LRA and NASSCORP compliance,
+            and keeping complete payroll transparency — all from one secure platform.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link
               href="/signup"
               className="inline-flex items-center justify-center gap-2 px-7 sm:px-8 py-3.5 sm:py-4 bg-em text-navy font-bold rounded-xl hover-em transition-colors text-base sm:text-lg"
             >
-              Sign up and start today
+              Start Free Demo
               <ArrowRight className="w-5 h-5" />
             </Link>
             <Link
-              href="/demo"
+              href="/support"
               className="inline-flex items-center justify-center gap-2 px-7 sm:px-8 py-3.5 sm:py-4 border border-emerald-500/40 text-emerald-400 rounded-xl hover:bg-emerald-500/10 transition-colors text-base sm:text-lg"
             >
-              Try the demo first
+              Book a Demo
               <ChevronRight className="w-5 h-5" />
             </Link>
           </div>
           <p className="mt-6 text-white/30 text-sm font-mono">
             <Lock className="w-3 h-3 inline mr-1" />
-            Built in Liberia · Data encrypted · Pay via MTN Mobile Money
-          </p>
-          <p className="mt-4 text-white/20 text-xs font-mono">
-            Full payroll tools coming soon 👀
+            Built in Liberia · Data encrypted · Secure by design
           </p>
         </AnimateIn>
       </div>
@@ -1379,7 +1443,7 @@ function Footer() {
           <span className="text-white/60 text-sm font-mono">Slipdesk</span>
           <span className="text-white/20 text-sm mx-1">·</span>
           <span className="text-white/30 text-xs font-mono hidden sm:inline">
-            LRA & NASSCORP Compliant Payslips
+            Liberia&apos;s Payroll &amp; Compliance Platform
           </span>
         </Link>
 
@@ -1412,6 +1476,7 @@ export default function LandingPageClient() {
         <Compliance />
         <Stats />
         <Pricing />
+        {process.env.NEXT_PUBLIC_SHOW_ROADMAP === "true" && <ComingSoon />}
         <CTA />
       </main>
       <Footer />

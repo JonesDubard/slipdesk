@@ -1,39 +1,111 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { Eye, EyeOff, ArrowRight, CheckCircle2 } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Eye, EyeOff, ArrowRight, CheckCircle2, AlertCircle, Loader } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import { bootstrapAccount } from "@/lib/auth/bootstrap-client";
 
-export default function SignupPage() {
+function SignupForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const supabase = createClient();
+
+  const invited = searchParams.get("invite") === "1";
+  const invitedEmail = (searchParams.get("email") ?? "").trim().toLowerCase();
+
   const [show,    setShow]    = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [form,    setForm]    = useState({
     companyName: "",
-    lraTin:      "",   // ← added: collect TIN now, enforce uniqueness later
-    email:       "",
+    lraTin:      "",
+    email:       invitedEmail,
     password:    "",
   });
+
+  useEffect(() => {
+    if (invitedEmail) {
+      setForm((prev) => ({ ...prev, email: invitedEmail }));
+    }
+  }, [invitedEmail]);
 
   const set = (field: string, value: string) =>
     setForm((prev) => ({ ...prev, [field]: value }));
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
+    setSuccess(null);
     setLoading(true);
-    // ── TODO (going live): replace this with real Supabase signup + TIN uniqueness check
-    // For now: straight to dashboard for testing
-    setTimeout(() => {
-      window.location.href = "/dashboard";
-    }, 1000);
+
+    const email = form.email.trim().toLowerCase();
+    if (invited && invitedEmail && email !== invitedEmail) {
+      setError(`Use the invited email address (${invitedEmail}) to join your team.`);
+      setLoading(false);
+      return;
+    }
+
+    const { data, error: signUpErr } = await supabase.auth.signUp({
+      email,
+      password: form.password,
+      options: {
+        data: invited
+          ? {}
+          : { company_name: form.companyName.trim(), lra_tin: form.lraTin.trim() },
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
+      },
+    });
+
+    if (signUpErr) {
+      const msg = signUpErr.message.toLowerCase().includes("already")
+        ? "An account with this email already exists. Sign in with your password instead."
+        : signUpErr.message;
+      setError(msg);
+      setLoading(false);
+      return;
+    }
+
+    if (data.session) {
+      const boot = await bootstrapAccount(
+        invited
+          ? {}
+          : { companyName: form.companyName.trim(), lraTin: form.lraTin.trim() },
+      );
+      if (!boot.ok) {
+        setError(boot.error ?? "Account created but setup failed. Try signing in.");
+        setLoading(false);
+        return;
+      }
+      router.push("/dashboard");
+      router.refresh();
+      return;
+    }
+
+    setSuccess(
+      invited
+        ? "Account created! Check your email for a confirmation link, then sign in. " +
+          "Use the same email and the password you just chose — invites do not include a password."
+        : "Account created! Check your email for a confirmation link, then sign in at /login. " +
+          "If no email arrives, check spam — auth emails are sent by Supabase (not Resend).",
+    );
+    setLoading(false);
   }
 
   const perks = [
     "LRA & NASSCORP compliant from day one",
     "Dual-currency USD & LRD payroll",
     "PDF payslips in one click",
-    "$0.75 per employee/month",
+    "Plans from $50/month",
   ];
+
+  const inputClass =
+    "w-full px-4 py-3 text-sm border border-slate-200 rounded-xl " +
+    "focus:outline-none focus:ring-2 focus:ring-[#50C878] focus:border-transparent " +
+    "bg-white text-slate-800 placeholder-slate-300";
 
   return (
     <>
@@ -44,28 +116,15 @@ export default function SignupPage() {
       `}</style>
 
       <div className="min-h-screen bg-slate-50 flex">
-
-        {/* ── Left panel ── */}
         <div className="hidden lg:flex flex-col justify-between w-[420px] flex-shrink-0 bg-[#002147] p-10">
           <Link href="/" className="flex items-center gap-2.5">
-            <Image
-              src="/Slipdesk_Logo_.png"
-              alt="Slipdesk"
-              width={32}
-              height={32}
-              className="rounded-md object-contain"
-              style={{ background: "white", padding: "2px" }}
-            />
+            <Image src="/Slipdesk_Logo_.png" alt="Slipdesk" width={32} height={32}
+              className="rounded-md object-contain" style={{ background: "white", padding: "2px" }} />
             <span className="text-white font-semibold text-base">Slipdesk</span>
           </Link>
-
           <div>
-            <p className="text-[#50C878] font-mono text-xs uppercase tracking-widest mb-3">
-              Built for Liberian SMEs
-            </p>
-            <h2 className="text-white text-2xl font-semibold leading-snug mb-6">
-              Liberia&apos;s smartest payroll platform
-            </h2>
+            <p className="text-[#50C878] font-mono text-xs uppercase tracking-widest mb-3">Built for Liberian SMEs</p>
+            <h2 className="text-white text-2xl font-semibold leading-snug mb-6">Liberia&apos;s smartest payroll platform</h2>
             {perks.map((p) => (
               <div key={p} className="flex items-start gap-3 mb-3">
                 <CheckCircle2 className="w-4 h-4 text-[#50C878] flex-shrink-0 mt-0.5" />
@@ -73,153 +132,101 @@ export default function SignupPage() {
               </div>
             ))}
           </div>
-
-          <p className="text-white/20 text-xs font-mono">
-            © {new Date().getFullYear()} Slipdesk · Monrovia, Liberia
-          </p>
+          <p className="text-white/20 text-xs font-mono">© {new Date().getFullYear()} Slipdesk · Monrovia, Liberia</p>
         </div>
 
-        {/* ── Right panel ── */}
         <div className="flex-1 flex items-center justify-center px-6 py-12">
           <div className="w-full max-w-sm">
-
-            {/* Mobile logo */}
             <Link href="/" className="flex items-center gap-2.5 mb-8 lg:hidden">
-              <Image
-                src="/Slipdesk_Logo_.png"
-                alt="Slipdesk"
-                width={28}
-                height={28}
-                className="rounded object-contain"
-                style={{ background: "#002147", padding: "2px" }}
-              />
+              <Image src="/Slipdesk_Logo_.png" alt="Slipdesk" width={28} height={28}
+                className="rounded object-contain" style={{ background: "#002147", padding: "2px" }} />
               <span className="text-[#002147] font-semibold">Slipdesk</span>
             </Link>
 
-            <h1 className="text-2xl font-bold text-slate-800 mb-1">Create your account</h1>
+            <h1 className="text-2xl font-bold text-slate-800 mb-1">
+              {invited ? "Join your team" : "Create your account"}
+            </h1>
             <p className="text-slate-400 text-sm mb-8">
-              Set up payroll for your company in minutes
+              {invited
+                ? "Create your Slipdesk login with the invited email and a password you choose."
+                : "Set up payroll for your company in minutes"}
             </p>
 
+            {error && (
+              <div className="flex items-start gap-2.5 bg-red-50 border border-red-100 rounded-xl px-4 py-3 mb-4">
+                <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-red-600">{error}</p>
+              </div>
+            )}
+            {success && (
+              <div className="flex items-start gap-2.5 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3 mb-4">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-emerald-700">{success}</p>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-4">
-
-              {/* Company Name */}
+              {!invited && (
+                <>
+                  <div>
+                    <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">Company Name</label>
+                    <input type="text" value={form.companyName} onChange={(e) => set("companyName", e.target.value)}
+                      placeholder="Acme Trading Co." required className={inputClass} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
+                      LRA TIN <span className="normal-case text-slate-300 font-normal">(optional for now)</span>
+                    </label>
+                    <input type="text" value={form.lraTin} onChange={(e) => set("lraTin", e.target.value.toUpperCase())}
+                      placeholder="e.g. LR-1234567" className={`${inputClass} font-mono tracking-wider`} />
+                  </div>
+                </>
+              )}
               <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
-                  Company Name
-                </label>
-                <input
-                  type="text"
-                  value={form.companyName}
-                  onChange={(e) => set("companyName", e.target.value)}
-                  placeholder="Acme Trading Co."
-                  required
-                  className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl
-                             focus:outline-none focus:ring-2 focus:ring-[#50C878] focus:border-transparent
-                             bg-white text-slate-800 placeholder-slate-300"
-                />
+                <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">Work Email</label>
+                <input type="email" value={form.email} onChange={(e) => set("email", e.target.value)}
+                  placeholder="you@company.lr" required readOnly={invited && !!invitedEmail}
+                  className={`${inputClass}${invited && invitedEmail ? " bg-slate-50" : ""}`} />
               </div>
-
-              {/* LRA TIN — new field */}
               <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
-                  LRA TIN{" "}
-                  <span className="normal-case text-slate-300 font-normal tracking-normal">
-                    (Liberia Revenue Authority Tax ID)
-                  </span>
-                </label>
-                <input
-                  type="text"
-                  value={form.lraTin}
-                  onChange={(e) => set("lraTin", e.target.value.toUpperCase())}
-                  placeholder="e.g. LR-1234567"
-                  required
-                  className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl
-                             focus:outline-none focus:ring-2 focus:ring-[#50C878] focus:border-transparent
-                             bg-white text-slate-800 placeholder-slate-300 font-mono tracking-wider"
-                />
-                <p className="text-[10px] text-slate-300 mt-1 font-mono">
-                  Used for LRA compliance. One account per TIN.
-                </p>
-              </div>
-
-              {/* Work Email */}
-              <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
-                  Work Email
-                </label>
-                <input
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => set("email", e.target.value)}
-                  placeholder="you@company.lr"
-                  required
-                  className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl
-                             focus:outline-none focus:ring-2 focus:ring-[#50C878] focus:border-transparent
-                             bg-white text-slate-800 placeholder-slate-300"
-                />
-              </div>
-
-              {/* Password */}
-              <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
-                  Password
-                </label>
+                <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">Password</label>
                 <div className="relative">
-                  <input
-                    type={show ? "text" : "password"}
-                    value={form.password}
+                  <input type={show ? "text" : "password"} value={form.password}
                     onChange={(e) => set("password", e.target.value)}
-                    placeholder="Min. 8 characters"
-                    required
-                    minLength={8}
-                    className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl
-                               focus:outline-none focus:ring-2 focus:ring-[#50C878] focus:border-transparent
-                               bg-white text-slate-800 placeholder-slate-300 pr-10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShow(!show)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                  >
+                    placeholder="Min. 8 characters" required minLength={8}
+                    className={`${inputClass} pr-10`} />
+                  <button type="button" onClick={() => setShow(!show)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
                     {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
-
-              {/* Submit */}
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl
-                           bg-[#50C878] text-[#002147] font-bold text-sm
-                           hover:bg-[#3aa85f] transition-colors disabled:opacity-60"
-              >
-                {loading ? (
-                  <div className="w-4 h-4 border-2 border-[#002147]/30 border-t-[#002147] rounded-full animate-spin" />
-                ) : (
-                  <>Create free account <ArrowRight className="w-4 h-4" /></>
-                )}
+              <button type="submit" disabled={loading}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-[#50C878] text-[#002147] font-bold text-sm hover:bg-[#3aa85f] transition-colors disabled:opacity-60">
+                {loading ? <Loader className="w-4 h-4 animate-spin" /> : <>{invited ? "Join team" : "Create account"} <ArrowRight className="w-4 h-4" /></>}
               </button>
             </form>
 
-            <p className="text-center text-xs text-slate-400 mt-4 leading-relaxed">
-              By creating an account you agree to our{" "}
-              <a href="/legal" className="text-[#50C878] hover:underline">Terms of Service</a>
-              {" "}and{" "}
-              <a href="/legal?tab=privacy" className="text-[#50C878] hover:underline">Privacy Policy</a>
-            </p>
-
             <p className="text-center text-sm text-slate-400 mt-5">
               Already have an account?{" "}
-              <Link href="/login" className="text-[#50C878] hover:underline font-medium">
+              <Link
+                href={invited && invitedEmail ? `/login?email=${encodeURIComponent(invitedEmail)}` : "/login"}
+                className="text-[#50C878] hover:underline font-medium"
+              >
                 Sign in
               </Link>
             </p>
-
           </div>
         </div>
       </div>
     </>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-50" />}>
+      <SignupForm />
+    </Suspense>
   );
 }

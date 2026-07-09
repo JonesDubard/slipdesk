@@ -1734,6 +1734,7 @@ const EMPTY_FORM: Omit<Employee, "id" | "employeeNumber" | "fullName" | "isArchi
   standardHours: 173.33, isActive: true, nasscorpNumber: "",
   allowances: 0, paymentMethod: "bank_transfer",
   bankName: "", accountNumber: "", momoNumber: "",
+  branch: "", position: "", taxId: "", employmentStatus: "active", bankBranch: "",
 };
 
 function getInitials(first: string, last: string) {
@@ -1960,6 +1961,9 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
       nasscorpNumber: employee.nasscorpNumber, allowances: employee.allowances,
       paymentMethod: employee.paymentMethod, bankName: employee.bankName,
       accountNumber: employee.accountNumber, momoNumber: employee.momoNumber,
+      branch: employee.branch ?? "", position: employee.position ?? "",
+      taxId: employee.taxId ?? "", employmentStatus: employee.employmentStatus ?? "active",
+      bankBranch: employee.bankBranch ?? "",
     } : { ...EMPTY_FORM, employeeNumber: "" }
   );
   const [saving, setSaving] = useState(false);
@@ -2047,7 +2051,10 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
                 <Field label="First Name"><Inp value={form.firstName} onChange={(v) => set("firstName", v)} placeholder="Moses"/></Field>
                 <Field label="Last Name"><Inp value={form.lastName} onChange={(v) => set("lastName", v)} placeholder="Kollie"/></Field>
               </div>
-              <Field label="Job Title"><Inp value={form.jobTitle} onChange={(v) => set("jobTitle", v)} placeholder="Operations Manager"/></Field>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <Field label="Job Title"><Inp value={form.jobTitle} onChange={(v) => set("jobTitle", v)} placeholder="Operations Manager"/></Field>
+                <Field label="Position"><Inp value={form.position ?? ""} onChange={(v) => set("position", v)} placeholder="Senior / Team Lead"/></Field>
+              </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                 <Field label="Department">
                   <Sel value={form.department} onChange={(v) => set("department", v)}>
@@ -2057,6 +2064,18 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
                 <Field label="County">
                   <Sel value={form.county} onChange={(v) => set("county", v)}>
                     {COUNTIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </Sel>
+                </Field>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <Field label="Branch"><Inp value={form.branch ?? ""} onChange={(v) => set("branch", v)} placeholder="Head Office"/></Field>
+                <Field label="Employment Status">
+                  <Sel value={form.employmentStatus ?? "active"} onChange={(v) => set("employmentStatus", v)}>
+                    <option value="active">Active</option>
+                    <option value="probation">Probation</option>
+                    <option value="on_leave">On Leave</option>
+                    <option value="suspended">Suspended</option>
+                    <option value="terminated">Terminated</option>
                   </Sel>
                 </Field>
               </div>
@@ -2073,9 +2092,14 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
                   </Sel>
                 </Field>
               </div>
-              <Field label="NASSCORP Number">
-                <Inp value={form.nasscorpNumber} onChange={(v) => set("nasscorpNumber", v)} placeholder="NSC-001-2024"/>
-              </Field>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <Field label="NASSCORP Number">
+                  <Inp value={form.nasscorpNumber} onChange={(v) => set("nasscorpNumber", v)} placeholder="NSC-001-2024"/>
+                </Field>
+                <Field label="Tax ID (TIN)">
+                  <Inp value={form.taxId ?? ""} onChange={(v) => set("taxId", v)} placeholder="LR-TIN-XXXXXXX"/>
+                </Field>
+              </div>
             </div>
           )}
 
@@ -2156,6 +2180,7 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
                 <>
                   <Field label="Bank Name"><Inp value={form.bankName} onChange={(v) => set("bankName", v)} placeholder="Ecobank Liberia"/></Field>
                   <Field label="Account Number"><Inp value={form.accountNumber} onChange={(v) => set("accountNumber", v)} placeholder="1234567890"/></Field>
+                  <Field label="Bank Branch"><Inp value={form.bankBranch ?? ""} onChange={(v) => set("bankBranch", v)} placeholder="Broad Street Branch"/></Field>
                 </>
               )}
               {(form.paymentMethod === "mtn_momo" || form.paymentMethod === "orange_money") && (

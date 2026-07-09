@@ -1,6 +1,6 @@
 export const TIERED_PRICING = {
   basic: { maxEmployees: 80, price: 50 },
-  standard: { maxEmployees: 499, price: 300 },
+  standard: { maxEmployees: 500, price: 300 },
   premium: { maxEmployees: Infinity, price: 500 },
 } as const;
 

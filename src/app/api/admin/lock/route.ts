@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
+import { isPlatformAdminRole } from "@/lib/auth/platform-admin";
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
@@ -12,7 +13,7 @@ export async function POST(req: NextRequest) {
     .eq("id", user.id)
     .single();
 
-  if (profile?.role !== "admin") {
+  if (!isPlatformAdminRole(profile?.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

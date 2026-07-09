@@ -19,6 +19,8 @@ export interface CompanyInfo {
   address?: string;
   phone?: string;
   email?: string;
+  /** Optional custom footer line (Company Administration → Payslip branding). */
+  payslipFooter?: string;
 }
 
 export type PaymentMethod = "cash" | "bank_transfer" | "orange_money" | "mtn_momo";
@@ -689,7 +691,9 @@ function PayslipDocument({ line, company, payDate, periodLabel, payment }: Paysl
         {/* Footer */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            This payslip is computer-generated and is valid without a physical signature.
+            {company.payslipFooter?.trim()
+              ? company.payslipFooter
+              : "This payslip is computer-generated and is valid without a physical signature."}
           </Text>
           <Text style={styles.footerBrand}>Slipdesk - slipdesk.com</Text>
         </View>

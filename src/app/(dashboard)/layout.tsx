@@ -6,20 +6,46 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Users, FileText, Settings,
   LogOut, ChevronRight, Bell, Menu, X, CreditCard, Loader,
+  BarChart3, ShieldCheck, FileBarChart, ScrollText, UserCog,
+  AlertTriangle, CheckCircle2, Info,
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { useApp } from "@/context/AppContext";
 import { ToastProvider } from "@/components/Toast";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { createClient } from '@/lib/supabase/client';
+import type { SubscriptionTier } from "@/context/AppContext";
+import { visibleNavItems as filterNavItems, type NavItemDef } from "@/lib/nav";
+import { fetchNotifications, markAllNotificationsRead, type AppNotification } from "@/lib/notifications";
+import { performSignOut } from "@/lib/sign-out";
+import { isPlatformAdminRole } from "@/lib/auth/platform-admin";
 
-const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/employees", label: "Employees", icon: Users           },
-  { href: "/payroll",   label: "Payroll",   icon: FileText        },
-  { href: "/billing",   label: "Billing",   icon: CreditCard      },
-  { href: "/settings",  label: "Settings",  icon: Settings        },
+interface NavItem extends NavItemDef {
+  icon: typeof LayoutDashboard;
+}
+
+const NAV_ITEMS: NavItem[] = [
+  { href: "/dashboard",  label: "Dashboard",  icon: LayoutDashboard },
+  { href: "/employees",  label: "Employees",  icon: Users,        permission: "employee:view" },
+  { href: "/payroll",    label: "Payroll",    icon: FileText,     permission: "payroll:view" },
+  { href: "/analytics",  label: "Analytics",  icon: BarChart3,    feature: "payrollAnalytics", permission: "analytics:view" },
+  { href: "/compliance", label: "Compliance", icon: ShieldCheck,  feature: "complianceDashboard", permission: "compliance:view" },
+  { href: "/reports",    label: "Reports",    icon: FileBarChart, permission: "report:view" },
+  { href: "/audit",      label: "Audit",      icon: ScrollText,   feature: "auditTrail", permission: "audit:view" },
+  { href: "/team",       label: "Team & Roles", icon: UserCog,    feature: "advancedRoles", permission: "users:manage" },
+  { href: "/billing",    label: "Billing",    icon: CreditCard,   permission: "billing:manage" },
+  { href: "/settings",   label: "Settings",   icon: Settings },
 ];
+
+function visibleNavItems(
+  tier: SubscriptionTier,
+  billingBypass: boolean,
+  role: import("@/lib/rbac").Role,
+): NavItem[] {
+  const allowed = filterNavItems(tier, billingBypass, role);
+  const allowedHrefs = new Set(allowed.map((i) => i.href));
+  return NAV_ITEMS.filter((item) => allowedHrefs.has(item.href));
+}
 
 const STYLES = (
   <style>{`
@@ -45,28 +71,27 @@ function initials(name: string): string {
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 function SidebarContent({ onClose }: { onClose: () => void }) {
   const pathname = usePathname();
-  const { employees, company, user, signOut, loading } = useApp();
-  const [userRole,   setUserRole]   = useState<string | null>(null);
+  const { employees, company, user, role, signOut, loading } = useApp();
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
-  if (user?.id) {
-    const supabase = createClient();
-    supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .limit(1)                          // ← take only the first row
-      .then(({ data, error }: any) => {
-        if (error) {
-          console.error('Role fetch error:', error.message);
-          setUserRole('member');
-        } else {
-          setUserRole(data?.[0]?.role || 'member');  // ← data is now an array
-        }
-      });
-  }
-}, [user]);
+    if (user?.id) {
+      const supabase = createClient();
+      supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .limit(1)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .then(({ data }: any) => {
+          const raw = data?.[0]?.role;
+          setIsPlatformAdmin(isPlatformAdminRole(raw));
+        });
+    }
+  }, [user]);
+
+  const navItems = visibleNavItems(company.subscriptionTier, company.billingBypass, role);
 
   const activeCount    = employees.filter((e) => e.isActive).length;
   const companyName    = company.name || 'Your Company';
@@ -74,16 +99,12 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
   const displayName    = company.name || userEmail.split('@')[0] || 'User';
   const avatarLetters  = initials(displayName) || '?';
 
-  async function handleSignOut() {
+  function handleSignOut() {
     setSigningOut(true);
-    try {
-      await signOut();
-    } finally {
-      window.location.href = '/login';
-    }
+    void performSignOut(signOut);
   }
 
-  const adminNavItems = userRole === 'admin' ? [
+  const adminNavItems = isPlatformAdmin ? [
   { href: '/admin/payments', label: 'Admin: Payments', icon: CreditCard },
 ] : [];
 
@@ -122,8 +143,8 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
-        {NAV_ITEMS.map((item) => {
+      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+        {navItems.map((item) => {
           const active = pathname === item.href || pathname?.startsWith(item.href + '/');
           return (
             <Link
@@ -216,13 +237,9 @@ function TopBarAvatar() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  async function handleSignOut() {
+  function handleSignOut() {
     setSigningOut(true);
-    try {
-      await signOut();
-    } finally {
-      window.location.href = "/login";
-    }
+    void performSignOut(signOut);
   }
 
   return (
@@ -282,8 +299,17 @@ function TopBarAvatar() {
 }
 
 // ── Bell button ───────────────────────────────────────────────────────────────
+function bellIcon(sev: string) {
+  if (sev === "critical") return <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />;
+  if (sev === "warning")  return <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />;
+  if (sev === "success")  return <CheckCircle2 className="w-4 h-4 text-[#50C878] flex-shrink-0 mt-0.5" />;
+  return <Info className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />;
+}
+
 function BellButton() {
+  const { company } = useApp();
   const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<AppNotification[]>([]);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -296,6 +322,20 @@ function BellButton() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
+  useEffect(() => {
+    if (!company.id) return;
+    let cancelled = false;
+    fetchNotifications(company.id, 8).then((data) => { if (!cancelled) setItems(data); });
+    return () => { cancelled = true; };
+  }, [company.id, open]);
+
+  const unread = items.filter((n) => !n.isRead).length;
+
+  async function handleReadAll() {
+    setItems((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    await markAllNotificationsRead(company.id);
+  }
+
   return (
     <div className="relative" ref={ref}>
       <button
@@ -304,22 +344,52 @@ function BellButton() {
         aria-label="Notifications"
       >
         <Bell className="w-5 h-5" />
-        <span className="absolute -top-1 -right-1 w-2 h-2 bg-[#50C878] rounded-full" />
+        {unread > 0 && (
+          <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 bg-[#50C878] text-[#002147] text-[10px] font-bold rounded-full flex items-center justify-center">
+            {unread > 9 ? "9+" : unread}
+          </span>
+        )}
       </button>
 
       {open && (
-        <div className="absolute right-0 top-10 w-72 bg-white rounded-2xl shadow-lg
+        <div className="absolute right-0 top-10 w-80 bg-white rounded-2xl shadow-lg
                         border border-slate-100 z-50 overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-100">
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
             <p className="text-sm font-semibold text-slate-800">Notifications</p>
+            {unread > 0 && (
+              <button onClick={handleReadAll} className="text-xs font-semibold text-[#50C878] hover:underline">
+                Mark all read
+              </button>
+            )}
           </div>
-          <div className="px-4 py-8 text-center">
-            <Bell className="w-8 h-8 text-slate-200 mx-auto mb-2" />
-            <p className="text-sm text-slate-400">No notifications yet</p>
-            <p className="text-xs text-slate-300 mt-1">
-              We'll notify you about payroll and billing updates
-            </p>
-          </div>
+          {items.length === 0 ? (
+            <div className="px-4 py-8 text-center">
+              <Bell className="w-8 h-8 text-slate-200 mx-auto mb-2" />
+              <p className="text-sm text-slate-400">No notifications yet</p>
+              <p className="text-xs text-slate-300 mt-1">
+                We&apos;ll notify you about payroll, compliance and billing updates
+              </p>
+            </div>
+          ) : (
+            <div className="max-h-80 overflow-y-auto">
+              {items.map((n) => (
+                <div key={n.id} className={`flex gap-2.5 px-4 py-3 border-b border-slate-50 ${n.isRead ? "" : "bg-[#50C878]/5"}`}>
+                  {bellIcon(n.severity)}
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-700 truncate">{n.title}</p>
+                    {n.body && <p className="text-xs text-slate-400 line-clamp-2">{n.body}</p>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <Link
+            href="/notifications"
+            onClick={() => setOpen(false)}
+            className="block px-4 py-3 text-center text-sm font-semibold text-[#002147] hover:bg-slate-50 border-t border-slate-100"
+          >
+            View all notifications
+          </Link>
         </div>
       )}
     </div>

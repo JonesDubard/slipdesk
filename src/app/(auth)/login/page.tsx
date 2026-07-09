@@ -7,17 +7,27 @@
  * Also create: src/app/(auth)/layout.tsx  (see bottom of file)
  */
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { Eye, EyeOff, Loader, AlertCircle, CheckCircle2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { bootstrapAccount } from "@/lib/auth/bootstrap-client";
 
 type Mode = "login" | "signup";
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-50" />}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router   = useRouter();
+  const searchParams = useSearchParams();
   const supabase =  createClient();
 
   const [mode,        setMode]        = useState<Mode>("login");
@@ -28,6 +38,14 @@ export default function LoginPage() {
   const [loading,     setLoading]     = useState(false);
   const [error,       setError]       = useState<string | null>(null);
   const [successMsg,  setSuccessMsg]  = useState<string | null>(null);
+
+  useEffect(() => {
+    if (searchParams.get("error") === "auth_callback") {
+      setError("Email link expired or invalid. Request a new confirmation or reset link and try again.");
+    }
+    const prefill = searchParams.get("email");
+    if (prefill) setEmail(prefill);
+  }, [searchParams]);
 
   async function handleSubmit() {
     setError(null);
@@ -49,30 +67,44 @@ export default function LoginPage() {
     setLoading(true);
 
     if (mode === "login") {
-      const { error: err } = await supabase.auth.signInWithPassword({ email, password });
-      if (err) { setError(err.message); setLoading(false); return; }
+      const { error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      if (err) {
+        const msg = err.message.toLowerCase().includes("invalid login")
+          ? "Invalid email or password. If you were invited to a team, create an account at /signup first with that email and a password you choose."
+          : err.message;
+        setError(msg);
+        setLoading(false);
+        return;
+      }
+      const boot = await bootstrapAccount();
+      if (!boot.ok) { setError(boot.error ?? "Account setup failed"); setLoading(false); return; }
       router.push("/dashboard");
       router.refresh();
     } else {
-      const { error: err } = await supabase.auth.signUp({
-        email,
+      const { data, error: err } = await supabase.auth.signUp({
+        email: email.trim(),
         password,
         options: {
           data: { company_name: company.trim() },
-          // emailRedirectTo: `${window.location.origin}/dashboard`,
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
         },
       });
       if (err) { setError(err.message); setLoading(false); return; }
-      // In dev with email confirmation off, log in immediately
-      const { error: loginErr } = await supabase.auth.signInWithPassword({ email, password });
-      if (loginErr) {
-        setSuccessMsg("Account created! Check your email to confirm, then log in.");
-        setLoading(false);
-        setMode("login");
+
+      if (data.session) {
+        const boot = await bootstrapAccount({ companyName: company.trim() });
+        if (!boot.ok) { setError(boot.error ?? "Account setup failed"); setLoading(false); return; }
+        router.push("/dashboard");
+        router.refresh();
         return;
       }
-      router.push("/dashboard");
-      router.refresh();
+
+      setSuccessMsg(
+        "Account created! Check your email for a confirmation link, then sign in. " +
+        "If you don't receive it within a few minutes, check spam or ask your admin to confirm the address in Supabase.",
+      );
+      setLoading(false);
+      setMode("login");
     }
   }
 

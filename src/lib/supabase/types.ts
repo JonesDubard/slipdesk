@@ -26,6 +26,11 @@ type CompanyRow = {
   mtn_momo_phone:         string | null;
   admin_email:            string | null;
   pricing_model:          string;
+  // ── Company administration / branding (migration 0001) ──
+  brand_primary_color?:   string | null;
+  brand_secondary_color?: string | null;
+  email_footer?:          string | null;
+  payslip_footer?:        string | null;
   created_at:             string;
   updated_at:             string;
 };
@@ -61,6 +66,13 @@ type EmployeeRow = {
   pending_overtime_hours: number | null;
   pending_holiday_hours:  number | null;
   pending_deductions:     number | null;
+  // ── Extended employee profile (migration 0001) ──
+  branch?:            string | null;
+  position?:          string | null;
+  tax_id?:            string | null;
+  employment_status?: string | null;
+  bank_branch?:       string | null;
+  date_terminated?:   string | null;
 };
 
 type PayRunRow = {
@@ -71,7 +83,7 @@ type PayRunRow = {
   pay_period_end:    string;
   pay_date:          string;
   exchange_rate:     number;
-  status:            "draft" | "review" | "approved" | "paid";
+  status:            "draft" | "review" | "approved" | "locked" | "archived" | "paid";
   employee_count:    number;
   total_gross:       number;
   total_net:         number;
@@ -79,6 +91,14 @@ type PayRunRow = {
   total_nasscorp:    number;
   created_at:        string;
   updated_at:        string;
+  // ── Payroll lifecycle & run types (migration 0001) ──
+  run_type?:         string | null;
+  workflow_stage?:   string | null;
+  locked_at?:        string | null;
+  archived_at?:      string | null;
+  approved_by?:      string | null;
+  reopened_by?:      string | null;
+  reopened_at?:      string | null;
 };
 
 type PayRunLineRow = {
@@ -127,6 +147,7 @@ type PaymentRow = {
   status:          "pending" | "confirmed" | "rejected";
   tier_requested:  "basic" | "standard" | "premium";
   receipt_note:    string | null;
+  receipt_url:     string | null;
   confirmed_by:    string | null;
   confirmed_at:    string | null;
   rejected_reason: string | null;
@@ -141,6 +162,73 @@ type FaqRow = {
   is_active:  boolean;
   created_at: string;
   updated_at: string;
+};
+
+// ─── Platform expansion tables (migration 0001) ─────────────────────────────
+
+type EmployeeSalaryHistoryRow = {
+  id:             string;
+  company_id:     string;
+  employee_id:    string;
+  currency:       string;
+  old_rate:       number | null;
+  new_rate:       number;
+  effective_date: string;
+  changed_by:     string | null;
+  note:           string | null;
+  created_at:     string;
+};
+
+type CompanyMemberRow = {
+  id:            string;
+  company_id:    string;
+  user_id:       string | null;
+  role:          "super_admin" | "company_owner" | "payroll_officer" |
+                 "finance_manager" | "hr_manager" | "auditor" | "executive";
+  invited_email: string | null;
+  status:        "pending" | "active";
+  created_at:    string;
+};
+
+type AuditLogRow = {
+  id:          string;
+  company_id:  string;
+  actor_id:    string | null;
+  actor_email: string | null;
+  action:      string;
+  entity_type: string | null;
+  entity_id:   string | null;
+  old_value:   Json | null;
+  new_value:   Json | null;
+  ip_address:  string | null;
+  created_at:  string;
+};
+
+type NotificationRow = {
+  id:         string;
+  company_id: string;
+  user_id:    string | null;
+  type:       string;
+  title:      string;
+  body:       string | null;
+  severity:   "info" | "success" | "warning" | "critical";
+  link:       string | null;
+  is_read:    boolean;
+  created_at: string;
+};
+
+type ComplianceSnapshotRow = {
+  id:             string;
+  company_id:     string;
+  period_label:   string;
+  score:          number;
+  critical_count: number;
+  warning_count:  number;
+  payroll_ready:  boolean;
+  lra_ready:      boolean;
+  nasscorp_ready: boolean;
+  details:        Json | null;
+  created_at:     string;
 };
 
 // ─── Database interface ───────────────────────────────────────────────────────
@@ -183,6 +271,31 @@ export interface Database {
         Insert: Omit<FaqRow, "id" | "created_at" | "updated_at"> & { id?: string };
         Update: Partial<Omit<FaqRow, "id" | "created_at" | "updated_at">>;
       };
+      employee_salary_history: {
+        Row:    EmployeeSalaryHistoryRow;
+        Insert: Omit<EmployeeSalaryHistoryRow, "id" | "created_at"> & { id?: string };
+        Update: Partial<Omit<EmployeeSalaryHistoryRow, "id" | "created_at">>;
+      };
+      company_members: {
+        Row:    CompanyMemberRow;
+        Insert: Omit<CompanyMemberRow, "id" | "created_at"> & { id?: string };
+        Update: Partial<Omit<CompanyMemberRow, "id" | "created_at">>;
+      };
+      audit_log: {
+        Row:    AuditLogRow;
+        Insert: Omit<AuditLogRow, "id" | "created_at"> & { id?: string };
+        Update: Partial<Omit<AuditLogRow, "id" | "created_at">>;
+      };
+      notifications: {
+        Row:    NotificationRow;
+        Insert: Omit<NotificationRow, "id" | "created_at"> & { id?: string };
+        Update: Partial<Omit<NotificationRow, "id" | "created_at">>;
+      };
+      compliance_snapshots: {
+        Row:    ComplianceSnapshotRow;
+        Insert: Omit<ComplianceSnapshotRow, "id" | "created_at"> & { id?: string };
+        Update: Partial<Omit<ComplianceSnapshotRow, "id" | "created_at">>;
+      };
       // ═══ ADD THIS NEW TABLE ═══
       payslip_generations: {
         Row: {
@@ -221,3 +334,8 @@ export type DbPayRunLine   = PayRunLineRow;
 export type DbBillingEvent = BillingEventRow;
 export type DbPayment      = PaymentRow;
 export type DbFaq          = FaqRow;
+export type DbEmployeeSalaryHistory = EmployeeSalaryHistoryRow;
+export type DbCompanyMember  = CompanyMemberRow;
+export type DbAuditLog       = AuditLogRow;
+export type DbNotification   = NotificationRow;
+export type DbComplianceSnapshot = ComplianceSnapshotRow;

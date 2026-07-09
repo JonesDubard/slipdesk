@@ -1,21 +1,70 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
+import { resendFromAddress } from "@/lib/email/resend-from";
+import { isPlatformAdminRole } from "@/lib/auth/platform-admin";
+import { paymentsDb } from "@/lib/payments/server";
 
+/** List all payments (platform admin). */
+export async function GET() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (!isPlatformAdminRole(profile?.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const admin = paymentsDb();
+
+  const baseSelect = `
+    id, amount, month, status, tier_requested,
+    receipt_note, created_at, rejected_reason,
+    company_id,
+    companies ( name, email, admin_email, subscription_tier, subscription_status, is_locked )
+  `;
+
+  let { data: payments, error } = await admin
+    .from("payments")
+    .select(`${baseSelect}, receipt_url`)
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  if (error?.message?.includes("receipt_url")) {
+    ({ data: payments, error } = await admin
+      .from("payments")
+      .select(baseSelect)
+      .order("created_at", { ascending: false })
+      .limit(100));
+  }
+
+  if (error) {
+    console.error("[admin/payments] list:", error);
+    return NextResponse.json({ error: "Failed to fetch payments" }, { status: 500 });
+  }
+
+  return NextResponse.json(payments ?? []);
+}
+
+/** Confirm or reject a payment (platform admin). */
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  // Role check
   const { data: profile } = await supabase
     .from("profiles")
     .select("role")
     .eq("id", user.id)
-    .single();
+    .maybeSingle();
 
-  if (profile?.role !== "admin") {
+  if (!isPlatformAdminRole(profile?.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -26,8 +75,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
 
-  // Fetch the payment
-  const { data: payment, error: fetchErr } = await supabase
+  const admin = paymentsDb();
+
+  const { data: payment, error: fetchErr } = await admin
     .from("payments")
     .select("company_id, amount, tier_requested")
     .eq("id", paymentId)
@@ -37,17 +87,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Payment not found" }, { status: 404 });
   }
 
-  // ── Reject ───────────────────────────────────────────────────────────────
   if (action === "reject") {
-    await supabase
+    const { error } = await admin
       .from("payments")
       .update({ status: "rejected", rejected_reason: rejectedReason ?? "Rejected by admin" })
       .eq("id", paymentId);
+    if (error) return NextResponse.json({ error: "Failed to reject payment" }, { status: 500 });
     return NextResponse.json({ success: true, action: "rejected" });
   }
 
-  // ── Confirm: mark payment row ─────────────────────────────────────────────
-  const { error: payErr } = await supabase
+  const { error: payErr } = await admin
     .from("payments")
     .update({
       status:       "confirmed",
@@ -60,21 +109,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Failed to confirm payment" }, { status: 500 });
   }
 
-  // ── Fetch company to calculate new expiry ─────────────────────────────────
-  const { data: co } = await supabase
+  const { data: co } = await admin
     .from("companies")
     .select("name, admin_email, email, subscription_expires_at")
     .eq("id", payment.company_id)
     .single();
 
-  // Extend by 1 month from current expiry if still in future, otherwise from today
   const base = co?.subscription_expires_at && new Date(co.subscription_expires_at) > new Date()
     ? new Date(co.subscription_expires_at)
     : new Date();
   base.setMonth(base.getMonth() + 1);
 
-  // ── Update company subscription (MUST happen before email) ────────────────
-  const { error: coErr } = await supabase
+  const { error: coErr } = await admin
     .from("companies")
     .update({
       subscription_status:     "active",
@@ -89,11 +135,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Payment confirmed but failed to update company" }, { status: 500 });
   }
 
-  
-
-  // ── Send confirmation email (after DB is updated — failure here is non-fatal) ──
   const recipientEmail = co?.admin_email || co?.email;
-  if (recipientEmail) {
+  if (recipientEmail && process.env.RESEND_API_KEY) {
     try {
       const resend = new Resend(process.env.RESEND_API_KEY);
       const tierLabel = payment.tier_requested.charAt(0).toUpperCase() + payment.tier_requested.slice(1);
@@ -102,7 +145,7 @@ export async function POST(req: NextRequest) {
       });
 
       await resend.emails.send({
-        from: "Slipdesk <helloslipdesk@gmail.com>",
+        from: resendFromAddress(),
         to: recipientEmail,
         subject: `Payment confirmed — your ${tierLabel} plan is now active`,
         html: `
@@ -117,29 +160,17 @@ export async function POST(req: NextRequest) {
               Your <strong style="color:#002147">${tierLabel} plan</strong> is now active.
             </p>
             <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px 20px;margin:20px 0">
-              <p style="margin:0;font-size:13px;color:#166534">
-                <strong>Plan:</strong> ${tierLabel}
-              </p>
-              <p style="margin:6px 0 0;font-size:13px;color:#166534">
-                <strong>Active until:</strong> ${expiryFormatted}
-              </p>
+              <p style="margin:0;font-size:13px;color:#166534"><strong>Plan:</strong> ${tierLabel}</p>
+              <p style="margin:6px 0 0;font-size:13px;color:#166534"><strong>Active until:</strong> ${expiryFormatted}</p>
             </div>
             <p style="color:#475569;font-size:14px">
-              You can now run payroll without any restrictions.
-              <a href="https://slipdesk.com/dashboard" style="color:#002147;font-weight:bold">
-                Log in to your dashboard →
-              </a>
-            </p>
-            <p style="color:#94a3b8;font-size:12px;margin-top:32px;border-top:1px solid #e2e8f0;padding-top:16px">
-              Questions? Reply to this email or contact 
-              <a href="mailto:helloslipdesk@gmail.com" style="color:#475569">helloslipdesk@gmail.com</a>
+              <a href="https://slipdesk.com/dashboard" style="color:#002147;font-weight:bold">Log in to your dashboard →</a>
             </p>
           </div>
         `,
       });
     } catch (emailErr) {
-      // Email failure is non-fatal — account is already activated
-      console.error("Confirmation email failed (account still activated):", emailErr);
+      console.error("Confirmation email failed:", emailErr);
     }
   }
 

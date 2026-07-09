@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { TIERED_PRICING } from "@/lib/billing";
+import { resolveCompanyIdForUser, paymentsDb } from "@/lib/payments/server";
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
@@ -13,14 +14,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid tier" }, { status: 400 });
   }
 
-  // Get company
-  const { data: company, error: coErr } = await supabase
-    .from("companies")
-    .select("id, name")
-    .eq("owner_id", user.id)
-    .single();
-
-  if (coErr || !company) {
+  const companyId = await resolveCompanyIdForUser(supabase, user.id);
+  if (!companyId) {
     return NextResponse.json({ error: "Company not found" }, { status: 400 });
   }
 
@@ -28,21 +23,21 @@ export async function POST(req: NextRequest) {
   const amount = TIERED_PRICING[tier].price;
   const month  = new Date().toLocaleString("default", { month: "long", year: "numeric" });
 
-  // Insert pending payment
-  const { data: payment, error: insertErr } = await supabase
+  const admin = paymentsDb();
+  const { data: payment, error: insertErr } = await admin
     .from("payments")
     .insert({
-      company_id:     company.id,
+      company_id:     companyId,
       amount,
       month,
       status:         "pending",
       tier_requested: tier,
     })
-    .select()
+    .select("id")
     .single();
 
   if (insertErr || !payment) {
-    console.error(insertErr);
+    console.error("[payments/manual]", insertErr);
     return NextResponse.json({ error: "Failed to create payment record" }, { status: 500 });
   }
 

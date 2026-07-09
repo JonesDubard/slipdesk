@@ -1,76 +1,88 @@
 "use client";
 
-import { useMemo, useState, useEffect, useCallback } from "react";
+import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { useApp } from "@/context/AppContext";
 import PageSkeleton from "@/components/PageSkeleton";
+import { createClient } from "@/lib/supabase/client";
 import {
   CheckCircle2, Users, DollarSign, ShieldCheck,
   Clock, AlertTriangle, Lock, ChevronDown, ChevronUp,
   Copy, Check, Loader2, ExternalLink, Smartphone,
+  Upload, X,
 } from "lucide-react";
 
 // ─── Plan definitions ────────────────────────────────────────────────────────
 const PLANS = [
   {
     id: "basic" as const,
-    name: "Basic",
+    name: "Starter",
     price: 50,
     max: 80,
     label: "Up to 80 employees",
     color: "#3B82F6",
     popular: false,
     features: [
-      "Up to 80 active employees",
-      "Unlimited pay runs per month",
-      "LRA income tax auto-calculation",
-      "NASSCORP compliance built-in",
-      "PDF payslip generation",
-      "CSV bulk employee import",
-      "Email support (48hr response)",
+      "Employee Management",
+      "Payroll Management",
+      "Unlimited Payroll Runs",
+      "Payroll History",
+      "PDF Payslips",
+      "LRA & NASSCORP Calculations",
+      "CSV Employee Import",
+      "Basic Dashboard",
+      "Email Support",
     ],
   },
   {
     id: "standard" as const,
-    name: "Standard",
+    name: "Professional",
     price: 300,
-    max: 499,
-    label: "Up to 499 employees",
+    max: 500,
+    label: "Up to 500 employees",
     color: "#50C878",
     popular: true,
     features: [
-      "Up to 499 active employees",
-      "Everything in Basic",
-      "Dual-currency USD & LRD payroll",
-      "Company logo on all payslips",
-      "Priority email support (24hr)",
-      "Bulk payslip download",
-      "Department-level reporting",
+      "Everything in Starter, plus:",
+      "Department & Branch Management",
+      "Payroll Approval Workflow",
+      "Payroll Analytics",
+      "Company Branding",
+      "Bulk Payslip Generation",
+      "Compliance Dashboard",
+      "Department Reports & Payroll Calendar",
+      "Priority Support",
     ],
   },
   {
     id: "premium" as const,
-    name: "Premium",
+    name: "Enterprise",
     price: 500,
     max: Infinity,
     label: "Unlimited employees",
     color: "#8B5CF6",
     popular: false,
     features: [
-      "Unlimited active employees",
-      "Everything in Standard",
-      "Dedicated account manager",
-      "Custom onboarding session",
-      "Priority phone support",
-      "Custom report exports",
-      "Multi-location support",
+      "Everything in Professional, plus:",
+      "Multi-branch Organizations",
+      "Advanced Role Permissions",
+      "Audit Trail & Compliance History",
+      "Executive Analytics",
+      "API Access & Custom Reports",
+      "Dedicated Onboarding",
+      "Dedicated Account Manager",
+      "Priority Phone Support",
     ],
   },
 ] as const;
 
 type PlanId = "basic" | "standard" | "premium";
 
-const SLIPDESK_MOMO_NUMBER = "0881936033";
-const SLIPDESK_MOMO_NAME   = "Slipdesk";
+const SLIPDESK_MTN_MOMO   = process.env.NEXT_PUBLIC_SLIPDESK_MTN_MOMO   ?? "0881936033";
+const SLIPDESK_ORANGE_MOMO = process.env.NEXT_PUBLIC_SLIPDESK_ORANGE_MOMO ?? "0776796033";
+const SLIPDESK_MOMO_NAME  = "Slipdesk";
+const MOMO_AUTOMATIC      = process.env.NEXT_PUBLIC_MOMO_AUTOMATIC === "true";
+const RECEIPT_MAX_BYTES   = 5 * 1024 * 1024;
+const RECEIPT_TYPES       = ["image/png", "image/jpeg", "image/webp"];
 
 const fmt = (n: number) =>
   `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -134,8 +146,12 @@ export default function BillingPage() {
   const [selectedPlan, setSelectedPlan] = useState<PlanId>(
     company.subscriptionTier ?? "basic"
   );
-  const [payStep, setPayStep] = useState<"idle" | "instructions" | "submitting" | "done" | "momo_pending">("idle");
+  const [payStep, setPayStep] = useState<"idle" | "instructions" | "submitting" | "submitted" | "done" | "momo_pending">("idle");
   const [receiptNote, setReceiptNote] = useState("");
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [momoProvider, setMomoProvider] = useState<"mtn" | "orange">("mtn");
+  const receiptInputRef = useRef<HTMLInputElement>(null);
   const [submitError, setSubmitError] = useState("");
   const [pendingPayment, setPendingPayment] = useState<{ id: string; amount: number; month: string } | null>(null);
   const [openFaq, setOpenFaq] = useState<string | null>(null);
@@ -196,7 +212,10 @@ export default function BillingPage() {
   // ── Handlers ──────────────────────────────────────────────────────────────
   async function handleStartPayment() {
     setSubmitError("");
-    setPayStep("instructions");
+    setReceiptNote("");
+    setReceiptFile(null);
+    setReceiptPreview(null);
+    setPayStep("submitting");
 
     try {
       const res = await fetch("/api/payments/manual", {
@@ -207,29 +226,82 @@ export default function BillingPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to create payment");
       setPendingPayment({ id: data.paymentId, amount: data.amount, month: data.month });
+      setPayStep("instructions");
     } catch (err: unknown) {
       setSubmitError(err instanceof Error ? err.message : "Something went wrong");
       setPayStep("idle");
     }
   }
 
+  async function uploadReceipt(paymentId: string, file: File): Promise<string> {
+    const supabase = createClient();
+    const ext = file.name.split(".").pop() ?? "jpg";
+    const path = `payment-receipts/${paymentId}.${ext}`;
+    const { error } = await supabase.storage
+      .from("company-assets")
+      .upload(path, file, { upsert: true, contentType: file.type });
+    if (error) throw new Error("Could not upload screenshot. Try again or submit without one.");
+    const { data } = supabase.storage.from("company-assets").getPublicUrl(path);
+    return `${data.publicUrl}?t=${Date.now()}`;
+  }
+
+  function handleReceiptSelect(file: File | null) {
+    setSubmitError("");
+    if (!file) {
+      setReceiptFile(null);
+      setReceiptPreview(null);
+      return;
+    }
+    if (!RECEIPT_TYPES.includes(file.type)) {
+      setSubmitError("Screenshot must be PNG, JPG, or WebP.");
+      return;
+    }
+    if (file.size > RECEIPT_MAX_BYTES) {
+      setSubmitError("Screenshot must be under 5 MB.");
+      return;
+    }
+    setReceiptFile(file);
+    setReceiptPreview(URL.createObjectURL(file));
+  }
+
   async function handleConfirmPayment() {
     if (!pendingPayment) return;
+    if (!receiptNote.trim() && !receiptFile) {
+      setSubmitError("Enter your MoMo transaction ID or upload a payment screenshot.");
+      return;
+    }
     setPayStep("submitting");
     setSubmitError("");
     try {
+      let receiptUrl: string | null = null;
+      if (receiptFile) {
+        receiptUrl = await uploadReceipt(pendingPayment.id, receiptFile);
+      }
       const res = await fetch("/api/payments/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentId: pendingPayment.id, receiptNote }),
+        body: JSON.stringify({
+          paymentId: pendingPayment.id,
+          receiptNote: receiptNote.trim() || null,
+          receiptUrl,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to submit");
-      setPayStep("done");
+      setPayStep("submitted");
     } catch (err: unknown) {
       setSubmitError(err instanceof Error ? err.message : "Something went wrong");
       setPayStep("instructions");
     }
+  }
+
+  function closePaymentModal() {
+    setPayStep("idle");
+    setPendingPayment(null);
+    setReceiptNote("");
+    setReceiptFile(null);
+    setReceiptPreview(null);
+    setSubmitError("");
   }
 
   async function handleMomoPayment() {
@@ -483,136 +555,261 @@ export default function BillingPage() {
                     {chosenPlan.name} Plan — {fmt(chosenPlan.price)}/month
                   </p>
                   <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--muted-foreground)" }}>
-                    Pay via MTN Mobile Money · Instant activation
+                    Pay via MTN or Orange Mobile Money · Manual verification (1–24 hrs)
                   </p>
                 </div>
-                <button
-                  onClick={handleMomoPayment}
-                  style={{
-                    padding: "12px 28px", borderRadius: 10,
-                    background: chosenPlan.color, color: "#fff",
-                    fontWeight: 700, fontSize: 14, border: "none",
-                    cursor: "pointer", whiteSpace: "nowrap",
-                  }}
-                >
-                  Pay with Mobile Money (Automatic)
-                </button>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button
+                    onClick={handleStartPayment}
+                    style={{
+                      padding: "12px 28px", borderRadius: 10,
+                      background: chosenPlan.color, color: "#fff",
+                      fontWeight: 700, fontSize: 14, border: "none",
+                      cursor: "pointer", whiteSpace: "nowrap",
+                    }}
+                  >
+                    Pay with Mobile Money
+                  </button>
+                  {MOMO_AUTOMATIC && (
+                    <button
+                      onClick={handleMomoPayment}
+                      style={{
+                        padding: "12px 20px", borderRadius: 10,
+                        background: "transparent", color: chosenPlan.color,
+                        fontWeight: 600, fontSize: 13,
+                        border: `1px solid ${chosenPlan.color}`,
+                        cursor: "pointer", whiteSpace: "nowrap",
+                      }}
+                    >
+                      Automatic (API)
+                    </button>
+                  )}
+                </div>
               </div>
+              {submitError && (
+                <p style={{ color: "#EF4444", fontSize: 12, marginTop: 12, marginBottom: 0 }}>{submitError}</p>
+              )}
             </div>
           )}
 
           {payStep === "instructions" && pendingPayment && (
             <div style={{
-              background: "var(--card)", border: "2px solid #50C878",
-              borderRadius: 16, padding: 28,
+              position: "fixed", inset: 0, zIndex: 100,
+              background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)",
+              display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
             }}>
-              <h3 style={{ margin: "0 0 20px", fontSize: 16, fontWeight: 800, color: "var(--foreground)" }}>
-                📱 Send your Mobile Money payment
-              </h3>
-
-              {[
-                { n: "1", title: "Dial *126*1# on your phone", body: "Go to Send Money or Pay Merchant." },
-                {
-                  n: "2", title: "Send payment to this number",
-                  body: (
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
-                      <code style={{
-                        background: "#F0FDF4", border: "1px solid #BBF7D0",
-                        padding: "6px 14px", borderRadius: 8,
-                        fontSize: 18, fontWeight: 800, letterSpacing: 2, color: "#15803D",
-                        fontFamily: "'DM Mono',monospace",
-                      }}>
-                        {SLIPDESK_MOMO_NUMBER}
-                      </code>
-                      <CopyButton text={SLIPDESK_MOMO_NUMBER} />
-                      <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>({SLIPDESK_MOMO_NAME})</span>
-                    </div>
-                  ),
-                },
-                {
-                  n: "3", title: "Amount to send",
-                  body: (
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
-                      <code style={{
-                        background: "#F0FDF4", border: "1px solid #BBF7D0",
-                        padding: "6px 14px", borderRadius: 8,
-                        fontSize: 18, fontWeight: 800, color: "#15803D",
-                        fontFamily: "'DM Mono',monospace",
-                      }}>
-                        {fmt(pendingPayment.amount)}
-                      </code>
-                      <CopyButton text={String(pendingPayment.amount)} />
-                    </div>
-                  ),
-                },
-                { n: "4", title: "Use your company name as the reference", body: `Type "${companyName}" in the note/reference field.` },
-              ].map((step) => (
-                <div key={step.n} style={{ display: "flex", gap: 16, marginBottom: 20 }}>
-                  <div style={{
-                    width: 28, height: 28, borderRadius: "50%",
-                    background: "#50C878", color: "#002147",
-                    fontWeight: 800, fontSize: 13, flexShrink: 0,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}>
-                    {step.n}
-                  </div>
-                  <div>
-                    <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: "var(--foreground)" }}>{step.title}</p>
-                    {typeof step.body === "string"
-                      ? <p style={{ margin: "3px 0 0", fontSize: 13, color: "var(--muted-foreground)" }}>{step.body}</p>
-                      : step.body}
-                  </div>
+              <div style={{
+                background: "var(--card)", border: "2px solid #50C878",
+                borderRadius: 18, padding: 28, width: "100%", maxWidth: 560,
+                maxHeight: "90vh", overflowY: "auto",
+                boxShadow: "0 24px 64px rgba(0,0,0,0.2)",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "var(--foreground)" }}>
+                    Pay with Mobile Money
+                  </h3>
+                  <button
+                    onClick={closePaymentModal}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", padding: 4 }}
+                    aria-label="Close"
+                  >
+                    <X size={18} />
+                  </button>
                 </div>
-              ))}
 
-              <div style={{ borderTop: "1px solid var(--border)", paddingTop: 20, marginTop: 4 }}>
-                <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "var(--foreground)", marginBottom: 8 }}>
-                  After paying — enter your MoMo transaction ID
-                  <span style={{ fontWeight: 400, color: "var(--muted-foreground)", marginLeft: 6 }}>(optional but speeds up confirmation)</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. 1234567890"
-                  value={receiptNote}
-                  onChange={(e) => setReceiptNote(e.target.value)}
-                  style={{
-                    width: "100%", padding: "10px 14px",
-                    border: "1px solid var(--border)", borderRadius: 10,
-                    fontSize: 14, background: "var(--background)",
-                    color: "var(--foreground)", boxSizing: "border-box",
-                    fontFamily: "'DM Mono',monospace",
-                  }}
-                />
-                {submitError && (
-                  <p style={{ color: "#EF4444", fontSize: 12, marginTop: 8 }}>{submitError}</p>
-                )}
-                <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
-                  <button
-                    onClick={handleConfirmPayment}
-                    style={{
-                      padding: "11px 24px", borderRadius: 10,
+                <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--muted-foreground)" }}>
+                  Send <strong>{fmt(pendingPayment.amount)}</strong> for the <strong>{chosenPlan.name}</strong> plan, then submit your transaction details below.
+                </p>
+
+                <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+                  {(["mtn", "orange"] as const).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setMomoProvider(p)}
+                      style={{
+                        flex: 1, padding: "10px 12px", borderRadius: 10, cursor: "pointer",
+                        border: momoProvider === p ? "2px solid #50C878" : "1px solid var(--border)",
+                        background: momoProvider === p ? "#F0FDF4" : "var(--background)",
+                        fontWeight: 700, fontSize: 13, color: "var(--foreground)",
+                      }}
+                    >
+                      {p === "mtn" ? "MTN MoMo" : "Orange Money"}
+                    </button>
+                  ))}
+                </div>
+
+                {[
+                  {
+                    n: "1",
+                    title: momoProvider === "mtn" ? "Dial *126*1# on your MTN line" : "Open Orange Money on your phone",
+                    body: momoProvider === "mtn" ? "Go to Send Money or Pay Merchant." : "Choose Send Money or Pay a merchant.",
+                  },
+                  {
+                    n: "2",
+                    title: "Send payment to this number",
+                    body: (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                        <code style={{
+                          background: "#F0FDF4", border: "1px solid #BBF7D0",
+                          padding: "6px 14px", borderRadius: 8,
+                          fontSize: 18, fontWeight: 800, letterSpacing: 2, color: "#15803D",
+                          fontFamily: "'DM Mono',monospace",
+                        }}>
+                          {momoProvider === "mtn" ? SLIPDESK_MTN_MOMO : SLIPDESK_ORANGE_MOMO}
+                        </code>
+                        <CopyButton text={momoProvider === "mtn" ? SLIPDESK_MTN_MOMO : SLIPDESK_ORANGE_MOMO} />
+                        <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>({SLIPDESK_MOMO_NAME})</span>
+                      </div>
+                    ),
+                  },
+                  {
+                    n: "3",
+                    title: "Amount to send",
+                    body: (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+                        <code style={{
+                          background: "#F0FDF4", border: "1px solid #BBF7D0",
+                          padding: "6px 14px", borderRadius: 8,
+                          fontSize: 18, fontWeight: 800, color: "#15803D",
+                          fontFamily: "'DM Mono',monospace",
+                        }}>
+                          {fmt(pendingPayment.amount)}
+                        </code>
+                        <CopyButton text={String(pendingPayment.amount)} />
+                      </div>
+                    ),
+                  },
+                  { n: "4", title: "Use your company name as the reference", body: `Type "${companyName}" in the note/reference field.` },
+                ].map((step) => (
+                  <div key={step.n} style={{ display: "flex", gap: 16, marginBottom: 18 }}>
+                    <div style={{
+                      width: 28, height: 28, borderRadius: "50%",
                       background: "#50C878", color: "#002147",
-                      fontWeight: 700, fontSize: 14, border: "none", cursor: "pointer",
-                    }}
-                  >
-                    I have paid — notify Slipdesk
-                  </button>
-                  <button
-                    onClick={() => { setPayStep("idle"); setPendingPayment(null); }}
+                      fontWeight: 800, fontSize: 13, flexShrink: 0,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                    }}>
+                      {step.n}
+                    </div>
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: "var(--foreground)" }}>{step.title}</p>
+                      {typeof step.body === "string"
+                        ? <p style={{ margin: "3px 0 0", fontSize: 13, color: "var(--muted-foreground)" }}>{step.body}</p>
+                        : step.body}
+                    </div>
+                  </div>
+                ))}
+
+                <div style={{ borderTop: "1px solid var(--border)", paddingTop: 20, marginTop: 4 }}>
+                  <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "var(--foreground)", marginBottom: 8 }}>
+                    MoMo transaction ID
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 1234567890"
+                    value={receiptNote}
+                    onChange={(e) => setReceiptNote(e.target.value)}
                     style={{
-                      padding: "11px 20px", borderRadius: 10,
-                      border: "1px solid var(--border)", background: "none",
-                      color: "var(--muted-foreground)", fontSize: 14, cursor: "pointer",
+                      width: "100%", padding: "10px 14px",
+                      border: "1px solid var(--border)", borderRadius: 10,
+                      fontSize: 14, background: "var(--background)",
+                      color: "var(--foreground)", boxSizing: "border-box",
+                      fontFamily: "'DM Mono',monospace",
                     }}
-                  >
-                    Cancel
-                  </button>
+                  />
+
+                  <label style={{ display: "block", fontWeight: 700, fontSize: 13, color: "var(--foreground)", margin: "16px 0 8px" }}>
+                    Payment screenshot
+                    <span style={{ fontWeight: 400, color: "var(--muted-foreground)", marginLeft: 6 }}>(PNG, JPG, or WebP)</span>
+                  </label>
+                  <input
+                    ref={receiptInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    style={{ display: "none" }}
+                    onChange={(e) => handleReceiptSelect(e.target.files?.[0] ?? null)}
+                  />
+                  {receiptPreview ? (
+                    <div style={{ position: "relative", marginBottom: 12 }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={receiptPreview}
+                        alt="Payment screenshot preview"
+                        style={{ width: "100%", maxHeight: 180, objectFit: "contain", borderRadius: 10, border: "1px solid var(--border)" }}
+                      />
+                      <button
+                        onClick={() => handleReceiptSelect(null)}
+                        style={{
+                          position: "absolute", top: 8, right: 8,
+                          background: "#fff", border: "1px solid var(--border)",
+                          borderRadius: 8, padding: 4, cursor: "pointer",
+                        }}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => receiptInputRef.current?.click()}
+                      style={{
+                        width: "100%", padding: "14px", borderRadius: 10,
+                        border: "1px dashed var(--border)", background: "var(--background)",
+                        color: "var(--muted-foreground)", fontSize: 13, cursor: "pointer",
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                      }}
+                    >
+                      <Upload size={16} /> Upload screenshot
+                    </button>
+                  )}
+
+                  <p style={{ margin: "8px 0 0", fontSize: 11.5, color: "var(--muted-foreground)" }}>
+                    Provide a transaction ID or screenshot (at least one). We&apos;ll verify and activate your plan within 24 hours.
+                  </p>
+
+                  {submitError && (
+                    <p style={{ color: "#EF4444", fontSize: 12, marginTop: 8 }}>{submitError}</p>
+                  )}
+                  <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
+                    <button
+                      onClick={handleConfirmPayment}
+                      style={{
+                        padding: "11px 24px", borderRadius: 10,
+                        background: "#50C878", color: "#002147",
+                        fontWeight: 700, fontSize: 14, border: "none", cursor: "pointer",
+                      }}
+                    >
+                      I have paid — submit for review
+                    </button>
+                    <button
+                      onClick={closePaymentModal}
+                      style={{
+                        padding: "11px 20px", borderRadius: 10,
+                        border: "1px solid var(--border)", background: "none",
+                        color: "var(--muted-foreground)", fontSize: 14, cursor: "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
-          {payStep === "submitting" && (
+          {payStep === "submitting" && !pendingPayment && (
+            <div style={{
+              background: "var(--card)", border: "1px solid var(--border)",
+              borderRadius: 16, padding: 40, textAlign: "center",
+            }}>
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+                <Loader2 size={32} style={{ animation: "spin 1s linear infinite", color: "var(--primary)" }} />
+              </div>
+              <p style={{ fontSize: 14, color: "var(--muted-foreground)", margin: 0 }}>
+                Preparing payment instructions…
+              </p>
+            </div>
+          )}
+
+          {payStep === "submitting" && pendingPayment && (
             <div style={{
               background: "var(--card)", border: "1px solid var(--border)",
               borderRadius: 16, padding: 40, textAlign: "center",
@@ -659,6 +856,34 @@ export default function BillingPage() {
                 }}
               >
                 Cancel
+              </button>
+            </div>
+          )}
+
+          {payStep === "submitted" && (
+            <div style={{
+              background: "#FFFBEB", border: "2px solid #FCD34D",
+              borderRadius: 16, padding: 32, textAlign: "center",
+            }}>
+              <Clock size={40} color="#D97706" style={{ margin: "0 auto 14px" }} />
+              <h3 style={{ margin: "0 0 8px", fontSize: 18, fontWeight: 800, color: "#92400E" }}>
+                Payment submitted for review
+              </h3>
+              <p style={{ color: "#B45309", fontSize: 13, margin: "0 0 6px" }}>
+                We received your <strong>{chosenPlan.name}</strong> payment details. Our team will verify your MoMo transfer and activate your plan within 24 hours.
+              </p>
+              <p style={{ color: "#D97706", fontSize: 12, margin: 0 }}>
+                You&apos;ll get an email at {company.email || "your registered email"} once approved.
+              </p>
+              <button
+                onClick={closePaymentModal}
+                style={{
+                  marginTop: 20, padding: "10px 18px", borderRadius: 10,
+                  border: "1px solid #FCD34D", background: "#fff",
+                  color: "#92400E", fontSize: 13, cursor: "pointer", fontWeight: 600,
+                }}
+              >
+                Back to billing
               </button>
             </div>
           )}

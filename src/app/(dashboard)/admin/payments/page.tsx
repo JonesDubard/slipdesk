@@ -13,6 +13,7 @@ type Payment = {
   status:          "pending" | "confirmed" | "rejected";
   tier_requested:  string;
   receipt_note:    string | null;
+  receipt_url:     string | null;
   created_at:      string;
   rejected_reason: string | null;
   company_id:      string;
@@ -167,20 +168,27 @@ export default function AdminPaymentsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res  = await fetch("/api/admin/payments/pending");
-      const data = await res.json();
-      // Bug 1 fix: check response status
+      const res = await fetch("/api/admin/payments");
+      let data: { error?: string } | unknown[] = [];
+      try {
+        data = await res.json();
+      } catch {
+        showToast("Server returned an invalid response.", "error");
+        setPayments([]);
+        return;
+      }
       if (!res.ok) {
+        const err = !Array.isArray(data) ? data : {};
         showToast(
           res.status === 403
             ? "Access denied. Make sure your account has the admin role in the profiles table."
-            : `Failed to load payments: ${data.error ?? "Unknown error"}`,
+            : `Failed to load payments: ${(err as { error?: string }).error ?? "Unknown error"}`,
           "error",
         );
         setPayments([]);
         return;
       }
-      setPayments(Array.isArray(data) ? data : []);
+      setPayments(Array.isArray(data) ? (data as Payment[]) : []);
     } catch {
       showToast("Network error — could not reach the server.", "error");
     } finally {
@@ -194,7 +202,7 @@ export default function AdminPaymentsPage() {
   async function handleConfirm(paymentId: string) {
     setWorking(paymentId);
     try {
-      const res  = await fetch("/api/admin/payments/confirm", {
+      const res  = await fetch("/api/admin/payments", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ paymentId, action: "confirm" }),
@@ -223,7 +231,7 @@ export default function AdminPaymentsPage() {
   async function handleReject(paymentId: string, reason: string) {
     setWorking(paymentId);
     try {
-      const res  = await fetch("/api/admin/payments/confirm", {
+      const res  = await fetch("/api/admin/payments", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ paymentId, action: "reject", rejectedReason: reason }),
@@ -307,7 +315,7 @@ export default function AdminPaymentsPage() {
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0, color: "#0F172A" }}>Admin — Payments</h1>
           <p style={{ color: "#64748B", fontSize: 13, margin: "4px 0 0" }}>
-            Review MTN MoMo payment notifications · {pending.length} pending
+            Review manual MoMo payments · {pending.length} pending
           </p>
         </div>
         <button
@@ -403,6 +411,18 @@ export default function AdminPaymentsPage() {
                         ) : (
                           <p style={{ margin: "8px 0 0", fontSize: 11, color: "#F59E0B" }}>
                             ⚠ No TX ID provided — verify manually in MoMo before confirming.
+                          </p>
+                        )}
+                        {p.receipt_url && (
+                          <p style={{ margin: "8px 0 0" }}>
+                            <a
+                              href={p.receipt_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ fontSize: 12, fontWeight: 600, color: "#2563EB" }}
+                            >
+                              View payment screenshot →
+                            </a>
                           </p>
                         )}
                       </div>
@@ -533,6 +553,11 @@ export default function AdminPaymentsPage() {
                   {p.rejected_reason && (
                     <p style={{ margin: 0, fontSize: 11, color: "#EF4444" }}>
                       Reason: {p.rejected_reason}
+                    </p>
+                  )}
+                  {p.receipt_note && (
+                    <p style={{ margin: "2px 0 0", fontSize: 11, color: "#64748B", fontFamily: "'DM Mono',monospace" }}>
+                      MoMo TX: {p.receipt_note}
                     </p>
                   )}
                   <p style={{ margin: "2px 0 0", fontSize: 11, color: "#94A3B8" }}>
