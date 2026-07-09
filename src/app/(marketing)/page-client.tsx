@@ -1005,7 +1005,7 @@ const FEATURES = [
   {
     icon: Users,
     title: "Employee Management",
-    desc: "Complete employee profiles — departments, branches, positions, tax IDs, NASSCORP numbers, bank details and salary history in one place.",
+    desc: "Complete employee profiles, departments, branches, positions, tax IDs, NASSCORP numbers, bank details and salary history in one place.",
     tag: "People",
   },
   {
@@ -1023,7 +1023,7 @@ const FEATURES = [
   {
     icon: BarChart3,
     title: "Analytics & Reporting",
-    desc: "Executive dashboards, payroll registers, department reports and tax summaries — exportable to PDF, Excel and CSV.",
+    desc: "Executive dashboards, payroll registers, department reports and tax summaries, exportable to PDF, Excel and CSV.",
     tag: "Insights",
   },
   {
@@ -1035,7 +1035,7 @@ const FEATURES = [
   {
     icon: Globe2,
     title: "Dual-Currency & Branding",
-    desc: "USD and LRD side by side on branded, professional payslips — ready to print, email or file with the LRA.",
+    desc: "USD and LRD side by side on branded, professional payslips, ready to print, email or file with the LRA.",
     tag: "USD ↔ LRD",
   },
 ];
@@ -1107,14 +1107,14 @@ function Compliance() {
             <p className="text-white/60 leading-relaxed mb-8 text-sm sm:text-base">
               Slipdesk embeds every LRA income tax bracket and NASSCORP contribution rule directly into the payroll engine,
               validates your data before every run, and generates the employer summaries and contribution reports your
-              obligations require. Every run is a precise, auditable record — no rounding errors, no forgotten thresholds.
+              obligations require. Every run is a precise, auditable record, no rounding errors, no forgotten thresholds.
             </p>
             <div className="space-y-3">
               {[
                 "NASSCORP: 4% Employee · 6% Employer, applied only on base salary",
                 "Income converted to LRD before tax bracket calculation",
                 "Tax converted back to employee's currency on the final payslip",
-                "Minimum‑wage guardrail flags under‑threshold earnings",
+                "Minimum, wage guardrail flags under threshold earnings",
                 "Every payslip is LRA‑ready from day one",
               ].map((t) => (
                 <div key={t} className="flex items-start gap-3">
@@ -1397,7 +1397,7 @@ function CTA() {
           </h2>
           <p className="text-white/50 mb-8 leading-relaxed text-sm sm:text-base">
             Join Liberian businesses running payroll, automating LRA and NASSCORP compliance,
-            and keeping complete payroll transparency — all from one secure platform.
+            and keeping complete payroll transparency, all from one secure platform.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link

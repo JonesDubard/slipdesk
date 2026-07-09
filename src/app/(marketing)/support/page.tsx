@@ -31,7 +31,7 @@ const FAQS: FAQ[] = [
   {
     icon: DollarSign,
     q: "How does pricing work? Are there hidden fees?",
-    a: "Slipdesk charges $0.75 per active employee per month — nothing else. No setup fee, no annual contract, no minimum. If you have 10 employees, you pay $7.50 that month. If you add 5 more mid-month, the next invoice reflects 15. You only pay for employees you actually run payroll for.",
+    a: "Slipdesk charges $0.75 per active employee per month, nothing else. No setup fee, no annual contract, no minimum. If you have 10 employees, you pay $7.50 that month. If you add 5 more mid-month, the next invoice reflects 15. You only pay for employees you actually run payroll for.",
   },
   {
     icon: Shield,
@@ -355,18 +355,18 @@ export default function SupportPage() {
                 helloslipdesk@gmail.com
               </a>
               <a
-                href="https://wa.me/4915231657334"
+                href="https://wa.me/231773295060"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 border border-white/20
                            text-white/80 text-sm hover:bg-white/20 transition-colors"
               >
                 <Phone className="w-4 h-4 text-[#50C878]" />
-                WhatsApp: +49 1523 1657 334
+                WhatsApp: +231 773 29 5060/ +231 77 793 6033
               </a>
               <div className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 border border-white/20 text-white/50 text-sm">
                 <Clock className="w-4 h-4 text-[#50C878]" />
-                Mon – Fri · 8am – 6pm WAT
+                Mon to Fri · 8am to 6pm WAT
               </div>
             </div>
           </div>
