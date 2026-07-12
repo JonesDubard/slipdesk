@@ -812,18 +812,18 @@ function Nav() {
         </nav>
 
         <div className="flex items-center gap-3">
-          <Link href="/demo" className="text-sm text-emerald-400 hover:text-emerald-300 transition-colors hidden md:inline font-mono">
+          <a href="/demo" className="text-sm text-emerald-400 hover:text-emerald-300 transition-colors hidden md:inline font-mono">
             Explore Interactive Demo →
-          </Link>
+          </a>
           <Link href="/login" className="text-sm text-white/70 hover:text-white transition-colors hidden md:inline">
             Sign in
           </Link>
-          <Link
+          <a
             href="/demo"
             className="text-sm font-semibold px-4 py-2 rounded-lg bg-em text-navy hover-em transition-colors whitespace-nowrap"
           >
             Explore Interactive Demo
-          </Link>
+          </a>
         </div>
       </div>
     </header>
@@ -887,13 +887,13 @@ function Hero() {
 
           {/* CTAs */}
           <motion.div variants={fadeUp} custom={3} className="flex flex-col sm:flex-row gap-4">
-            <Link
+            <a
               href="/demo"
               className="inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-em text-navy font-semibold rounded-xl hover-em transition-colors text-base"
             >
               Explore Interactive Demo
               <ArrowRight className="w-4 h-4" />
-            </Link>
+            </a>
             <a
               href={bookDemoUrl()}
               className="inline-flex items-center justify-center gap-2 px-7 py-3.5 border border-emerald-500/40 text-emerald-400 rounded-xl hover:bg-emerald-500/10 transition-colors text-base"
@@ -1400,13 +1400,13 @@ function CTA() {
             live walkthrough with our team. Access is invite-only after purchase.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link
+            <a
               href="/demo"
               className="inline-flex items-center justify-center gap-2 px-7 sm:px-8 py-3.5 sm:py-4 bg-em text-navy font-bold rounded-xl hover-em transition-colors text-base sm:text-lg"
             >
               Explore Interactive Demo
               <ArrowRight className="w-5 h-5" />
-            </Link>
+            </a>
             <a
               href={bookDemoUrl()}
               className="inline-flex items-center justify-center gap-2 px-7 sm:px-8 py-3.5 sm:py-4 border border-emerald-500/40 text-emerald-400 rounded-xl hover:bg-emerald-500/10 transition-colors text-base sm:text-lg"

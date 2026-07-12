@@ -3,11 +3,8 @@
 import { useEffect } from "react";
 import { Loader } from "lucide-react";
 
-/**
- * Hard-navigate into the server cookie handoff.
- * (Next.js soft redirects strip Set-Cookie from /api auth routes.)
- */
-export default function DemoPage() {
+/** Old /demo/enter links — same hard handoff. */
+export default function DemoEnterPage() {
   useEffect(() => {
     window.location.replace("/api/demo/enter");
   }, []);
@@ -16,7 +13,6 @@ export default function DemoPage() {
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-3 px-6">
       <Loader className="w-8 h-8 text-[#50C878] animate-spin" />
       <p className="text-sm text-slate-500 font-medium">Starting interactive demo…</p>
-      <p className="text-xs text-slate-400">ABC Construction Ltd. · read-only</p>
     </div>
   );
 }

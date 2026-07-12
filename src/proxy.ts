@@ -9,6 +9,13 @@ const PROTECTED_PREFIXES = [
 // Note: /api/v1/* uses Bearer API keys — intentionally not cookie-protected here.
 
 export async function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // Demo cookie handoff — skip session refresh so Set-Cookie from the route wins.
+  if (pathname === "/api/demo/enter" || pathname === "/api/demo/session") {
+    return NextResponse.next();
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -34,7 +41,6 @@ export async function proxy(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
 
-  const { pathname } = request.nextUrl;
   const isProtected = PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
   const isAuthPage   = pathname === "/login" || pathname === "/signup";
 

@@ -305,7 +305,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const newUser = session?.user ?? null;
         setUser(newUser);
         if (newUser) {
-          if (event === "SIGNED_IN" || event === "USER_UPDATED") {
+          if (
+            event === "SIGNED_IN" ||
+            event === "USER_UPDATED" ||
+            event === "INITIAL_SESSION"
+          ) {
             setDataLoading(true);
             await loadData();
             if (mounted) setDataLoading(false);

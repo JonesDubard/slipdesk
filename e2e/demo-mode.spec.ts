@@ -31,7 +31,6 @@ test.describe("Acquisition CTAs (no free trial)", () => {
 test.describe("Demo enter flow", () => {
   test("GET /demo redirects into enter or off state", async ({ page }) => {
     await page.goto(`${BASE}/demo`, { waitUntil: "commit" });
-    // Allow redirect chain (demo → enter → dashboard, or demo → home)
     await page.waitForURL(
       (url) => {
         const path = url.pathname;
@@ -57,6 +56,15 @@ test.describe("Demo enter flow", () => {
     }
   });
 
+  test("demo session API respects enable flag", async ({ request }) => {
+    const res = await request.post(`${BASE}/api/demo/session`);
+    if (DEMO_ENABLED) {
+      expect([200, 401, 503]).toContain(res.status());
+    } else {
+      expect(res.status()).toBe(403);
+    }
+  });
+
   test("mutating org API without auth still 401", async ({ request }) => {
     const res = await request.post(`${BASE}/api/org/units`, {
       data: { kind: "departments", name: "Demo Test Dept" },
@@ -70,7 +78,8 @@ test.describe("Demo read-only (requires seeded demo)", () => {
 
   test("demo session blocks employee create API", async ({ page, request }) => {
     await page.goto(`${BASE}/demo/enter`, { waitUntil: "networkidle" });
-    await page.waitForTimeout(1500);
+    await page.waitForURL(/dashboard/, { timeout: 25_000 }).catch(() => undefined);
+    await page.waitForTimeout(1000);
     const cookies = await page.context().cookies();
     expect(cookies.length).toBeGreaterThan(0);
 
@@ -90,7 +99,7 @@ test.describe("Demo read-only (requires seeded demo)", () => {
 
   test("dashboard shows demo banner", async ({ page }) => {
     await page.goto(`${BASE}/demo/enter`, { waitUntil: "networkidle" });
-    await page.waitForURL(/dashboard/, { timeout: 20_000 }).catch(() => undefined);
+    await page.waitForURL(/dashboard/, { timeout: 25_000 }).catch(() => undefined);
     await expect(
       page.getByText(/read-only demo of ABC Construction/i).first(),
     ).toBeVisible({ timeout: 20_000 });

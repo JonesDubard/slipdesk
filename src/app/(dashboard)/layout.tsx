@@ -419,7 +419,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [loading, user, company.isLocked, router]);
 
-  if (loading || !user) {
+  if (loading) {
     return (
       <>
         {STYLES}
@@ -433,6 +433,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <div className="h-48 bg-slate-200 rounded-2xl animate-pulse" />
             </div>
           </div>
+        </div>
+      </>
+    );
+  }
+
+  if (!user) {
+    return (
+      <>
+        {STYLES}
+        <div className="flex h-screen items-center justify-center bg-slate-50 text-sm text-slate-400">
+          Redirecting to sign in…
         </div>
       </>
     );
