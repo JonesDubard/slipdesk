@@ -694,6 +694,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useRef } from "react";
+import { bookDemoUrl } from "@/lib/demo/constants";
 
 // ─── Motion Variants ─────────────────────────────────────────────────────────
 
@@ -812,16 +813,16 @@ function Nav() {
 
         <div className="flex items-center gap-3">
           <Link href="/demo" className="text-sm text-emerald-400 hover:text-emerald-300 transition-colors hidden md:inline font-mono">
-            Interactive demo →
+            Explore Interactive Demo →
           </Link>
           <Link href="/login" className="text-sm text-white/70 hover:text-white transition-colors hidden md:inline">
             Sign in
           </Link>
           <Link
-            href="/signup"
+            href="/demo"
             className="text-sm font-semibold px-4 py-2 rounded-lg bg-em text-navy hover-em transition-colors whitespace-nowrap"
           >
-            Get started
+            Explore Interactive Demo
           </Link>
         </div>
       </div>
@@ -870,8 +871,8 @@ function Hero() {
             className="font-serif text-white leading-[1.12] mb-6"
             style={{ fontSize: "clamp(2rem, 5.5vw, 4rem)" }}
           >
-            Payroll. Compliance.{" "}
-            <em className="not-italic shimmer-text">Confidence.</em>
+            See Slipdesk{" "}
+            <em className="not-italic shimmer-text">in action.</em>
           </motion.h1>
 
           {/* Subtext — full platform scope */}
@@ -880,27 +881,26 @@ function Hero() {
             custom={2}
             className="text-white/60 text-base sm:text-lg leading-relaxed mb-10 max-w-xl font-light"
           >
-            Manage payroll, automate LRA and NASSCORP compliance, generate professional
-            payslips, and simplify payroll operations from one secure platform built
-            specifically for Liberian businesses.
+            Explore a real Liberian company workspace — payroll, compliance, and
+            payslips — in a read-only interactive demo. No free trial required.
           </motion.p>
 
           {/* CTAs */}
           <motion.div variants={fadeUp} custom={3} className="flex flex-col sm:flex-row gap-4">
             <Link
-              href="/signup"
+              href="/demo"
               className="inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-em text-navy font-semibold rounded-xl hover-em transition-colors text-base"
             >
-              Start Free Demo
+              Explore Interactive Demo
               <ArrowRight className="w-4 h-4" />
             </Link>
-            <Link
-              href="/support"
+            <a
+              href={bookDemoUrl()}
               className="inline-flex items-center justify-center gap-2 px-7 py-3.5 border border-emerald-500/40 text-emerald-400 rounded-xl hover:bg-emerald-500/10 transition-colors text-base"
             >
-              Book a Demo
+              Book a Live Demo
               <ChevronRight className="w-4 h-4" />
-            </Link>
+            </a>
           </motion.div>
 
           <motion.p variants={fadeUp} custom={4} className="mt-8 text-white/35 text-sm font-mono">
@@ -1305,17 +1305,17 @@ function Pricing() {
                   </div>
                 </div>
                 <div className="px-6 sm:px-7 pb-8 mt-auto">
-                  <Link
-                    href="/signup"
+                  <a
+                    href={bookDemoUrl()}
                     className="flex items-center justify-center gap-2 w-full py-3.5 rounded-xl font-bold transition-colors text-sm"
                     style={{
                       background: tier.popular ? tier.color : "rgba(255,255,255,0.08)",
                       color: tier.popular ? "#002147" : "#fff",
                     }}
                   >
-                    Choose {tier.name}
+                    Book a Live Demo
                     <ArrowRight className="w-4 h-4" />
-                  </Link>
+                  </a>
                 </div>
               </div>
             ))}
@@ -1388,32 +1388,32 @@ function ComingSoon() {
 
 function CTA() {
   return (
-    <section className="py-20 sm:py-24 bg-navy noise text-center">
+    <section id="contact" className="py-20 sm:py-24 bg-navy noise text-center">
       <div className="max-w-2xl mx-auto px-4 sm:px-6">
         <AnimateIn>
           <Zap className="w-10 h-10 text-em mx-auto mb-5" />
           <h2 className="font-serif text-white text-3xl sm:text-4xl mb-5 leading-tight">
-            Payroll and compliance, under control.
+            See Slipdesk in action.
           </h2>
           <p className="text-white/50 mb-8 leading-relaxed text-sm sm:text-base">
-            Join Liberian businesses running payroll, automating LRA and NASSCORP compliance,
-            and keeping complete payroll transparency, all from one secure platform.
+            Explore the interactive demo of a Liberian construction company, or book a
+            live walkthrough with our team. Access is invite-only after purchase.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link
-              href="/signup"
+              href="/demo"
               className="inline-flex items-center justify-center gap-2 px-7 sm:px-8 py-3.5 sm:py-4 bg-em text-navy font-bold rounded-xl hover-em transition-colors text-base sm:text-lg"
             >
-              Start Free Demo
+              Explore Interactive Demo
               <ArrowRight className="w-5 h-5" />
             </Link>
-            <Link
-              href="/support"
+            <a
+              href={bookDemoUrl()}
               className="inline-flex items-center justify-center gap-2 px-7 sm:px-8 py-3.5 sm:py-4 border border-emerald-500/40 text-emerald-400 rounded-xl hover:bg-emerald-500/10 transition-colors text-base sm:text-lg"
             >
-              Book a Demo
+              Book a Live Demo
               <ChevronRight className="w-5 h-5" />
-            </Link>
+            </a>
           </div>
           <p className="mt-6 text-white/30 text-sm font-mono">
             <Lock className="w-3 h-3 inline mr-1" />

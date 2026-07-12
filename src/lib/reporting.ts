@@ -97,6 +97,14 @@ export interface GroupBucket {
   net: number;
 }
 
+export type Cell = string | number;
+
+export const fmtUSD = (n: number) =>
+  `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+export const fmtMoney = (n: number, currency: string) =>
+  `${currency === "USD" ? "$" : "L$"}${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 export function groupByDepartment(rows: EmployeePayroll[]): GroupBucket[] {
   const map = new Map<string, GroupBucket>();
   for (const r of rows) {
@@ -108,6 +116,83 @@ export function groupByDepartment(rows: EmployeePayroll[]): GroupBucket[] {
     map.set(key, b);
   }
   return [...map.values()].sort((a, b) => b.gross - a.gross);
+}
+
+export function groupByBranch(rows: EmployeePayroll[]): GroupBucket[] {
+  const map = new Map<string, GroupBucket>();
+  for (const r of rows) {
+    const key = r.employee.branch?.trim() || r.employee.county?.trim() || "Unassigned";
+    const b = map.get(key) ?? { key, employees: 0, gross: 0, net: 0 };
+    b.employees += 1;
+    b.gross += r.usd.gross;
+    b.net += r.usd.net;
+    map.set(key, b);
+  }
+  return [...map.values()].sort((a, b) => b.gross - a.gross);
+}
+
+export type CustomReportColumn =
+  | "employeeNumber"
+  | "fullName"
+  | "department"
+  | "branch"
+  | "currency"
+  | "gross"
+  | "incomeTax"
+  | "nasscorpEe"
+  | "net";
+
+export const CUSTOM_REPORT_COLUMNS: { id: CustomReportColumn; label: string }[] = [
+  { id: "employeeNumber", label: "Emp #" },
+  { id: "fullName", label: "Name" },
+  { id: "department", label: "Department" },
+  { id: "branch", label: "Branch" },
+  { id: "currency", label: "Currency" },
+  { id: "gross", label: "Gross" },
+  { id: "incomeTax", label: "Income Tax" },
+  { id: "nasscorpEe", label: "NASSCORP EE" },
+  { id: "net", label: "Net" },
+];
+
+export function buildCustomReport(
+  rows: EmployeePayroll[],
+  columns: CustomReportColumn[],
+  groupBy?: "department" | "branch" | null,
+): { headers: string[]; dataRows: Cell[][]; total?: Cell[] } {
+  const cols = columns.length ? columns : CUSTOM_REPORT_COLUMNS.map((c) => c.id);
+  const headers = cols.map((id) => CUSTOM_REPORT_COLUMNS.find((c) => c.id === id)?.label ?? id);
+
+  const sourceRows = rows;
+  if (groupBy === "department" || groupBy === "branch") {
+    const groups = groupBy === "department" ? groupByDepartment(rows) : groupByBranch(rows);
+    const dataRows: Cell[][] = groups.map((g) => cols.map((id) => {
+      if (id === "fullName" || id === "employeeNumber") return g.key;
+      if (id === "department" || id === "branch") return g.key;
+      if (id === "gross") return fmtUSD(g.gross);
+      if (id === "net") return fmtUSD(g.net);
+      if (id === "currency") return "USD";
+      if (id === "incomeTax" || id === "nasscorpEe") return "—";
+      return g.employees;
+    }));
+    return { headers, dataRows };
+  }
+
+  const dataRows: Cell[][] = sourceRows.map((r) => cols.map((id) => cellFor(r, id)));
+  return { headers, dataRows };
+}
+
+function cellFor(r: EmployeePayroll, id: CustomReportColumn): Cell {
+  switch (id) {
+    case "employeeNumber": return r.employee.employeeNumber;
+    case "fullName": return r.employee.fullName;
+    case "department": return r.employee.department || "—";
+    case "branch": return r.employee.branch || r.employee.county || "—";
+    case "currency": return r.employee.currency;
+    case "gross": return fmtMoney(r.result.grossPay, r.employee.currency);
+    case "incomeTax": return fmtMoney(r.result.Paye.taxInBase, r.employee.currency);
+    case "nasscorpEe": return fmtMoney(r.result.nasscorp.employeeContribution, r.employee.currency);
+    case "net": return fmtMoney(r.result.netPay, r.employee.currency);
+  }
 }
 
 export function currencyDistribution(rows: EmployeePayroll[]): { currency: string; count: number }[] {
@@ -298,8 +383,6 @@ function triggerDownload(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export type Cell = string | number;
-
 export function downloadCSV(filename: string, headers: string[], rows: Cell[][]) {
   const escape = (v: Cell) => {
     const s = String(v ?? "");
@@ -328,9 +411,3 @@ export function downloadExcel(filename: string, sheets: SheetSpec[]) {
   });
   triggerDownload(blob, filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`);
 }
-
-export const fmtUSD = (n: number) =>
-  `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-export const fmtMoney = (n: number, currency: string) =>
-  `${currency === "USD" ? "$" : "L$"}${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

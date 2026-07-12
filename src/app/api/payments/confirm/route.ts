@@ -4,6 +4,7 @@ import { Resend } from "resend";
 import { resendFromAddress } from "@/lib/email/resend-from";
 import { resolveCompanyIdForUser, paymentsDb } from "@/lib/payments/server";
 import { buildPaymentReceiptUpdate } from "@/lib/payments/receipt";
+import { assertNotDemoCompany } from "@/lib/demo/assert-not-demo";
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
@@ -21,6 +22,9 @@ export async function POST(req: NextRequest) {
   if (!companyId) {
     return NextResponse.json({ error: "Company not found" }, { status: 400 });
   }
+
+  const blocked = await assertNotDemoCompany(supabase, companyId);
+  if (blocked) return blocked;
 
   const admin = paymentsDb();
 

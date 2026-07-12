@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Users, FileText, Settings,
   LogOut, ChevronRight, Bell, Menu, X, CreditCard, Loader,
-  BarChart3, ShieldCheck, FileBarChart, ScrollText, UserCog,
+  BarChart3, ShieldCheck, FileBarChart, ScrollText, UserCog, Network, CalendarDays,
   AlertTriangle, CheckCircle2, Info,
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
@@ -19,6 +19,7 @@ import { visibleNavItems as filterNavItems, type NavItemDef } from "@/lib/nav";
 import { fetchNotifications, markAllNotificationsRead, type AppNotification } from "@/lib/notifications";
 import { performSignOut } from "@/lib/sign-out";
 import { isPlatformAdminRole } from "@/lib/auth/platform-admin";
+import { DemoGuardProvider } from "@/components/demo/DemoGuard";
 
 interface NavItem extends NavItemDef {
   icon: typeof LayoutDashboard;
@@ -28,6 +29,8 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard",  label: "Dashboard",  icon: LayoutDashboard },
   { href: "/employees",  label: "Employees",  icon: Users,        permission: "employee:view" },
   { href: "/payroll",    label: "Payroll",    icon: FileText,     permission: "payroll:view" },
+  { href: "/payroll/calendar", label: "Calendar", icon: CalendarDays, feature: "payrollCalendar", permission: "payroll:view" },
+  { href: "/organization", label: "Organization", icon: Network, feature: "departmentManagement", permission: "company:manage" },
   { href: "/analytics",  label: "Analytics",  icon: BarChart3,    feature: "payrollAnalytics", permission: "analytics:view" },
   { href: "/compliance", label: "Compliance", icon: ShieldCheck,  feature: "complianceDashboard", permission: "compliance:view" },
   { href: "/reports",    label: "Reports",    icon: FileBarChart, permission: "report:view" },
@@ -438,8 +441,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <>
       {STYLES}
-      {/* Removed overflow-hidden from outer div — it was blocking sidebar clicks */}
-      <div className="flex h-screen bg-slate-50">
+      <DemoGuardProvider>
+      <div className="flex flex-1 min-h-0 bg-slate-50">
 
         {/* Desktop sidebar */}
         <aside className="hidden md:flex flex-col flex-shrink-0 w-60 bg-navy">
@@ -493,6 +496,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </main>
         </div>
       </div>
+      </DemoGuardProvider>
     </>
   );
 }

@@ -3,9 +3,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isPlatformAdminRole } from "@/lib/auth/platform-admin";
 
 const PROTECTED_PREFIXES = [
-  "/dashboard", "/employees", "/payroll", "/analytics", "/compliance",
+  "/dashboard", "/employees", "/payroll", "/organization", "/analytics", "/compliance",
   "/reports", "/audit", "/team", "/notifications", "/billing", "/settings", "/admin",
 ];
+// Note: /api/v1/* uses Bearer API keys — intentionally not cookie-protected here.
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });

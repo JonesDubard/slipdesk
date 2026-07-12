@@ -1,17 +1,18 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
   PieChart, Pie, Cell, LineChart, Line, Legend,
 } from "recharts";
-import { Users, DollarSign, Building2, TrendingUp, FileText } from "lucide-react";
+import { Users, DollarSign, Building2, TrendingUp, FileText, Crown } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { getEffectiveTier, canUse, PLAN_LABELS } from "@/lib/plan-features";
 import { can } from "@/lib/rbac";
 import {
   computePayroll, sumTotals, groupByDepartment, currencyDistribution, fmtUSD,
 } from "@/lib/reporting";
+import type { ExecutiveMetrics } from "@/lib/analytics/executive";
 import {
   ModuleShell, ModuleHeader, Card, StatTile, UpgradeNotice,
 } from "@/components/module-ui";
@@ -21,6 +22,24 @@ const CHART_COLORS = ["#50C878", "#002147", "#3B82F6", "#8B5CF6", "#F59E0B", "#E
 export default function AnalyticsPage() {
   const { employees, company, role, loading } = useApp();
   const effectiveTier = getEffectiveTier(company.subscriptionTier, company.billingBypass);
+  const [exec, setExec] = useState<ExecutiveMetrics | null>(null);
+  const showExec = canUse("executiveAnalytics", effectiveTier) && can(role, "analytics:executive");
+
+  useEffect(() => {
+    if (!showExec) { setExec(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/analytics/executive");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setExec(data);
+      } catch {
+        /* non-fatal */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [showExec, company.id]);
 
   const data = useMemo(() => {
     const active = employees.filter((e) => e.isActive && !e.isArchived);
@@ -28,11 +47,9 @@ export default function AnalyticsPage() {
     const totals = sumTotals(rows);
     const byDept = groupByDepartment(rows);
     const byCurrency = currencyDistribution(rows);
-    const branches = new Set(active.map((e) => e.county?.trim()).filter(Boolean));
+    const branches = new Set(active.map((e) => (e.branch || e.county)?.trim()).filter(Boolean));
     const departments = new Set(active.map((e) => e.department?.trim()).filter(Boolean));
 
-    // Synthetic 6-month trend derived from the current run (until historical
-    // pay_runs data is wired in). Gives execs a directional view.
     const months = ["Feb", "Mar", "Apr", "May", "Jun", "Jul"];
     const trend = months.map((m, i) => ({
       month: m,
@@ -63,8 +80,6 @@ export default function AnalyticsPage() {
     );
   }
 
-  const isExec = can(role, "analytics:executive");
-
   return (
     <ModuleShell>
       <ModuleHeader
@@ -72,7 +87,6 @@ export default function AnalyticsPage() {
         subtitle={loading ? "Loading…" : `${data.active.length} active employees · USD equivalent`}
       />
 
-      {/* KPI tiles */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, marginBottom: 20 }}>
         <StatTile label="Total Employees" value={data.active.length} sub={`${employees.length} on record`} />
         <StatTile label="Monthly Payroll" value={fmtUSD(data.totals.gross)} accent sub="Gross, USD equiv." />
@@ -84,7 +98,29 @@ export default function AnalyticsPage() {
         <StatTile label="Net Payout" value={fmtUSD(data.totals.net)} sub="After deductions" />
       </div>
 
-      {/* Charts */}
+      {showExec && (
+        <Card style={{ marginBottom: 16 }} data-testid="executive-analytics">
+          <ChartTitle icon={<Crown size={14} />} title="Executive Snapshot" hint="Enterprise · live aggregates" />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 12 }}>
+            <StatTile label="Active Headcount" value={exec?.headcount.active ?? data.active.length} />
+            <StatTile label="Latest Gross" value={fmtUSD(exec?.payroll.latestGross ?? data.totals.gross)} />
+            <StatTile label="Pay Runs" value={exec?.payroll.runCount ?? 0} />
+            <StatTile label="Branches" value={exec?.headcount.branches ?? data.branches.size} />
+          </div>
+          {exec?.trend?.length ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={exec.trend} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" />
+                <YAxis tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" />
+                <Tooltip formatter={(value) => fmtUSD(Number(value))} />
+                <Line type="monotone" dataKey="gross" stroke="#002147" strokeWidth={2.5} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : null}
+        </Card>
+      )}
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, marginBottom: 16 }}>
         <Card>
           <ChartTitle icon={<TrendingUp size={14} />} title="Payroll Trend" hint="Gross payroll, USD" />
@@ -131,11 +167,11 @@ export default function AnalyticsPage() {
           </ResponsiveContainer>
         </Card>
 
-        {isExec && (
+        {showExec && (
           <Card>
             <ChartTitle icon={<Users size={14} />} title="Employee Growth" hint="Headcount trend (executive)" />
             <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={data.trend} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
+              <BarChart data={exec?.trend?.length ? exec.trend.map((t) => ({ month: t.label, employees: t.headcount })) : data.trend} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" />
                 <YAxis tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" allowDecimals={false} />
@@ -147,7 +183,6 @@ export default function AnalyticsPage() {
         )}
       </div>
 
-      {/* Department table */}
       <Card>
         <ChartTitle icon={<FileText size={14} />} title="Department Breakdown" />
         <div style={{ overflowX: "auto" }}>
@@ -185,17 +220,20 @@ export default function AnalyticsPage() {
 
 function ChartTitle({ icon, title, hint }: { icon: React.ReactNode; title: string; hint?: string }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
       <span style={{ color: "var(--primary)" }}>{icon}</span>
-      <span style={{ color: "var(--foreground)", fontWeight: 700, fontSize: 14 }}>{title}</span>
-      {hint && <span style={{ color: "var(--muted-foreground)", fontSize: 11, marginLeft: "auto", fontFamily: "'DM Mono',monospace" }}>{hint}</span>}
+      <div>
+        <p style={{ margin: 0, fontWeight: 700, fontSize: 13.5 }}>{title}</p>
+        {hint && <p style={{ margin: 0, fontSize: 11, color: "var(--muted-foreground)" }}>{hint}</p>}
+      </div>
     </div>
   );
 }
 
 const thStyle: React.CSSProperties = {
-  padding: "10px 12px", background: "var(--background)", borderBottom: "1px solid var(--border)",
-  fontSize: 10, fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.08em",
-  textTransform: "uppercase", fontFamily: "'DM Mono',monospace", textAlign: "left", whiteSpace: "nowrap",
+  textAlign: "left", padding: "8px 10px", fontSize: 11, fontFamily: "'DM Mono',monospace",
+  color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)", fontWeight: 600,
 };
-const tdStyle: React.CSSProperties = { padding: "11px 12px", fontSize: 12, color: "var(--foreground)" };
+const tdStyle: React.CSSProperties = {
+  padding: "10px", fontSize: 13, color: "var(--foreground)",
+};

@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { calculateMonthlyFee } from "@/lib/billing/tiered-pricing";
 import { requestToPay } from "@/lib/mtn-momo/client";
 import { v4 as uuidv4 } from "uuid";
+import { assertNotDemoCompany } from "@/lib/demo/assert-not-demo";
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,6 +21,9 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (!company) return NextResponse.json({ error: "Company not found" }, { status: 404 });
+
+    const blocked = await assertNotDemoCompany(supabase, company.id);
+    if (blocked) return blocked;
     if (!company.mtn_momo_phone) {
       return NextResponse.json({ error: "No MTN MoMo phone number set for company. Please update your settings." }, { status: 400 });
     }

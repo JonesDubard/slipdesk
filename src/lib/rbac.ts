@@ -19,26 +19,53 @@ export type Role =
   | "finance_manager"
   | "hr_manager"
   | "auditor"
-  | "executive";
+  | "executive"
+  | "employee";
+
+/** Simplified RBAC families shown in product copy: Admin / Manager / Employee. */
+export type RoleFamily = "admin" | "manager" | "employee";
 
 export const ROLE_LABELS: Record<Role, string> = {
   super_admin: "Super Admin",
-  company_owner: "Company Owner",
-  payroll_officer: "Payroll Officer",
+  company_owner: "Company Owner (Admin)",
+  payroll_officer: "Payroll Officer (Manager)",
   finance_manager: "Finance Manager",
   hr_manager: "HR Manager",
   auditor: "Auditor",
   executive: "Executive (Read Only)",
+  employee: "Employee",
 };
 
 export const ROLE_DESCRIPTIONS: Record<Role, string> = {
   super_admin: "Full platform access, including cross-company administration.",
-  company_owner: "Owns the company account and controls all settings and billing.",
-  payroll_officer: "Creates and edits payroll runs and manages employees.",
-  finance_manager: "Reviews and approves payroll from a financial standpoint.",
-  hr_manager: "Manages employees and approves payroll from an HR standpoint.",
+  company_owner: "Admin — owns the company account and controls settings, billing, and users.",
+  payroll_officer: "Manager — creates and edits payroll runs and manages employees.",
+  finance_manager: "Manager — reviews and approves payroll from a financial standpoint.",
+  hr_manager: "Manager — manages employees and approves payroll from an HR standpoint.",
   auditor: "Read-only access to audit logs, reports and compliance.",
   executive: "Read-only executive dashboards and high-level analytics.",
+  employee: "Employee — view own payslip-related info; no company admin access.",
+};
+
+export const ROLE_FAMILY: Record<Role, RoleFamily> = {
+  super_admin: "admin",
+  company_owner: "admin",
+  payroll_officer: "manager",
+  finance_manager: "manager",
+  hr_manager: "manager",
+  auditor: "manager",
+  executive: "manager",
+  employee: "employee",
+};
+
+export function roleFamily(role: Role): RoleFamily {
+  return ROLE_FAMILY[role] ?? "employee";
+}
+
+export const ROLE_FAMILY_LABELS: Record<RoleFamily, string> = {
+  admin: "Admin",
+  manager: "Manager",
+  employee: "Employee",
 };
 
 export type Permission =
@@ -116,6 +143,9 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "report:view", "analytics:view", "analytics:executive",
     "notifications:view",
   ],
+  employee: [
+    "notifications:view",
+  ],
 };
 
 /** Legacy `profiles.role` → new Role. */
@@ -128,11 +158,14 @@ export function normalizeRole(raw: string | null | undefined): Role {
     case "hr_manager":
     case "auditor":
     case "executive":
+    case "employee":
       return raw;
     case "admin":
       return "company_owner";
     case "owner":
       return "company_owner";
+    case "manager":
+      return "payroll_officer";
     case "member":
     default:
       return "payroll_officer";

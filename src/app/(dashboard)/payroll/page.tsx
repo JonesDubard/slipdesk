@@ -11,7 +11,7 @@ import {
   AlertTriangle, CheckCircle2, Upload, ChevronRight,
   FileText, Lock, Play, Clock, Download, FileDown,
   Loader, Plus, Calendar, RefreshCw, DollarSign, Users,
-  TrendingUp, Zap, Shield,
+  TrendingUp, Zap, Shield, Mail,
 } from "lucide-react";
 import { calculatePayroll } from "@/lib/slipdesk-payroll-engine";
 import type { PayRunLine } from "@/lib/mock-data";
@@ -25,6 +25,7 @@ import { canGeneratePayslips, recordPayslipGeneration, getDistinctEmployeeIdsGen
 import { can, type Permission } from "@/lib/rbac";
 import { logAudit, type AuditAction } from "@/lib/audit";
 import { createNotification, sendEmailNotification, type NotificationType, type NotificationSeverity } from "@/lib/notifications";
+import { useDemoGuard } from "@/components/demo/DemoGuard";
 
 const PDF_NAVY    = "#002147";
 const PDF_EMERALD = "#50C878";
@@ -59,6 +60,8 @@ interface PdfCompany {
   name:string; tin:string; nasscorpRegNo:string;
   address:string; phone:string; email:string; logoUrl:string|null;
   payslipFooter?:string;
+  brandPrimaryColor?:string;
+  brandSecondaryColor?:string;
 }
 
 
@@ -148,57 +151,59 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
   const {calc,currency}=line;
   if(!calc) throw new Error("No calculation data");
   const sym=currency==="USD"?"$":"L$";
+  const NAVY = company.brandPrimaryColor?.trim() || PDF_NAVY;
+  const EMERALD = company.brandSecondaryColor?.trim() || PDF_EMERALD;
 
   const buildDoc = (logoSrc?: string) => {
   const S=StyleSheet.create({
     page:{fontFamily:"Helvetica",fontSize:9,color:"#1e293b",backgroundColor:"#fff",paddingHorizontal:36,paddingVertical:32},
-    header:{flexDirection:"row",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,paddingBottom:16,borderBottomWidth:2,borderBottomColor:PDF_NAVY},
+    header:{flexDirection:"row",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,paddingBottom:16,borderBottomWidth:2,borderBottomColor:NAVY},
     coLeft:{flexDirection:"row",alignItems:"center",gap:10},logo:{width:48,height:48,objectFit:"contain"},
-    coName:{fontSize:16,fontFamily:"Helvetica-Bold",color:PDF_NAVY,marginBottom:3},
+    coName:{fontSize:16,fontFamily:"Helvetica-Bold",color:NAVY,marginBottom:3},
     coMeta:{fontSize:8,color:PDF_SLATE,lineHeight:1.5},
-    badge:{backgroundColor:PDF_NAVY,paddingHorizontal:12,paddingVertical:6,borderRadius:4},
+    badge:{backgroundColor:NAVY,paddingHorizontal:12,paddingVertical:6,borderRadius:4},
     badgeText:{fontSize:10,fontFamily:"Helvetica-Bold",color:"#fff",letterSpacing:1},
     infoGrid:{flexDirection:"row",gap:12,marginBottom:18},
     infoBox:{flex:1,backgroundColor:PDF_LIGHT,borderRadius:6,padding:10,borderWidth:1,borderColor:PDF_BORDER},
     infoLbl:{fontSize:7,fontFamily:"Helvetica-Bold",color:PDF_SLATE,textTransform:"uppercase",letterSpacing:0.5,marginBottom:2},
-    infoVal:{fontSize:9,color:PDF_NAVY,fontFamily:"Helvetica-Bold"},infoSub:{fontSize:8,color:"#374151"},
+    infoVal:{fontSize:9,color:NAVY,fontFamily:"Helvetica-Bold"},infoSub:{fontSize:8,color:"#374151"},
     secTitle:{fontSize:8,fontFamily:"Helvetica-Bold",color:PDF_SLATE,textTransform:"uppercase",letterSpacing:0.8,marginBottom:6,marginTop:14},
     table:{borderWidth:1,borderColor:PDF_BORDER,borderRadius:6,overflow:"hidden"},
-    tHead:{flexDirection:"row",backgroundColor:PDF_NAVY,paddingHorizontal:10,paddingVertical:6},
+    tHead:{flexDirection:"row",backgroundColor:NAVY,paddingHorizontal:10,paddingVertical:6},
     thDesc:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:"#fff",width:140},
     thNotes:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:"#fff",flex:1},
     thAmt:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:"#fff",textAlign:"right",width:90},
     tRow:{flexDirection:"row",paddingHorizontal:10,paddingVertical:8,borderTopWidth:1,borderTopColor:PDF_BORDER,alignItems:"flex-start"},
     tAlt:{backgroundColor:PDF_LIGHT},
-    tdDesc:{width:140,fontSize:8.5,fontFamily:"Helvetica-Bold",color:PDF_NAVY},
+    tdDesc:{width:140,fontSize:8.5,fontFamily:"Helvetica-Bold",color:NAVY},
     tdNotes:{flex:1,fontSize:8,color:"#374151",lineHeight:1.6},
     tdAmt:{width:90,fontSize:8.5,color:"#374151",textAlign:"right"},
-    tdAmtBold:{width:90,fontSize:8.5,fontFamily:"Helvetica-Bold",color:PDF_NAVY,textAlign:"right"},
+    tdAmtBold:{width:90,fontSize:8.5,fontFamily:"Helvetica-Bold",color:NAVY,textAlign:"right"},
     tdRed:{width:90,fontSize:8.5,color:"#dc2626",textAlign:"right"},
     tdNote:{flex:1,fontSize:7.5,color:PDF_SLATE,lineHeight:1.5},
     erBox:{marginTop:10,backgroundColor:PDF_LIGHT,borderRadius:6,padding:8,borderWidth:1,borderColor:PDF_BORDER},
     erLabel:{fontSize:7,fontFamily:"Helvetica-Bold",color:PDF_SLATE,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4},
     erRow:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},
-    erText:{fontSize:7.5,color:PDF_SLATE},erAmount:{fontSize:8,fontFamily:"Helvetica-Bold",color:PDF_NAVY},
-    netBox:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",backgroundColor:PDF_NAVY,borderRadius:6,paddingHorizontal:14,paddingVertical:10,marginTop:12},
+    erText:{fontSize:7.5,color:PDF_SLATE},erAmount:{fontSize:8,fontFamily:"Helvetica-Bold",color:NAVY},
+    netBox:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",backgroundColor:NAVY,borderRadius:6,paddingHorizontal:14,paddingVertical:10,marginTop:12},
     netLabel:{fontSize:10,fontFamily:"Helvetica-Bold",color:"#fff"},
-    netValue:{fontSize:16,fontFamily:"Helvetica-Bold",color:PDF_EMERALD,textAlign:"right"},
+    netValue:{fontSize:16,fontFamily:"Helvetica-Bold",color:EMERALD,textAlign:"right"},
     netWords:{backgroundColor:PDF_LIGHT,borderRadius:6,paddingHorizontal:12,paddingVertical:7,marginTop:6,borderWidth:1,borderColor:PDF_BORDER,flexDirection:"row",alignItems:"center",gap:6},
     netWordsLbl:{fontSize:7,fontFamily:"Helvetica-Bold",color:PDF_SLATE,textTransform:"uppercase",letterSpacing:0.4},
-    netWordsTxt:{fontSize:8,color:PDF_NAVY,fontFamily:"Helvetica-Bold",flex:1},
+    netWordsTxt:{fontSize:8,color:NAVY,fontFamily:"Helvetica-Bold",flex:1},
     payBox:{marginTop:10,backgroundColor:"#f0fdf4",borderRadius:6,padding:8,borderWidth:1,borderColor:"#86efac"},
     payLbl:{fontSize:7,fontFamily:"Helvetica-Bold",color:"#166534",textTransform:"uppercase",letterSpacing:0.5,marginBottom:4},
     payRow:{flexDirection:"row",gap:20,flexWrap:"wrap"},payItem:{flex:1,minWidth:120},
-    payItemLbl:{fontSize:7,color:"#166534",marginBottom:1},payItemVal:{fontSize:8.5,fontFamily:"Helvetica-Bold",color:PDF_NAVY},
+    payItemLbl:{fontSize:7,color:"#166534",marginBottom:1},payItemVal:{fontSize:8.5,fontFamily:"Helvetica-Bold",color:NAVY},
     compRow:{flexDirection:"row",gap:8,marginTop:10},
     compBadge:{flex:1,flexDirection:"row",alignItems:"center",gap:4,backgroundColor:"#f0fdf4",borderWidth:1,borderColor:"#86efac",borderRadius:4,paddingHorizontal:8,paddingVertical:5},
-    compDot:{width:5,height:5,borderRadius:3,backgroundColor:PDF_EMERALD},
+    compDot:{width:5,height:5,borderRadius:3,backgroundColor:EMERALD},
     compText:{fontSize:7.5,color:"#166534",fontFamily:"Helvetica-Bold"},
     sigSection:{flexDirection:"row",gap:30,marginTop:24,paddingTop:16,borderTopWidth:1,borderTopColor:PDF_BORDER},
     sigBox:{flex:1},sigLine:{borderBottomWidth:1,borderBottomColor:"#cbd5e1",marginBottom:4,height:20},
     sigLabel:{fontSize:7.5,color:PDF_SLATE,textAlign:"center"},
     footer:{marginTop:16,paddingTop:10,borderTopWidth:1,borderTopColor:PDF_BORDER,flexDirection:"row",justifyContent:"space-between",alignItems:"center"},
-    footerTxt:{fontSize:7,color:"#94a3b8"},footerBrand:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:PDF_NAVY},
+    footerTxt:{fontSize:7,color:"#94a3b8"},footerBrand:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:NAVY},
   });
   const earningsRows=[
     {label:"Regular Salary",note:`${line.regularHours} hrs × ${sym}${line.rate.toFixed(2)}/hr`,amount:calc.regularSalary},
@@ -342,11 +347,13 @@ function DownloadSlipButton({
 }) {
   const { toast } = useToast();
   const { company: appCompany } = useApp();
+  const { guardAction } = useDemoGuard();
   const [loading, setLoading] = useState(false);
   const [wasCounted, setWasCounted] = useState(false); // track if already counted this session
 
   async function handle() {
     if (!line.calc) return;
+    if (!guardAction("export_download")) return;
     setLoading(true);
     try {
       // ── Check limit before generating (only if not already counted for this employee this session) ──
@@ -433,12 +440,14 @@ function BulkDownloadButton({
 }) {
   const { toast } = useToast();
   const { company: appCompany } = useApp();
+  const { guardAction } = useDemoGuard();
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const valid = lines.filter((l) => l.calc !== null);
 
   async function handleAll() {
     if (!valid.length) return;
+    if (!guardAction("export_download")) return;
 
     setLoading(true);
 
@@ -523,6 +532,107 @@ function BulkDownloadButton({
           All Payslips ({valid.length})
         </>
       )}
+    </button>
+  );
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      const b64 = result.includes(",") ? result.split(",")[1] : result;
+      resolve(b64);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+/** Email generated payslip PDFs to employees via Resend (server). */
+function EmailPayslipsButton({
+  lines,
+  periodLabel,
+  payDate,
+  company,
+}: {
+  lines: PayRunLine[];
+  periodLabel: string;
+  payDate: string;
+  company: PdfCompany;
+}) {
+  const { toast } = useToast();
+  const { company: appCompany, employees } = useApp();
+  const { guardAction } = useDemoGuard();
+  const [loading, setLoading] = useState(false);
+  const valid = lines.filter((l) => l.calc !== null);
+
+  async function handleEmail() {
+    if (!valid.length) return;
+    if (!guardAction("email_payslips")) return;
+    setLoading(true);
+    try {
+      const emailByEmpId = new Map(
+        employees.map((e) => [e.id, (e.email || "").trim().toLowerCase()]),
+      );
+      const attachments = [];
+      for (const line of valid) {
+        const to = emailByEmpId.get(line.employeeId) || "";
+        if (!to) continue;
+        const blob = await generatePayslipBlob({ line, periodLabel, payDate, company });
+        const contentBase64 = await blobToBase64(blob);
+        attachments.push({
+          to,
+          employeeName: line.fullName,
+          filename: buildFilename(line.fullName, periodLabel),
+          contentBase64,
+        });
+      }
+      if (!attachments.length) {
+        toast.error("No employee emails on file for this run.");
+        return;
+      }
+      const res = await fetch("/api/payroll/email-payslips", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          periodLabel,
+          companyName: appCompany.name,
+          emailFooter: appCompany.emailFooter,
+          attachments,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok && !data.sent) {
+        toast.error(data.errors?.[0] || data.error || "Could not send payslips.");
+        return;
+      }
+      toast.success(`Emailed ${data.sent ?? 0} payslip(s)${data.failed ? ` · ${data.failed} failed` : ""}.`);
+    } catch (e) {
+      console.error(e);
+      toast.error("Email send failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <button
+      onClick={handleEmail}
+      disabled={loading || !valid.length}
+      data-testid="email-payslips-btn"
+      style={{
+        display: "flex", alignItems: "center", gap: 7,
+        padding: "9px 16px", borderRadius: 10,
+        cursor: valid.length ? "pointer" : "not-allowed",
+        background: "transparent",
+        border: "1px solid var(--border)",
+        color: "var(--foreground)",
+        fontSize: 12, fontWeight: 700,
+      }}
+    >
+      {loading ? <Loader style={{ animation: "spin 1s linear infinite" }} size={13} /> : <Mail size={13} />}
+      Email Payslips
     </button>
   );
 }
@@ -671,6 +781,7 @@ function StatusStepper({current,onAdvance,saving=false,allowed=true,roleHint}:{c
 export default function PayrollPage() {
   const { employees, company, role, addEmployee, refreshEmployees, loading } = useApp();
   const { toast } = useToast();
+  const { guardAction } = useDemoGuard();
 
   if (loading) return <PageSkeleton />;
 
@@ -684,6 +795,8 @@ export default function PayrollPage() {
     email: company.email,
     logoUrl: canUse("companyLogo", effectiveTier) ? company.logoUrl : null,
     payslipFooter: canUse("companyBranding", effectiveTier) ? company.payslipFooter : undefined,
+    brandPrimaryColor: canUse("companyBranding", effectiveTier) ? company.brandPrimaryColor : undefined,
+    brandSecondaryColor: canUse("companyBranding", effectiveTier) ? company.brandSecondaryColor : undefined,
   };
 
   const defaultPeriod = getCurrentPeriod();
@@ -787,6 +900,7 @@ export default function PayrollPage() {
   async function advanceStatus() {
     const idx = STATUS_STEPS.indexOf(status);
     if (idx >= STATUS_STEPS.length - 1) return;
+    if (!guardAction("generate_payroll")) return;
     const next = STATUS_STEPS[idx + 1];
 
     // Approval workflow gate — the transition from the current stage requires
@@ -1752,12 +1866,20 @@ export default function PayrollPage() {
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                         {run.lines.length > 0 && (
+                          <>
                           <BulkDownloadButton
                             lines={run.lines}
                             periodLabel={run.periodLabel}
                             payDate={run.payDate}
                             company={pdfCompany}
                           />
+                          <EmailPayslipsButton
+                            lines={run.lines}
+                            periodLabel={run.periodLabel}
+                            payDate={run.payDate}
+                            company={pdfCompany}
+                          />
+                          </>
                         )}
                         <span
                           style={{
@@ -1915,6 +2037,12 @@ export default function PayrollPage() {
             </button>
           )}
           <BulkDownloadButton
+            lines={lines}
+            periodLabel={periodLabel}
+            payDate={payDate}
+            company={pdfCompany}
+          />
+          <EmailPayslipsButton
             lines={lines}
             periodLabel={periodLabel}
             payDate={payDate}
@@ -2266,12 +2394,20 @@ export default function PayrollPage() {
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                   {run.lines.length > 0 && (
+                    <>
                     <BulkDownloadButton
                       lines={run.lines}
                       periodLabel={run.periodLabel}
                       payDate={run.payDate}
                       company={pdfCompany}
                     />
+                    <EmailPayslipsButton
+                      lines={run.lines}
+                      periodLabel={run.periodLabel}
+                      payDate={run.payDate}
+                      company={pdfCompany}
+                    />
+                    </>
                   )}
                   <span
                     style={{

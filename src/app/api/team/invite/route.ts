@@ -2,9 +2,10 @@ import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { normalizeRole, type Role } from "@/lib/rbac";
 import { resendFromAddress } from "@/lib/email/resend-from";
+import { assertNotDemoCompany } from "@/lib/demo/assert-not-demo";
 
 const ASSIGNABLE: Role[] = [
-  "company_owner", "finance_manager", "hr_manager", "payroll_officer", "auditor", "executive",
+  "company_owner", "finance_manager", "hr_manager", "payroll_officer", "auditor", "executive", "employee",
 ];
 
 export async function POST(req: NextRequest) {
@@ -35,6 +36,9 @@ export async function POST(req: NextRequest) {
   if (coErr || !company) {
     return NextResponse.json({ error: "Company not found or you are not the owner." }, { status: 403 });
   }
+
+  const blocked = await assertNotDemoCompany(supabase, company.id);
+  if (blocked) return blocked;
 
   // Keep profile.company_id in sync so RLS helpers resolve for owners.
   await supabase.from("profiles").update({ company_id: company.id }).eq("id", user.id);

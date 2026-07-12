@@ -100,8 +100,8 @@ function Nav() {
 
         <div className="flex items-center gap-3">
           <Link href="/login"  className="text-sm text-white/70 hover:text-white transition-colors hidden md:inline">Sign in</Link>
-          <Link href="/signup" className="text-sm font-semibold px-4 py-2 rounded-lg bg-[#50C878] text-[#002147] hover:bg-[#3aa85f] transition-colors whitespace-nowrap">
-            Start free →
+          <Link href="/demo" className="text-sm font-semibold px-4 py-2 rounded-lg bg-[#50C878] text-[#002147] hover:bg-[#3aa85f] transition-colors whitespace-nowrap">
+            Explore Interactive Demo →
           </Link>
         </div>
       </div>
@@ -362,7 +362,7 @@ export default function SupportPage() {
                            text-white/80 text-sm hover:bg-white/20 transition-colors"
               >
                 <Phone className="w-4 h-4 text-[#50C878]" />
-                WhatsApp: +231 773 29 5060/ +231 77 793 6033
+                WhatsApp: +231 773 29 5060
               </a>
               <div className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 border border-white/20 text-white/50 text-sm">
                 <Clock className="w-4 h-4 text-[#50C878]" />
@@ -407,12 +407,12 @@ export default function SupportPage() {
                   </p>
                 </div>
                 <a
-                  href="https://wa.me/4915231657334"
+                  href="https://wa.me/231881855884"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="mt-auto text-[#50C878] text-sm font-semibold hover:underline flex items-center gap-1"
                 >
-                  +49 1523 1657 334 <ArrowRight className="w-3.5 h-3.5" />
+                  +231 881 855 884 <ArrowRight className="w-3.5 h-3.5" />
                 </a>
                 <p className="text-xs text-slate-300 font-mono">Mon – Fri, 8am – 6pm WAT</p>
               </div>
@@ -424,15 +424,15 @@ export default function SupportPage() {
                 <div>
                   <p className="font-semibold text-white text-sm">New to Slipdesk?</p>
                   <p className="text-white/50 text-xs mt-0.5 leading-relaxed">
-                    Create a free account and run your first payroll. No credit card needed — see the calculations before you pay anything.
+                    Explore our interactive demo of a Liberian construction company — payroll, compliance, and payslips — before you buy.
                   </p>
                 </div>
                 <Link
-                  href="/signup"
+                  href="/demo"
                   className="mt-auto flex items-center gap-1.5 px-4 py-2.5 bg-[#50C878] text-[#002147] rounded-xl
                              text-sm font-bold hover:bg-[#3aa85f] transition-colors w-fit"
                 >
-                  Get started free <ArrowRight className="w-3.5 h-3.5" />
+                  Explore Interactive Demo <ArrowRight className="w-3.5 h-3.5" />
                 </Link>
               </div>
 
@@ -481,17 +481,17 @@ export default function SupportPage() {
         <section className="bg-[#002147] py-14">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-6">
             <div>
-              <p className="text-white font-semibold text-lg">Ready to simplify your payroll?</p>
+              <p className="text-white font-semibold text-lg">Ready to see Slipdesk in action?</p>
               <p className="text-white/40 text-sm mt-1">
-                Join Liberian businesses running error-free, compliant payroll with Slipdesk.
+                Explore the interactive demo or book a live walkthrough with our team.
               </p>
             </div>
             <Link
-              href="/signup"
+              href="/demo"
               className="flex items-center gap-2 px-6 py-3 bg-[#50C878] text-[#002147] font-bold rounded-xl
                          hover:bg-[#3aa85f] transition-colors whitespace-nowrap flex-shrink-0"
             >
-              Start free today <ArrowRight className="w-4 h-4" />
+              Explore Interactive Demo <ArrowRight className="w-4 h-4" />
             </Link>
           </div>
         </section>

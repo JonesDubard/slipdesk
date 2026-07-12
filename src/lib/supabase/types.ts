@@ -17,6 +17,7 @@ type CompanyRow = {
   email:                  string;
   logo_url:               string | null;
   billing_bypass:         boolean;
+  is_demo?:               boolean;
   subscription_tier:      "basic" | "standard" | "premium";
   subscription_status:    "trial" | "active" | "past_due" | "cancelled";
   subscription_expires_at: string | null;

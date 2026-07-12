@@ -11,6 +11,18 @@ import { normalizeRole, type Role } from "@/lib/rbac";
 import { resolveAppRole } from "@/lib/nav";
 import { logAudit } from "@/lib/audit";
 import { createNotification } from "@/lib/notifications";
+import { DemoReadonlyError } from "@/lib/demo/errors";
+import type { DemoFeatureName } from "@/lib/demo/constants";
+
+function blockIfDemo(isDemo: boolean, feature: DemoFeatureName) {
+  if (!isDemo) return;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent("slipdesk:demo-readonly", { detail: { feature } }),
+    );
+  }
+  throw new DemoReadonlyError(feature);
+}
 
 export type Currency       = "USD" | "LRD";
 export type EmploymentType = "full_time" | "part_time" | "contractor" | "casual";
@@ -66,6 +78,8 @@ export interface CompanyProfile {
   email:                string;
   logoUrl:              string | null;
   billingBypass:        boolean;
+  /** Shared Interactive Demo tenant — all mutations are blocked. */
+  isDemo:               boolean;
   // ── NEW billing fields ──
   subscriptionTier:     SubscriptionTier;
   subscriptionStatus:   SubscriptionStatus;
@@ -85,6 +99,7 @@ export const EMPTY_COMPANY: CompanyProfile = {
   id: "", name: "", tin: "", nasscorpRegNo: "",
   address: "", phone: "", email: "", logoUrl: null,
   billingBypass: false,
+  isDemo: false,
   subscriptionTier: "basic",
   subscriptionStatus: "trial",
   subscriptionExpiresAt: null,
@@ -147,6 +162,7 @@ function dbToCompany(row: DbCompany): CompanyProfile {
     email:                row.email,
     logoUrl:              row.logo_url,
     billingBypass:        row.billing_bypass ?? false,
+    isDemo:               Boolean((row as DbCompany & { is_demo?: boolean }).is_demo),
     subscriptionTier:     (row.subscription_tier as SubscriptionTier) ?? "basic",
     subscriptionStatus:   (row.subscription_status as SubscriptionStatus) ?? "trial",
     subscriptionExpiresAt: row.subscription_expires_at ?? null,
@@ -352,6 +368,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const archivedEmployees: Employee[] = allEmployees.filter((e) =>  e.isArchived);
 
   const setCompany = useCallback(async (profile: Partial<CompanyProfile>) => {
+    blockIfDemo(company.isDemo, "settings");
     const base = {
       ...(profile.name          !== undefined && { name:            profile.name          }),
       ...(profile.tin           !== undefined && { tin:             profile.tin           }),
@@ -400,6 +417,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     data: Omit<Employee, "id" | "fullName" | "isArchived">,
     employeeNumber?: string,
   ): Promise<Employee | null> => {
+    blockIfDemo(company.isDemo, "add_employee");
     const { data: { user: currentUser } } = await supabase.auth.getUser();
     if (!currentUser) throw new Error("Not authenticated");
 
@@ -468,6 +486,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [supabase, nextEmpNumber, company.id]);
 
   const updateEmployee = useCallback(async (id: string, data: Partial<Employee>) => {
+    blockIfDemo(company.isDemo, "edit_employee");
     const prev = allEmployees.find((e) => e.id === id);
     const baseUpdate = {
       ...(data.firstName      !== undefined && { first_name:      data.firstName      }),
@@ -528,6 +547,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [supabase, allEmployees, company.id]);
 
   const archiveEmployee = useCallback(async (id: string) => {
+    blockIfDemo(company.isDemo, "delete_employee");
     if (!id || !company.id) throw new Error("Company not loaded");
     await db(supabase)
       .from("employees")
@@ -541,6 +561,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [supabase, company.id]);
 
   const restoreEmployee = useCallback(async (id: string) => {
+    blockIfDemo(company.isDemo, "edit_employee");
     if (!id || !company.id) throw new Error("Company not loaded");
     await db(supabase)
       .from("employees")
@@ -554,6 +575,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [supabase, company.id]);
 
   const hardDeleteEmployee = useCallback(async (id: string) => {
+    blockIfDemo(company.isDemo, "delete_employee");
     if (!id || !company.id) throw new Error("Company not loaded");
     await db(supabase)
       .from("employees")

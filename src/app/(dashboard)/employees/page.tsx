@@ -1670,6 +1670,7 @@ import { useToast } from "@/components/Toast";
 import PageSkeleton from "@/components/PageSkeleton";
 import { createClient } from "@/lib/supabase/client";
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
+import { useDemoGuard } from "@/components/demo/DemoGuard";
 
 function parseDateToISO(dateStr: string | undefined): string {
   if (!dateStr) return "";
@@ -2754,6 +2755,7 @@ export default function EmployeesPage() {
   const { employees, archivedEmployees, addEmployee, updateEmployee, archiveEmployee, hardDeleteEmployee, restoreEmployee, refreshEmployees, loading, company } = useApp();
   const effectiveTier = getEffectiveTier(company.subscriptionTier, company.billingBypass);
   const allowLRD = canUse("dualCurrency", effectiveTier);
+  const { guardAction } = useDemoGuard();
 
   const { toast } = useToast();
 
@@ -2811,6 +2813,9 @@ export default function EmployeesPage() {
   const atLimit       = currentLimit !== Infinity && activeCount >= currentLimit;
 
   async function handleBulkImport(rows: Partial<Employee>[]): Promise<ImportResult> {
+    if (!guardAction("import_employees")) {
+      return { imported: 0, skipped: [{ rowNum: 0, name: "Import", reasons: ["Demo read-only"] }] };
+    }
     const existingNums = allEmployees
       .map((e) => parseInt(e.employeeNumber.replace(/\D/g, ""), 10))
       .filter(Boolean);
@@ -2881,24 +2886,36 @@ export default function EmployeesPage() {
     }
   }
 
-  function openAdd()           { setDrawerEmp(undefined); setShowDrawer(true); }
-  function openEdit(e: Employee) { setDrawerEmp(e);         setShowDrawer(true); }
+  function openAdd() {
+    if (!guardAction("add_employee")) return;
+    setDrawerEmp(undefined);
+    setShowDrawer(true);
+  }
+  function openEdit(e: Employee) {
+    if (!guardAction("edit_employee")) return;
+    setDrawerEmp(e);
+    setShowDrawer(true);
+  }
 
   async function handleArchive(id: string) {
+    if (!guardAction("delete_employee")) return;
     await archiveEmployee(id);
     toast.success("Employee archived.");
   }
   async function handleRestore(id: string) {
+    if (!guardAction("edit_employee")) return;
     await restoreEmployee(id);
     toast.success("Employee restored.");
   }
   async function handleDelete(id: string) {
+    if (!guardAction("delete_employee")) return;
     await hardDeleteEmployee(id);
     setSelected((prev) => { const n = new Set(prev); n.delete(id); return n; });
     toast.success("Employee deleted.");
   }
 
   async function handleBulkArchive() {
+    if (!guardAction("delete_employee")) return;
     const ids = Array.from(selected);
     setSelected(new Set());
     let successCount = 0;

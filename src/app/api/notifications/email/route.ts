@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
 import { resendFromAddress } from "@/lib/email/resend-from";
+import { assertNotDemoForUser } from "@/lib/demo/assert-not-demo";
 
 /**
  * Sends a branded Slipdesk notification email via Resend.
@@ -14,6 +15,9 @@ export async function POST(req: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { blocked } = await assertNotDemoForUser(supabase, user.id);
+  if (blocked) return blocked;
 
   const body = await req.json().catch(() => ({}));
   const {

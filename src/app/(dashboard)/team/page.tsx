@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { UserPlus, Shield, Trash2, Mail, Crown, Loader, CheckCircle2, AlertTriangle } from "lucide-react";
 import { useApp } from "@/context/AppContext";
-import { can, ROLE_LABELS, ROLE_DESCRIPTIONS, type Role } from "@/lib/rbac";
+import { can, ROLE_LABELS, ROLE_DESCRIPTIONS, ROLE_FAMILY_LABELS, roleFamily, type Role } from "@/lib/rbac";
+import { canUse, getEffectiveTier, PLAN_LABELS } from "@/lib/plan-features";
 import { logAudit } from "@/lib/audit";
 import { createNotification } from "@/lib/notifications";
 import {
@@ -15,7 +16,7 @@ import {
 
 // Roles that a company admin may assign to teammates (super_admin is platform-only).
 const ASSIGNABLE_ROLES: Role[] = [
-  "company_owner", "finance_manager", "hr_manager", "payroll_officer", "auditor", "executive",
+  "company_owner", "finance_manager", "hr_manager", "payroll_officer", "auditor", "executive", "employee",
 ];
 
 const selectStyle: React.CSSProperties = {
@@ -25,6 +26,8 @@ const selectStyle: React.CSSProperties = {
 
 export default function TeamPage() {
   const { company, user, role } = useApp();
+  const effectiveTier = getEffectiveTier(company.subscriptionTier, company.billingBypass);
+  const planOk = canUse("advancedRoles", effectiveTier);
 
   const [members, setMembers] = useState<CompanyMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,7 +39,7 @@ export default function TeamPage() {
   const allowed = can(role, "users:manage");
 
   useEffect(() => {
-    if (!allowed || !company.id) { setLoading(false); return; }
+    if (!allowed || !planOk || !company.id) { setLoading(false); return; }
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -48,7 +51,7 @@ export default function TeamPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [company.id, allowed]);
+  }, [company.id, allowed, planOk]);
 
   async function reload() {
     setMembers(await fetchMembers(company.id));
@@ -94,6 +97,16 @@ export default function TeamPage() {
 
   const pending = useMemo(() => members.filter((m) => m.status === "pending").length, [members]);
 
+  if (!planOk) {
+    return (
+      <UpgradeNotice
+        title="Team & Roles"
+        requiredPlan={PLAN_LABELS.premium}
+        description="Advanced role permissions (Admin, Manager, Employee) are available on the Enterprise plan."
+      />
+    );
+  }
+
   if (!allowed) {
     return (
       <UpgradeNotice title="Team & Roles" requiredPlan="an authorized"
@@ -105,12 +118,12 @@ export default function TeamPage() {
 
   return (
     <ModuleShell>
-      <ModuleHeader title="Team & Roles" subtitle="Invite teammates and assign granular access" />
+      <ModuleHeader title="Team & Roles" subtitle="Admin · Manager · Employee access with granular permissions" />
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 14, marginBottom: 20 }}>
         <StatTile label="Members" value={members.length + 1} accent />
         <StatTile label="Pending Invites" value={pending} />
-        <StatTile label="Roles Available" value={ASSIGNABLE_ROLES.length} />
+        <StatTile label="Role Families" value={3} sub="Admin · Manager · Employee" />
       </div>
 
       {/* Invite */}
@@ -141,7 +154,11 @@ export default function TeamPage() {
             />
           </div>
           <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value as Role)} style={selectStyle}>
-            {ASSIGNABLE_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+            {ASSIGNABLE_ROLES.map((r) => (
+              <option key={r} value={r}>
+                [{ROLE_FAMILY_LABELS[roleFamily(r)]}] {ROLE_LABELS[r]}
+              </option>
+            ))}
           </select>
           <button
             onClick={handleInvite}

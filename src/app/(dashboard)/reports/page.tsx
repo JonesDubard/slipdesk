@@ -11,6 +11,7 @@ import { can } from "@/lib/rbac";
 import {
   computePayroll, sumTotals, groupByDepartment, fmtUSD, fmtMoney,
   downloadCSV, downloadExcel, type Cell, type EmployeePayroll, type PayrollTotals,
+  CUSTOM_REPORT_COLUMNS, buildCustomReport, type CustomReportColumn,
 } from "@/lib/reporting";
 import { downloadReportPdf, type ReportSection } from "@/components/ReportPDF";
 import {
@@ -38,12 +39,22 @@ export default function ReportsPage() {
   const { employees, company, role } = useApp();
   const effectiveTier = getEffectiveTier(company.subscriptionTier, company.billingBypass);
   const [busy, setBusy] = useState<string | null>(null);
+  const [customCols, setCustomCols] = useState<CustomReportColumn[]>([
+    "employeeNumber", "fullName", "department", "gross", "net",
+  ]);
+  const [customGroup, setCustomGroup] = useState<"department" | "branch" | "">("");
 
   const active = useMemo(() => employees.filter((e) => e.isActive && !e.isArchived), [employees]);
   const rows = useMemo(() => computePayroll(active), [active]);
   const totals = useMemo(() => sumTotals(rows), [rows]);
 
   const period = new Date().toLocaleString("default", { month: "long", year: "numeric" });
+  const companyMeta = [
+    { label: "Company", value: company.name || "—" },
+    { label: "Period", value: period },
+    { label: "Employees", value: String(active.length) },
+    { label: "Gross (USD)", value: fmtUSD(totals.gross) },
+  ];
 
   if (!can(role, "report:view")) {
     return (
@@ -54,6 +65,38 @@ export default function ReportsPage() {
 
   const canExport = can(role, "report:export");
   const hasDeptReports = canUse("departmentReports", effectiveTier);
+  const hasCustom = canUse("customReports", effectiveTier);
+
+  function toggleCol(id: CustomReportColumn) {
+    setCustomCols((prev) =>
+      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id],
+    );
+  }
+
+  async function exportCustom(kind: ExportKind) {
+    setBusy(`custom-${kind}`);
+    try {
+      const built = buildCustomReport(rows, customCols, customGroup || null);
+      const fname = `Custom_Report_${period.replace(/\s+/g, "_")}`;
+      if (kind === "csv") downloadCSV(fname, built.headers, built.dataRows);
+      else if (kind === "excel") downloadExcel(fname, [{ name: "Custom", headers: built.headers, rows: built.dataRows }]);
+      else {
+        await downloadReportPdf({
+          title: "Custom Payroll Report",
+          subtitle: period,
+          companyName: company.name,
+          meta: companyMeta,
+          sections: [{
+            heading: customGroup ? `Grouped by ${customGroup}` : "Custom columns",
+            columns: built.headers.map((h) => ({ header: h, width: 1.2 })),
+            rows: built.dataRows.map((r) => r.map(String)),
+          }],
+        }, fname);
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
 
   const REPORTS: ReportDef[] = [
     {
@@ -189,13 +232,6 @@ export default function ReportsPage() {
     },
   ];
 
-  const companyMeta = [
-    { label: "Company", value: company.name || "—" },
-    { label: "Period", value: period },
-    { label: "Employees", value: String(active.length) },
-    { label: "Gross (USD)", value: fmtUSD(totals.gross) },
-  ];
-
   async function runExport(def: ReportDef, kind: ExportKind) {
     setBusy(`${def.id}-${kind}`);
     try {
@@ -256,6 +292,49 @@ export default function ReportsPage() {
           );
         })}
       </div>
+
+      <Card style={{ marginTop: 16 }} data-testid="custom-report-builder">
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <FileBarChart size={16} color="var(--primary)" />
+          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Custom report builder</h3>
+        </div>
+        {!hasCustom ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 10, background: "color-mix(in oklch, var(--primary) 8%, transparent)", border: "1px solid var(--border)" }}>
+            <Lock size={14} color="var(--muted-foreground)" />
+            <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>Custom column reports are included in {PLAN_LABELS.premium}.</span>
+          </div>
+        ) : (
+          <>
+            <p style={{ fontSize: 12, color: "var(--muted-foreground)", margin: "0 0 10px" }}>Pick columns and optional grouping, then export.</p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+              {CUSTOM_REPORT_COLUMNS.map((c) => (
+                <label key={c.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", cursor: "pointer" }}>
+                  <input type="checkbox" checked={customCols.includes(c.id)} onChange={() => toggleCol(c.id)} />
+                  {c.label}
+                </label>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <select
+                value={customGroup}
+                onChange={(e) => setCustomGroup(e.target.value as "" | "department" | "branch")}
+                style={{ padding: "8px 10px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--background)", fontSize: 12 }}
+              >
+                <option value="">No grouping</option>
+                <option value="department">Group by department</option>
+                <option value="branch">Group by branch</option>
+              </select>
+              {canExport && (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => exportCustom("pdf")} disabled={!!busy || customCols.length === 0} style={btnGhost()}><FileText size={14} /> PDF</button>
+                  <button onClick={() => exportCustom("excel")} disabled={!!busy || customCols.length === 0} style={btnGhost()}><FileSpreadsheet size={14} /> Excel</button>
+                  <button onClick={() => exportCustom("csv")} disabled={!!busy || customCols.length === 0} style={btnGhost()}><FileDown size={14} /> CSV</button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </Card>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 18, color: "var(--muted-foreground)" }}>
         <FileBarChart size={14} />

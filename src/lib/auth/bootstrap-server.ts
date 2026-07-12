@@ -91,45 +91,11 @@ export async function bootstrapUserAccount(
     return { ok: true, companyId: memberOf[0].company_id, isTeamMember: true };
   }
 
-  const trialExpires = new Date();
-  trialExpires.setDate(trialExpires.getDate() + 14);
-
-  const { data: company, error: companyErr } = await db(admin)
-    .from("companies")
-    .insert({
-      owner_id:            user.id,
-      name:                companyName || String(user.user_metadata?.company_name ?? "") || "My Company",
-      tin:                 lraTin || String(user.user_metadata?.lra_tin ?? ""),
-      nasscorp_reg_no:     "",
-      address:             "",
-      phone:               "",
-      email:               user.email ?? "",
-      logo_url:            null,
-      billing_bypass:      false,
-      subscription_tier:   "basic",
-      subscription_status: "trial",
-      subscription_expires_at: null,
-      trial_expires_at:    trialExpires.toISOString(),
-      is_locked:           false,
-      locked_reason:       null,
-      mtn_momo_phone:      null,
-      admin_email:         user.email ?? null,
-      pricing_model:       "tiered",
-    })
-    .select("id")
-    .single();
-
-  if (companyErr || !company) {
-    console.error("[bootstrap] company insert:", companyErr);
-    return { ok: false, error: "Could not create company" };
-  }
-
-  await db(admin).from("profiles").update({
-    company_id:   company.id,
-    role:         "owner",
-    company_name: companyName || String(user.user_metadata?.company_name ?? "") || "My Company",
-    tin:          lraTin || null,
-  }).eq("id", user.id);
-
-  return { ok: true, companyId: company.id, created: true };
+  // Self-serve company / free-trial creation is retired.
+  // New companies are provisioned by Slipdesk ops or via a paid onboarding path.
+  return {
+    ok: false,
+    error:
+      "Access is invite-only. If you are a customer, please sign in. For demos, explore our interactive demo.",
+  };
 }

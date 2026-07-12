@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
-import { canUse } from "@/lib/plan-features";
+import { assertNotDemoForUser } from "@/lib/demo/assert-not-demo";
 
 const TIER_LIMITS = {
   basic:    80,
@@ -12,6 +12,9 @@ export async function POST(req: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { blocked } = await assertNotDemoForUser(supabase, user.id);
+  if (blocked) return blocked;
 
   // Get company with tier info
   const { data: company } = await supabase

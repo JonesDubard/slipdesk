@@ -13,6 +13,8 @@ export const DASHBOARD_NAV_ITEMS: NavItemDef[] = [
   { href: "/dashboard",  label: "Dashboard" },
   { href: "/employees",  label: "Employees",  permission: "employee:view" },
   { href: "/payroll",    label: "Payroll",    permission: "payroll:view" },
+  { href: "/payroll/calendar", label: "Payroll Calendar", feature: "payrollCalendar", permission: "payroll:view" },
+  { href: "/organization", label: "Organization", feature: "departmentManagement", permission: "company:manage" },
   { href: "/analytics",  label: "Analytics",  feature: "payrollAnalytics", permission: "analytics:view" },
   { href: "/compliance", label: "Compliance", feature: "complianceDashboard", permission: "compliance:view" },
   { href: "/reports",    label: "Reports",    permission: "report:view" },

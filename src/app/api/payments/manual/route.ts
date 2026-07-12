@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { TIERED_PRICING } from "@/lib/billing";
 import { resolveCompanyIdForUser, paymentsDb } from "@/lib/payments/server";
+import { assertNotDemoCompany } from "@/lib/demo/assert-not-demo";
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
@@ -18,6 +19,9 @@ export async function POST(req: NextRequest) {
   if (!companyId) {
     return NextResponse.json({ error: "Company not found" }, { status: 400 });
   }
+
+  const blocked = await assertNotDemoCompany(supabase, companyId);
+  if (blocked) return blocked;
 
   const tier   = tierRequested as keyof typeof TIERED_PRICING;
   const amount = TIERED_PRICING[tier].price;

@@ -8,7 +8,9 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { useApp, type CompanyProfile, EMPTY_COMPANY } from "@/context/AppContext";
 import LogoUploader from "@/components/LogoUploader";
+import { ApiAccessPanel } from "@/components/ApiAccessPanel";
 import { canUse, getEffectiveTier, PLAN_LABELS } from "@/lib/plan-features";
+import { KeyRound } from "lucide-react";
 
 const inputStyle: React.CSSProperties = {
   width: "100%", padding: "10px 13px",
@@ -217,13 +219,24 @@ export default function SettingsPage() {
 
         <div style={{ animation: "fadeUp 0.35s ease 0.05s both" }}>
           <SectionCard title="Company Logo" icon={<Building2 size={15} color="var(--primary)"/>}>
-            <p style={{ color: "var(--muted-foreground)", fontSize: 12, margin: 0 }}>
-              Appears on all payslips and PDFs. PNG, JPG, SVG or WebP · max 2 MB.
-            </p>
-            <LogoUploader
-              currentLogoUrl={form.logoUrl}
-              onUploadComplete={(url) => update("logoUrl", url)}
-            />
+            {!brandingUnlocked ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 10, background: "color-mix(in oklch, var(--primary) 8%, transparent)", border: "1px solid var(--border)" }}>
+                <Lock size={14} color="var(--muted-foreground)" />
+                <span style={{ fontSize: 12.5, color: "var(--muted-foreground)" }}>
+                  White-label logo upload is available on the {PLAN_LABELS.standard} plan and above.
+                </span>
+              </div>
+            ) : (
+              <>
+                <p style={{ color: "var(--muted-foreground)", fontSize: 12, margin: 0 }}>
+                  Appears on all payslips and PDFs. PNG, JPG, SVG or WebP · max 2 MB.
+                </p>
+                <LogoUploader
+                  currentLogoUrl={form.logoUrl}
+                  onUploadComplete={(url) => update("logoUrl", url)}
+                />
+              </>
+            )}
           </SectionCard>
         </div>
 
@@ -293,6 +306,12 @@ export default function SettingsPage() {
                 )}
               </>
             )}
+          </SectionCard>
+        </div>
+
+        <div style={{ animation: "fadeUp 0.44s ease 0.14s both" }}>
+          <SectionCard title="API Access" icon={<KeyRound size={15} color="var(--primary)"/>}>
+            <ApiAccessPanel />
           </SectionCard>
         </div>
 

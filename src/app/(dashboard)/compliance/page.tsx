@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ShieldCheck, AlertTriangle, CheckCircle2, XCircle, FileDown,
-  FileSpreadsheet, FileText, Landmark,
+  FileSpreadsheet, FileText, Landmark, Save, Loader,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { getEffectiveTier, canUse, PLAN_LABELS } from "@/lib/plan-features";
@@ -17,15 +17,47 @@ import {
   ModuleShell, ModuleHeader, Card, UpgradeNotice, btnGhost,
 } from "@/components/module-ui";
 
+interface SnapshotRow {
+  id: string;
+  period_label: string;
+  score: number;
+  critical_count: number;
+  warning_count: number;
+  payroll_ready: boolean;
+  lra_ready: boolean;
+  nasscorp_ready: boolean;
+  created_at: string;
+}
+
 export default function CompliancePage() {
   const { employees, company, role } = useApp();
   const effectiveTier = getEffectiveTier(company.subscriptionTier, company.billingBypass);
   const [busy, setBusy] = useState<string | null>(null);
+  const [snapshots, setSnapshots] = useState<SnapshotRow[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [savingSnap, setSavingSnap] = useState(false);
+  const canHistory = canUse("complianceHistory", effectiveTier);
 
   const report = useMemo(() => runComplianceChecks(employees, company), [employees, company]);
   const active = useMemo(() => employees.filter((e) => e.isActive && !e.isArchived), [employees]);
   const rows = useMemo(() => computePayroll(active), [active]);
   const totals = useMemo(() => sumTotals(rows), [rows]);
+
+  useEffect(() => {
+    if (!canHistory) return;
+    let cancelled = false;
+    (async () => {
+      setHistoryLoading(true);
+      try {
+        const res = await fetch("/api/compliance/snapshots");
+        const data = await res.json();
+        if (!cancelled && res.ok) setSnapshots(data.snapshots ?? []);
+      } finally {
+        if (!cancelled) setHistoryLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [canHistory, company.id]);
 
   if (!canUse("complianceDashboard", effectiveTier)) {
     return (
@@ -52,6 +84,32 @@ export default function CompliancePage() {
     { label: "Period", value: period },
     { label: "Employees", value: String(active.length) },
   ];
+
+  async function saveSnapshot() {
+    setSavingSnap(true);
+    try {
+      const res = await fetch("/api/compliance/snapshots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          periodLabel: period,
+          score: report.score,
+          criticalCount: report.criticalCount,
+          warningCount: report.warningCount,
+          payrollReady: report.payrollReady,
+          lraReady: report.lraReady,
+          nasscorpReady: report.nasscorpReady,
+          details: { issues: report.issues.slice(0, 50) },
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.snapshot) {
+        setSnapshots((prev) => [data.snapshot, ...prev]);
+      }
+    } finally {
+      setSavingSnap(false);
+    }
+  }
 
   // ── LRA reports ──
   async function lraEmployerSummary(kind: "pdf" | "excel" | "csv") {
@@ -126,6 +184,58 @@ export default function CompliancePage() {
   return (
     <ModuleShell>
       <ModuleHeader title="Compliance Center" subtitle={`Built for Liberian payroll compliance · ${period}`} />
+
+      {canHistory && (
+        <Card style={{ marginBottom: 16 }} data-testid="compliance-history">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Compliance history</h3>
+            <button
+              type="button"
+              onClick={() => void saveSnapshot()}
+              disabled={savingSnap}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 6,
+                padding: "8px 12px", borderRadius: 9, border: "none",
+                background: "var(--primary)", color: "var(--primary-foreground)",
+                fontWeight: 700, fontSize: 12, cursor: "pointer",
+              }}
+            >
+              {savingSnap ? <Loader size={13} className="animate-spin" /> : <Save size={13} />}
+              Save snapshot
+            </button>
+          </div>
+          {historyLoading ? (
+            <p style={{ fontSize: 12, color: "var(--muted-foreground)" }}>Loading history…</p>
+          ) : snapshots.length === 0 ? (
+            <p style={{ fontSize: 12, color: "var(--muted-foreground)" }}>No snapshots yet. Save the current scorecard to start a history trail.</p>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr>
+                  {["Date", "Period", "Score", "Critical", "Warnings", "LRA", "NASSCORP"].map((h) => (
+                    <th key={h} style={{ textAlign: "left", padding: "8px 6px", borderBottom: "1px solid var(--border)", fontSize: 11, color: "var(--muted-foreground)" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {snapshots.map((s) => (
+                  <tr key={s.id}>
+                    <td style={{ padding: "8px 6px", borderBottom: "1px solid var(--border)", fontFamily: "'DM Mono',monospace", fontSize: 11 }}>
+                      {new Date(s.created_at).toLocaleDateString()}
+                    </td>
+                    <td style={{ padding: "8px 6px", borderBottom: "1px solid var(--border)" }}>{s.period_label}</td>
+                    <td style={{ padding: "8px 6px", borderBottom: "1px solid var(--border)", fontWeight: 700 }}>{s.score}</td>
+                    <td style={{ padding: "8px 6px", borderBottom: "1px solid var(--border)" }}>{s.critical_count}</td>
+                    <td style={{ padding: "8px 6px", borderBottom: "1px solid var(--border)" }}>{s.warning_count}</td>
+                    <td style={{ padding: "8px 6px", borderBottom: "1px solid var(--border)" }}>{s.lra_ready ? "Ready" : "—"}</td>
+                    <td style={{ padding: "8px 6px", borderBottom: "1px solid var(--border)" }}>{s.nasscorp_ready ? "Ready" : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      )}
 
       {/* Score + readiness */}
       <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 1fr) 2fr", gap: 16, marginBottom: 16 }}>
