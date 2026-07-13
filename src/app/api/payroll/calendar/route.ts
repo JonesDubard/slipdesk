@@ -6,6 +6,15 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { buildPayrollCalendarMonth } from "@/lib/payroll/periods";
 import type { SubscriptionTier } from "@/context/AppContext";
 
+/** Prefer service role; fall back to the user session (works when SERVICE_ROLE_KEY is unset). */
+function dbForCalendar(userClient: Awaited<ReturnType<typeof createClient>>) {
+  try {
+    return createAdminClient();
+  } catch {
+    return userClient;
+  }
+}
+
 /** GET /api/payroll/calendar?year=2026&month=7 */
 export async function GET(req: NextRequest) {
   const supabase = await createClient();
@@ -38,14 +47,19 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const admin = createAdminClient();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: payRuns } = await (admin as any)
+    const db = dbForCalendar(supabase) as any;
+    const { data: payRuns, error: runsErr } = await db
       .from("pay_runs")
       .select("id, status, pay_period_start, pay_period_end, pay_date, period_label, created_at")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false })
       .limit(50);
+
+    if (runsErr) {
+      console.error("[payroll-calendar] pay_runs:", runsErr.message);
+      return NextResponse.json({ error: "Could not load calendar", detail: runsErr.message }, { status: 500 });
+    }
 
     const runs = (payRuns ?? []).map((r: {
       id: string; status?: string; pay_period_start?: string; pay_period_end?: string;
@@ -63,6 +77,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ calendar, runs });
   } catch (err) {
     console.error("[payroll-calendar]", err);
-    return NextResponse.json({ error: "Could not load calendar" }, { status: 500 });
+    return NextResponse.json({
+      error: "Could not load calendar",
+      detail: err instanceof Error ? err.message : String(err),
+    }, { status: 500 });
   }
 }
