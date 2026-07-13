@@ -12,13 +12,13 @@ test.describe("Acquisition CTAs (no free trial)", () => {
     await expect(page.getByText(/see slipdesk/i).first()).toBeVisible();
   });
 
-  test("pricing cards book a live demo (not signup)", async ({ page }) => {
+  test("pricing cards buy plan (not signup)", async ({ page }) => {
     await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
     await page.locator("#pricing").scrollIntoViewIfNeeded();
     const pricing = page.locator("#pricing");
     await expect(pricing).toBeVisible({ timeout: 15_000 });
     await expect(pricing.locator('a[href="/signup"]')).toHaveCount(0);
-    await expect(pricing.getByRole("link", { name: /book a live demo/i }).first()).toBeVisible();
+    await expect(pricing.getByRole("link", { name: /buy starter/i }).first()).toBeVisible();
   });
 
   test("signup page explains invite-only access", async ({ page }) => {

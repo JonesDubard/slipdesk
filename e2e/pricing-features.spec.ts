@@ -89,11 +89,12 @@ test.describe("Marketing pricing page E2E", () => {
     }
   });
 
-  test("Choose plan CTAs book a live demo", async ({ page }) => {
+  test("Choose plan CTAs buy plan (not signup)", async ({ page }) => {
     const pricing = await openPricing(page);
     await expect(pricing.locator('a[href="/signup"]')).toHaveCount(0);
-    const links = pricing.getByRole("link", { name: /book a live demo/i });
-    await expect(links).toHaveCount(3);
+    await expect(pricing.getByRole("link", { name: /buy starter/i })).toBeVisible();
+    await expect(pricing.getByRole("link", { name: /buy professional/i })).toBeVisible();
+    await expect(pricing.getByRole("link", { name: /buy enterprise/i })).toBeVisible();
   });
 
   test("all-plans footer claims dual-currency, PDF payslips, and feature gating", async ({ page }) => {

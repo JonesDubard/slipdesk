@@ -1313,7 +1313,7 @@ function Pricing() {
                       color: tier.popular ? "#002147" : "#fff",
                     }}
                   >
-                    Book a Live Demo
+                    Buy {tier.name}
                     <ArrowRight className="w-4 h-4" />
                   </a>
                 </div>
@@ -1324,7 +1324,7 @@ function Pricing() {
           <p className="text-center text-slate-400 text-xs font-mono mt-8">
             All plans include unlimited payroll runs, LRA &amp; NASSCORP compliance, dual-currency payroll and PDF payslips.
             <br />
-            Feature gating is enforced per plan. Cancel anytime.
+            Feature gating is enforced per plan. After you choose a plan, we create your company account and issue credentials.
           </p>
         </AnimateIn>
       </div>
