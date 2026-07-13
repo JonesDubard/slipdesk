@@ -881,8 +881,8 @@ function Hero() {
             custom={2}
             className="text-white/60 text-base sm:text-lg leading-relaxed mb-10 max-w-xl font-light"
           >
-            Explore a real Liberian company workspace — payroll, compliance, and
-            payslips — in a read-only interactive demo. No free trial required.
+            Explore a real Liberian company workspace, payroll, compliance, and
+            payslips, in a read-only interactive demo. No free trial required.
           </motion.p>
 
           {/* CTAs */}
@@ -1051,7 +1051,7 @@ function Features() {
           </h2>
           <p className="text-slate-500 max-w-xl mx-auto text-sm sm:text-base">
             Slipdesk brings employee management, payroll, compliance, analytics and
-            approvals together — purpose-built for how Liberian organizations operate.
+            approvals together, purpose built for how Liberian organizations operate.
           </p>
         </AnimateIn>
         <motion.div

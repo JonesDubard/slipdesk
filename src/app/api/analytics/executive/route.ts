@@ -76,7 +76,7 @@ export async function GET() {
 
     const { data: payRuns } = await db
       .from("pay_runs")
-      .select("id, status, period_start, period_end, created_at, total_gross, total_net")
+      .select("id, status, pay_period_start, pay_period_end, pay_date, created_at, total_gross, total_net")
       .eq("company_id", company.id)
       .order("created_at", { ascending: false })
       .limit(12);
@@ -84,7 +84,23 @@ export async function GET() {
     const metrics = aggregateExecutiveMetrics({
       companyName: company.name,
       employees: employees ?? [],
-      payRuns: payRuns ?? [],
+      payRuns: (payRuns ?? []).map((r: {
+        id: string;
+        status?: string;
+        pay_period_start?: string;
+        pay_period_end?: string;
+        created_at?: string;
+        total_gross?: number;
+        total_net?: number;
+      }) => ({
+        id: r.id,
+        status: r.status,
+        period_start: r.pay_period_start,
+        period_end: r.pay_period_end,
+        created_at: r.created_at,
+        total_gross: r.total_gross,
+        total_net: r.total_net,
+      })),
     });
 
     return NextResponse.json(metrics);

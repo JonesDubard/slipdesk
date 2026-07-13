@@ -42,20 +42,20 @@ export async function GET(req: NextRequest) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: payRuns } = await (admin as any)
       .from("pay_runs")
-      .select("id, status, period_start, period_end, pay_date, period_label, created_at")
+      .select("id, status, pay_period_start, pay_period_end, pay_date, period_label, created_at")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false })
       .limit(50);
 
     const runs = (payRuns ?? []).map((r: {
-      id: string; status?: string; period_start?: string; period_end?: string;
+      id: string; status?: string; pay_period_start?: string; pay_period_end?: string;
       pay_date?: string; period_label?: string;
     }) => ({
       id: r.id,
       status: r.status,
-      periodStart: r.period_start,
-      periodEnd: r.period_end,
-      payDate: r.pay_date ?? r.period_end,
+      periodStart: r.pay_period_start,
+      periodEnd: r.pay_period_end,
+      payDate: r.pay_date ?? r.pay_period_end,
       periodLabel: r.period_label,
     }));
 
