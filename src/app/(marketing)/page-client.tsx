@@ -812,9 +812,9 @@ function Nav() {
         </nav>
 
         <div className="flex items-center gap-3">
-          <a href="/demo" className="text-sm text-emerald-400 hover:text-emerald-300 transition-colors hidden md:inline font-mono">
+          {/* <a href="/demo" className="text-sm text-emerald-400 hover:text-emerald-300 transition-colors hidden md:inline font-mono">
             Explore Interactive Demo →
-          </a>
+          </a> */}
           <Link href="/login" className="text-sm text-white/70 hover:text-white transition-colors hidden md:inline">
             Sign in
           </Link>
