@@ -100,7 +100,7 @@ function Nav() {
 
         <div className="flex items-center gap-3">
           <Link href="/login"  className="text-sm text-white/70 hover:text-white transition-colors hidden md:inline">Sign in</Link>
-          <Link href="/demo" className="text-sm font-semibold px-4 py-2 rounded-lg bg-[#50C878] text-[#002147] hover:bg-[#3aa85f] transition-colors whitespace-nowrap">
+          <Link href="/api/demo/enter" className="text-sm font-semibold px-4 py-2 rounded-lg bg-[#50C878] text-[#002147] hover:bg-[#3aa85f] transition-colors whitespace-nowrap">
             Explore Interactive Demo →
           </Link>
         </div>
@@ -428,7 +428,7 @@ export default function SupportPage() {
                   </p>
                 </div>
                 <Link
-                  href="/demo"
+                  href="/api/demo/enter"
                   className="mt-auto flex items-center gap-1.5 px-4 py-2.5 bg-[#50C878] text-[#002147] rounded-xl
                              text-sm font-bold hover:bg-[#3aa85f] transition-colors w-fit"
                 >
@@ -487,7 +487,7 @@ export default function SupportPage() {
               </p>
             </div>
             <Link
-              href="/demo"
+              href="/api/demo/enter"
               className="flex items-center gap-2 px-6 py-3 bg-[#50C878] text-[#002147] font-bold rounded-xl
                          hover:bg-[#3aa85f] transition-colors whitespace-nowrap flex-shrink-0"
             >

@@ -136,7 +136,7 @@ function StatusBadge({ status }: { status: string }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function BillingPage() {
-  const { employees, company, loading, refreshCompany } = useApp();
+  const { employees, company, initializing, refreshCompany } = useApp();
 
   const activeCount = useMemo(
     () => employees.filter((e) => e.isActive).length,
@@ -196,7 +196,7 @@ export default function BillingPage() {
     return () => clearInterval(interval);
   }, [momoPolling, momoReferenceId, refreshCompany]);
 
-  if (loading) return <PageSkeleton />;
+  if (initializing) return <PageSkeleton />;
 
   const companyName    = company.name || "Your Company";
   const billingBypass  = company.billingBypass;

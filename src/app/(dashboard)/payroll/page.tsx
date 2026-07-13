@@ -779,11 +779,12 @@ function StatusStepper({current,onAdvance,saving=false,allowed=true,roleHint}:{c
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PayrollPage() {
-  const { employees, company, role, addEmployee, refreshEmployees, loading } = useApp();
+  const { employees, company, role, addEmployee, refreshEmployees, initializing } = useApp();
   const { toast } = useToast();
   const { guardAction } = useDemoGuard();
 
-  if (loading) return <PageSkeleton />;
+  // Auth shell can paint early; wait for company/employees before heavy payroll UI.
+  if (initializing) return <PageSkeleton />;
 
   const effectiveTier = getEffectiveTier(company.subscriptionTier, company.billingBypass);
   const pdfCompany: PdfCompany = {

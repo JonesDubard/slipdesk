@@ -1,22 +1,13 @@
-"use client";
-
-import { useEffect } from "react";
-import { Loader } from "lucide-react";
+import { redirect } from "next/navigation";
+import { isDemoModeEnabled } from "@/lib/demo/constants";
 
 /**
- * Hard-navigate into the server cookie handoff.
- * (Next.js soft redirects strip Set-Cookie from /api auth routes.)
+ * Server redirect into the cookie handoff.
+ * Browser does a full GET to /api/demo/enter (Set-Cookie preserved), then dashboard.
  */
 export default function DemoPage() {
-  useEffect(() => {
-    window.location.replace("/api/demo/enter");
-  }, []);
-
-  return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-3 px-6">
-      <Loader className="w-8 h-8 text-[#50C878] animate-spin" />
-      <p className="text-sm text-slate-500 font-medium">Starting interactive demo…</p>
-      <p className="text-xs text-slate-400">ABC Construction Ltd. · read-only</p>
-    </div>
-  );
+  if (!isDemoModeEnabled()) {
+    redirect("/?demo=off");
+  }
+  redirect("/api/demo/enter");
 }

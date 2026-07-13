@@ -2752,7 +2752,7 @@ function BulkBar({ count, isArchiveView, onArchive, onDelete, onClear }: {
 }
 
 export default function EmployeesPage() {
-  const { employees, archivedEmployees, addEmployee, updateEmployee, archiveEmployee, hardDeleteEmployee, restoreEmployee, refreshEmployees, loading, company } = useApp();
+  const { employees, archivedEmployees, addEmployee, updateEmployee, archiveEmployee, hardDeleteEmployee, restoreEmployee, refreshEmployees, initializing, company } = useApp();
   const effectiveTier = getEffectiveTier(company.subscriptionTier, company.billingBypass);
   const allowLRD = canUse("dualCurrency", effectiveTier);
   const { guardAction } = useDemoGuard();
@@ -2959,7 +2959,7 @@ export default function EmployeesPage() {
     setSelected(selected.size === filtered.length ? new Set() : new Set(filtered.map((e) => e.id)));
   }
 
-  if (loading) return <PageSkeleton/>;
+  if (initializing) return <PageSkeleton/>;
 
   return (
     <div style={{ padding: "28px 32px", minHeight: "100vh", background: "var(--background)", fontFamily: "'DM Sans',sans-serif" }}>

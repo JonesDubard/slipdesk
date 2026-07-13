@@ -207,20 +207,31 @@ async function resolveCompanyForUser(
   supabase: ReturnType<typeof createClient>,
   userId: string,
 ): Promise<{ company: DbCompany | null; memberRole: Role | null }> {
-  const { data: owned } = await db(supabase)
-    .from("companies")
-    .select("*")
-    .eq("owner_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(1);
+  // owners + profile in parallel — most users hit one of these first
+  const [{ data: owned }, { data: profile }] = await Promise.all([
+    db(supabase)
+      .from("companies")
+      .select("*")
+      .eq("owner_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(1),
+    db(supabase)
+      .from("profiles")
+      .select("company_id, role")
+      .eq("id", userId)
+      .maybeSingle(),
+  ]);
+
   if (owned?.[0]) return { company: owned[0] as DbCompany, memberRole: null };
 
-  const { data: profile } = await db(supabase)
-    .from("profiles")
-    .select("company_id, role")
-    .eq("id", userId)
-    .maybeSingle();
   if (profile?.company_id) {
+    // Skip second companies fetch if ownership already returned nothing but profile points at a company
+    if (owned?.[0]?.id === profile.company_id) {
+      return {
+        company: owned[0] as DbCompany,
+        memberRole: profile.role ? normalizeRole(profile.role) : null,
+      };
+    }
     const { data: co } = await db(supabase)
       .from("companies")
       .select("*")
@@ -266,6 +277,7 @@ async function activatePendingInvite(): Promise<void> {
 }
 
 let _hasBooted = false;
+let _loadGeneration = 0;
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const sbRef = useRef<ReturnType<typeof createClient> | null>(null);
@@ -279,40 +291,142 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
   const [role,         setRole]         = useState<Role>("payroll_officer");
 
+  // Auth shell unblocks as soon as session is known — do NOT wait for company/employees.
   const loading = !booted;
+
+  const loadData = useCallback(async (retries = 2, knownUserId?: string) => {
+    const gen = ++_loadGeneration;
+    // Prefer the session user id from boot — avoid an extra getUser() network RTT
+    // on every cold start (that call alone often cost 300–800ms).
+    let userId = knownUserId;
+    if (!userId) {
+      const { data: { session } } = await supabase.auth.getSession();
+      userId = session?.user?.id;
+    }
+    if (!userId || gen !== _loadGeneration) return;
+
+    setDataLoading(true);
+    try {
+      // Resolve company first. Only hit invite activation when we have no company yet
+      // (avoids a ~0.5–1s POST on every demo / returning-owner boot).
+      let resolved = await resolveCompanyForUser(supabase, userId);
+      if (!resolved.company && retries > 0) {
+        await activatePendingInvite();
+        if (gen !== _loadGeneration) return;
+        resolved = await resolveCompanyForUser(supabase, userId);
+      }
+
+      if (!resolved.company && retries > 0) {
+        await new Promise((r) => setTimeout(r, 400));
+        if (gen !== _loadGeneration) return;
+        return loadData(retries - 1, userId);
+      }
+
+      if (gen !== _loadGeneration) return;
+
+      const co = resolved.company;
+      const memberRole = resolved.memberRole;
+
+      if (co) {
+        // Profile role + employees in parallel once company is known
+        const [{ data: profileRows }, { data: emps }] = await Promise.all([
+          db(supabase).from("profiles").select("role").eq("id", userId).limit(1),
+          db(supabase)
+            .from("employees")
+            .select("*")
+            .eq("company_id", co.id)
+            .order("employee_number"),
+        ]);
+        if (gen !== _loadGeneration) return;
+
+        const rawRole = profileRows?.[0]?.role ?? null;
+        setCompanyState(dbToCompany(co));
+        setRole(resolveAppRole(memberRole, rawRole));
+        if (emps) setAllEmployees((emps as DbEmployee[]).map(dbToEmployee));
+
+        // Keep profile.company_id synced for owners (fire-and-forget).
+        if (!memberRole) {
+          void db(supabase).from("profiles").update({ company_id: co.id }).eq("id", userId);
+        }
+      } else {
+        const { data: profileRows } = await db(supabase)
+          .from("profiles")
+          .select("role")
+          .eq("id", userId)
+          .limit(1);
+        if (gen !== _loadGeneration) return;
+        setRole(normalizeRole(profileRows?.[0]?.role ?? null));
+        setAllEmployees([]);
+      }
+    } finally {
+      if (gen === _loadGeneration) setDataLoading(false);
+    }
+  }, [supabase]);
 
   // ── Boot & auth state listener ──────────────────────────────────────────
   useEffect(() => {
     let mounted = true;
 
     async function boot() {
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      // getSession reads local cookies (fast). getUser would re-validate over the network
+      // and was a major contributor to the long dashboard skeleton.
+      const { data: { session } } = await supabase.auth.getSession();
       if (!mounted) return;
+
+      const currentUser = session?.user ?? null;
       setUser(currentUser);
+      _hasBooted = true;
+      setBooted(true);
+
       if (currentUser) {
-        setDataLoading(true);
-        await loadData();
-        if (mounted) setDataLoading(false);
+        void loadData(2, currentUser.id);
       }
-      if (mounted) { _hasBooted = true; setBooted(true); }
+
+      // Background JWT verification — deferred so it does not contend with
+      // loadData() for the gotrue navigator lock on cold start.
+      const verify = () => {
+        void supabase.auth.getUser().then(({ data: { user: verified }, error }) => {
+          if (!mounted) return;
+          if (error || !verified) {
+            setUser(null);
+            setCompanyState(EMPTY_COMPANY);
+            setAllEmployees([]);
+          } else if (verified.id !== currentUser?.id) {
+            setUser(verified);
+            void loadData(2, verified.id);
+          }
+        });
+      };
+      if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+        window.requestIdleCallback(verify, { timeout: 2500 });
+      } else {
+        setTimeout(verify, 500);
+      }
     }
 
-    boot();
+    if (!_hasBooted) {
+      void boot();
+    } else {
+      // Soft remounts can reuse prior boot; still refresh data.
+      void supabase.auth.getSession().then(({ data: { session } }) => {
+        if (!mounted) return;
+        setUser(session?.user ?? null);
+        setBooted(true);
+        if (session?.user) void loadData(2, session.user.id);
+      });
+    }
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event: AuthChangeEvent, session: Session | null) => {
         if (!mounted) return;
+        // INITIAL_SESSION is handled by boot() — loading again doubles cold-start time.
+        if (event === "INITIAL_SESSION") return;
+
         const newUser = session?.user ?? null;
         setUser(newUser);
         if (newUser) {
-          if (
-            event === "SIGNED_IN" ||
-            event === "USER_UPDATED" ||
-            event === "INITIAL_SESSION"
-          ) {
-            setDataLoading(true);
-            await loadData();
-            if (mounted) setDataLoading(false);
+          if (event === "SIGNED_IN" || event === "USER_UPDATED") {
+            void loadData(2, newUser.id);
           }
         } else {
           setCompanyState(EMPTY_COMPANY);
@@ -323,50 +437,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
 
     return () => { mounted = false; subscription.unsubscribe(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  async function loadData(retries = 3) {
-    const { data: { user: currentUser } } = await supabase.auth.getUser();
-    if (!currentUser) return;
-
-    await activatePendingInvite();
-
-    const [{ company: co, memberRole }, { data: profileRows }] = await Promise.all([
-      resolveCompanyForUser(supabase, currentUser.id),
-      db(supabase)
-        .from("profiles")
-        .select("role")
-        .eq("id", currentUser.id)
-        .limit(1),
-    ]);
-
-    const rawRole = profileRows?.[0]?.role ?? null;
-
-    if (!co && retries > 0) {
-      await new Promise((r) => setTimeout(r, 800));
-      return loadData(retries - 1);
-    }
-    if (co) {
-      setCompanyState(dbToCompany(co));
-      setRole(resolveAppRole(memberRole, rawRole));
-
-      // Keep profile.company_id synced for owners so RLS helpers resolve correctly.
-      if (!memberRole) {
-        void db(supabase).from("profiles").update({ company_id: co.id }).eq("id", currentUser.id);
-      }
-
-      const { data: emps } = await db(supabase)
-        .from("employees")
-        .select("*")
-        .eq("company_id", co.id)
-        .order("employee_number");
-      if (emps) setAllEmployees((emps as DbEmployee[]).map(dbToEmployee));
-    } else {
-      setRole(normalizeRole(rawRole));
-      setAllEmployees([]);
-    }
-  }
+  }, [supabase, loadData]);
 
   const employees:         Employee[] = allEmployees.filter((e) => !e.isArchived);
   const archivedEmployees: Employee[] = allEmployees.filter((e) =>  e.isArchived);
@@ -625,7 +696,7 @@ const refreshCompany = useCallback(async () => {
       user,
       role,
       loading,
-      initializing: loading,
+      initializing: loading || dataLoading,
       company, setCompany,
       employees, archivedEmployees,
       addEmployee, refreshEmployees, updateEmployee,

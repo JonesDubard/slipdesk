@@ -235,7 +235,7 @@
 //               <ArrowRight className="w-4 h-4" />
 //             </Link>
 //             <Link
-//               href="/demo"
+//               href="/api/demo/enter"
 //               className="inline-flex items-center justify-center gap-2 px-7 py-3.5 border border-emerald-500/40 text-emerald-400 rounded-xl hover:bg-emerald-500/10 transition-colors text-base"
 //             >
 //               Try interactive demo
@@ -794,6 +794,7 @@ function Nav() {
             alt="Slipdesk"
             width={32}
             height={32}
+            priority
             className="rounded-md object-contain"
             style={{ background: "white", padding: "2px" }}
           />
@@ -819,7 +820,7 @@ function Nav() {
             Sign in
           </Link>
           <a
-            href="/demo"
+            href="/api/demo/enter"
             className="text-sm font-semibold px-4 py-2 rounded-lg bg-em text-navy hover-em transition-colors whitespace-nowrap"
           >
             Explore Interactive Demo
@@ -888,7 +889,7 @@ function Hero() {
           {/* CTAs */}
           <motion.div variants={fadeUp} custom={3} className="flex flex-col sm:flex-row gap-4">
             <a
-              href="/demo"
+              href="/api/demo/enter"
               className="inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-em text-navy font-semibold rounded-xl hover-em transition-colors text-base"
             >
               Explore Interactive Demo
@@ -1401,7 +1402,7 @@ function CTA() {
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <a
-              href="/demo"
+              href="/api/demo/enter"
               className="inline-flex items-center justify-center gap-2 px-7 sm:px-8 py-3.5 sm:py-4 bg-em text-navy font-bold rounded-xl hover-em transition-colors text-base sm:text-lg"
             >
               Explore Interactive Demo

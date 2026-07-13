@@ -53,8 +53,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}/?demo=error`);
   }
 
-  // Ensure auth cookies are flushed onto the redirect response.
-  await supabase.auth.getUser();
+  // Hint for edge proxy: skip billing gates on subsequent navigations without DB.
+  response.cookies.set("slipdesk_demo", "1", {
+    path: "/",
+    sameSite: "lax",
+    httpOnly: true,
+    maxAge: 60 * 60 * 8,
+  });
 
   return response;
 }

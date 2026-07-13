@@ -8,11 +8,25 @@ const PROTECTED_PREFIXES = [
 ];
 // Note: /api/v1/* uses Bearer API keys — intentionally not cookie-protected here.
 
+const AUTH_PAGES = new Set(["/login", "/signup"]);
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Demo cookie handoff — skip session refresh so Set-Cookie from the route wins.
   if (pathname === "/api/demo/enter" || pathname === "/api/demo/session") {
+    return NextResponse.next();
+  }
+
+  const isProtected = PROTECTED_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`),
+  );
+  const isAuthPage = AUTH_PAGES.has(pathname);
+
+  // Marketing + public API: do NOT call supabase.auth.getUser().
+  // Previously every landing-page request paid 200–2000ms for JWT revalidation,
+  // which dominated Lighthouse Performance and starved the demo enter flow.
+  if (!isProtected && !isAuthPage) {
     return NextResponse.next();
   }
 
@@ -39,10 +53,13 @@ export async function proxy(request: NextRequest) {
     },
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
-
-  const isProtected = PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
-  const isAuthPage   = pathname === "/login" || pathname === "/signup";
+  // Prefer getSession() in the edge proxy: it reads cookies locally.
+  // getUser() revalidates over the network (often 300–2000ms+) and was the
+  // dominant TTFB cost on every protected page. Auth Z for data still happens
+  // via Supabase RLS + client-side session checks. Trade-off: a revoked JWT
+  // may work until expiry for HTML shell access only.
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user ?? null;
 
   if (!user && isProtected) {
     return NextResponse.redirect(new URL("/login", request.url));
@@ -52,8 +69,17 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
-  if (user && isProtected) {
-    const { data: profile } = await supabase
+  // Billing / trial gate. Interactive demo sessions skip (query flag or cookie).
+  if (
+    user &&
+    isProtected &&
+    pathname !== "/billing" &&
+    request.nextUrl.searchParams.get("demo") !== "1" &&
+    request.cookies.get("slipdesk_demo")?.value !== "1"
+  ) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = supabase as any;
+    const { data: profile } = await db
       .from("profiles")
       .select("company_id, role")
       .eq("id", user.id)
@@ -64,21 +90,26 @@ export async function proxy(request: NextRequest) {
     }
 
     if (profile?.company_id) {
-      const { data: company } = await supabase
+      const { data: company } = await db
         .from("companies")
-        .select("subscription_status, trial_expires_at, billing_bypass")
+        .select("subscription_status, trial_expires_at, billing_bypass, is_demo")
         .eq("id", profile.company_id)
         .single();
 
-      if (company?.billing_bypass) {
+      if (company?.billing_bypass || company?.is_demo) {
         return response;
       }
 
-      const trialExpiry = company?.trial_expires_at ? new Date(company.trial_expires_at) : null;
-      const isTrialValid = company?.subscription_status === "trial" && trialExpiry && trialExpiry > new Date();
+      const trialExpiry = company?.trial_expires_at
+        ? new Date(company.trial_expires_at)
+        : null;
+      const isTrialValid =
+        company?.subscription_status === "trial" &&
+        trialExpiry &&
+        trialExpiry > new Date();
       const isActive = company?.subscription_status === "active";
 
-      if (!isTrialValid && !isActive && pathname !== "/billing") {
+      if (!isTrialValid && !isActive) {
         return NextResponse.redirect(new URL("/billing", request.url));
       }
     }

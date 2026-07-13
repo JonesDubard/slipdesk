@@ -8,7 +8,7 @@ test.describe("Acquisition CTAs (no free trial)", () => {
     await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
     const explore = page.getByRole("link", { name: /explore interactive demo/i }).first();
     await expect(explore).toBeVisible({ timeout: 20_000 });
-    await expect(explore).toHaveAttribute("href", "/demo");
+    await expect(explore).toHaveAttribute("href", "/api/demo/enter");
     await expect(page.getByText(/see slipdesk/i).first()).toBeVisible();
   });
 

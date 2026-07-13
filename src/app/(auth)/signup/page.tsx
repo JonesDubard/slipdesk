@@ -140,11 +140,11 @@ function SignupForm() {
                   Access is invite-only. If you are a customer, please{" "}
                   <Link href="/login" className="text-[#50C878] hover:underline font-medium">sign in</Link>.
                   {" "}For demos, explore our{" "}
-                  <Link href="/demo" className="text-[#50C878] hover:underline font-medium">interactive demo</Link>.
+                  <Link href="/api/demo/enter" className="text-[#50C878] hover:underline font-medium">interactive demo</Link>.
                 </p>
                 <div className="space-y-3">
                   <Link
-                    href="/demo"
+                    href="/api/demo/enter"
                     className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-[#50C878] text-[#002147] font-bold text-sm hover:bg-[#3aa85f] transition-colors"
                   >
                     Explore Interactive Demo <ArrowRight className="w-4 h-4" />

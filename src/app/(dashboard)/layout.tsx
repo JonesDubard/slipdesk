@@ -10,7 +10,7 @@ import {
   AlertTriangle, CheckCircle2, Info,
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
-import { useApp } from "@/context/AppContext";
+import { AppProvider, useApp } from "@/context/AppContext";
 import { ToastProvider } from "@/components/Toast";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { createClient } from '@/lib/supabase/client';
@@ -18,7 +18,7 @@ import type { SubscriptionTier } from "@/context/AppContext";
 import { visibleNavItems as filterNavItems, type NavItemDef } from "@/lib/nav";
 import { fetchNotifications, markAllNotificationsRead, type AppNotification } from "@/lib/notifications";
 import { performSignOut } from "@/lib/sign-out";
-import { isPlatformAdminRole } from "@/lib/auth/platform-admin";
+import { isPlatformAdminRole, isDesignatedPlatformAdmin } from "@/lib/auth/platform-admin";
 import { DemoGuardProvider } from "@/components/demo/DemoGuard";
 
 interface NavItem extends NavItemDef {
@@ -52,9 +52,9 @@ function visibleNavItems(
 
 const STYLES = (
   <style>{`
-    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=DM+Mono:wght@400;500&display=swap');
-    * { font-family: 'DM Sans', system-ui, sans-serif; }
-    .font-mono { font-family: 'DM Mono', monospace; }
+    /* Prefer root Geist variables — avoid render-blocking Google Fonts @import */
+    * { font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif; }
+    .font-mono { font-family: var(--font-geist-mono), ui-monospace, monospace; }
     :root { --navy:#002147; --emerald:#50C878; --em-dark:#3aa85f; }
     .bg-navy { background-color: var(--navy); }
     .bg-em   { background-color: var(--emerald); }
@@ -79,19 +79,23 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
   const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
-    if (user?.id) {
-      const supabase = createClient();
-      supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .limit(1)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .then(({ data }: any) => {
-          const raw = data?.[0]?.role;
-          setIsPlatformAdmin(isPlatformAdminRole(raw));
-        });
+    if (!user?.id) return;
+    // Skip an extra profiles round-trip for the designated admin email.
+    if (isDesignatedPlatformAdmin(user.email)) {
+      setIsPlatformAdmin(true);
+      return;
     }
+    const supabase = createClient();
+    supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .limit(1)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .then(({ data }: any) => {
+        const raw = data?.[0]?.role;
+        setIsPlatformAdmin(isPlatformAdminRole(raw));
+      });
   }, [user]);
 
   const navItems = visibleNavItems(company.subscriptionTier, company.billingBypass, role);
@@ -400,8 +404,15 @@ function BellButton() {
 }
 
 // ── Main layout ───────────────────────────────────────────────────────────────
-// ── Main layout ───────────────────────────────────────────────────────────────
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <AppProvider>
+      <DashboardShell>{children}</DashboardShell>
+    </AppProvider>
+  );
+}
+
+function DashboardShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { user, loading, company } = useApp();
   const router = useRouter();

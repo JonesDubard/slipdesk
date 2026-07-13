@@ -11,5 +11,10 @@ export async function performSignOut(signOut: () => Promise<void>): Promise<void
   } catch {
     // Proceed to login even if sign-out fails
   }
+  try {
+    document.cookie = "slipdesk_demo=; Path=/; Max-Age=0; SameSite=Lax";
+  } catch {
+    // ignore
+  }
   window.location.assign("/login");
 }
