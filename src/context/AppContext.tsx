@@ -62,6 +62,8 @@ export interface Employee {
   employmentStatus?:  string;
   bankBranch?:        string;
   dateTerminated?:    string | null;
+  /** HR must enable before employee can use the self-service portal (migration 0011). */
+  portalEnabled?:     boolean;
   pendingRegularHours?:  number | null;
   pendingOvertimeHours?: number | null;
   pendingHolidayHours?:  number | null;
@@ -144,6 +146,7 @@ function dbToEmployee(row: DbEmployee): Employee {
     employmentStatus:  row.employment_status ?? "active",
     bankBranch:        row.bank_branch ?? "",
     dateTerminated:    row.date_terminated ?? null,
+    portalEnabled:     Boolean(row.portal_enabled),
     pendingRegularHours:  row.pending_regular_hours  ?? null,
     pendingOvertimeHours: row.pending_overtime_hours ?? null,
     pendingHolidayHours:  row.pending_holiday_hours  ?? null,
@@ -225,11 +228,23 @@ async function resolveCompanyForUser(
   if (owned?.[0]) return { company: owned[0] as DbCompany, memberRole: null };
 
   if (profile?.company_id) {
-    // Skip second companies fetch if ownership already returned nothing but profile points at a company
+    // Prefer company_members.role when present (employee / invited teammates).
+    const { data: member } = await db(supabase)
+      .from("company_members")
+      .select("role")
+      .eq("user_id", userId)
+      .eq("company_id", profile.company_id)
+      .eq("status", "active")
+      .maybeSingle();
+
     if (owned?.[0]?.id === profile.company_id) {
       return {
         company: owned[0] as DbCompany,
-        memberRole: profile.role ? normalizeRole(profile.role) : null,
+        memberRole: member
+          ? normalizeRole(member.role)
+          : profile.role
+            ? normalizeRole(profile.role)
+            : null,
       };
     }
     const { data: co } = await db(supabase)
@@ -240,7 +255,11 @@ async function resolveCompanyForUser(
     if (co) {
       return {
         company: co as DbCompany,
-        memberRole: profile.role ? normalizeRole(profile.role) : null,
+        memberRole: member
+          ? normalizeRole(member.role)
+          : profile.role
+            ? normalizeRole(profile.role)
+            : null,
       };
     }
   }
@@ -328,21 +347,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const memberRole = resolved.memberRole;
 
       if (co) {
-        // Profile role + employees in parallel once company is known
+        // Profile role + employees in parallel once company is known.
+        // Employee portal principals must NEVER receive the full company roster.
+        const resolvedRoleHint = memberRole ?? null;
+        const isEmployeePortal = resolvedRoleHint === "employee";
+
+        const profilePromise = db(supabase).from("profiles").select("role").eq("id", userId).limit(1);
+        const empPromise = isEmployeePortal
+          ? Promise.resolve({ data: null })
+          : db(supabase)
+              .from("employees")
+              .select("*")
+              .eq("company_id", co.id)
+              .order("employee_number");
+
         const [{ data: profileRows }, { data: emps }] = await Promise.all([
-          db(supabase).from("profiles").select("role").eq("id", userId).limit(1),
-          db(supabase)
-            .from("employees")
-            .select("*")
-            .eq("company_id", co.id)
-            .order("employee_number"),
+          profilePromise,
+          empPromise,
         ]);
         if (gen !== _loadGeneration) return;
 
         const rawRole = profileRows?.[0]?.role ?? null;
+        const nextRole = resolveAppRole(memberRole, rawRole);
         setCompanyState(dbToCompany(co));
-        setRole(resolveAppRole(memberRole, rawRole));
-        if (emps) setAllEmployees((emps as DbEmployee[]).map(dbToEmployee));
+        setRole(nextRole);
+        if (nextRole === "employee") {
+          setAllEmployees([]);
+        } else if (emps) {
+          setAllEmployees((emps as DbEmployee[]).map(dbToEmployee));
+        }
 
         // Keep profile.company_id synced for owners (fire-and-forget).
         if (!memberRole) {
@@ -540,6 +573,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...(data.taxId            !== undefined && { tax_id:            data.taxId            }),
       ...(data.employmentStatus !== undefined && { employment_status: data.employmentStatus }),
       ...(data.bankBranch       !== undefined && { bank_branch:       data.bankBranch       }),
+      ...(data.portalEnabled    !== undefined && { portal_enabled:    data.portalEnabled    }),
     };
 
     let res = await db(supabase).from("employees").insert({ ...baseInsert, ...extended }).select().single();
@@ -595,6 +629,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...(data.employmentStatus !== undefined && { employment_status: data.employmentStatus }),
       ...(data.bankBranch       !== undefined && { bank_branch:       data.bankBranch       }),
       ...(data.dateTerminated   !== undefined && { date_terminated:   data.dateTerminated || null }),
+      ...(data.portalEnabled    !== undefined && { portal_enabled:    data.portalEnabled    }),
     };
 
     let res = await db(supabase).from("employees").update({ ...baseUpdate, ...extended }).eq("id", id).select().single();

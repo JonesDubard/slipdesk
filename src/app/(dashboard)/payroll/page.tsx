@@ -871,6 +871,27 @@ export default function PayrollPage() {
   const activeEmployees = employees.filter((e) => e.isActive);
 
   function handleStartRun() {
+    // Pre-payroll validation (non-blocking UI warnings)
+    if (company.id) {
+      void fetch("/api/payroll/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payDate, periodLabel }),
+      })
+        .then(async (res) => {
+          if (!res.ok) return;
+          const data = await res.json();
+          if (data.errorCount > 0) {
+            toast.error(`Payroll validation: ${data.errorCount} error(s), ${data.warningCount} warning(s). Review before approving.`);
+          } else if (data.warningCount > 0) {
+            toast.error(`${data.warningCount} payroll warning(s) — review leave/attendance before approving.`);
+          }
+        })
+        .catch(() => {
+          /* validation is advisory */
+        });
+    }
+
     const rows: PayRunLine[] = activeEmployees.map((emp) => ({
       id: emp.id,
       employeeId: emp.id,
@@ -1032,6 +1053,34 @@ export default function PayrollPage() {
             lines.length !== 1 ? "s" : ""
           } paid.`
         );
+
+        // Email employees with secure View Payslip links (no PDF). Best-effort.
+        if (run?.id) {
+          try {
+            const notifyRes = await fetch("/api/payroll/notify-payslips", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ payRunId: run.id }),
+            });
+            if (notifyRes.ok) {
+              const n = await notifyRes.json();
+              if (n.sent > 0) {
+                toast.success(`Payslip emails sent to ${n.sent} employee${n.sent !== 1 ? "s" : ""}.`);
+              }
+            }
+          } catch (notifyErr) {
+            console.warn("Payslip email notify failed:", notifyErr);
+          }
+          try {
+            await fetch("/api/payroll/apply-attendance", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ payRunId: run.id }),
+            });
+          } catch (attErr) {
+            console.warn("Attendance apply-after-paid failed:", attErr);
+          }
+        }
       } catch (err) {
         console.error("Failed to save pay run:", err);
         toast.error("Pay run marked paid locally but could not save to Supabase.");

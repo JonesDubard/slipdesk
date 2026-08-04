@@ -95,7 +95,15 @@ export type Permission =
   | "billing:manage"
   | "users:manage"
   | "audit:view"
-  | "notifications:view";
+  | "notifications:view"
+  // Employee self-service (own records only)
+  | "portal:view_own"
+  | "portal:request_change"
+  // HR review of employee change requests
+  | "portal:review_changes"
+  // Leave + attendance (v0.2.0)
+  | "leave:review"
+  | "attendance:manage";
 
 const ALL_PERMISSIONS: Permission[] = [
   "employee:view", "employee:create", "employee:edit", "employee:delete",
@@ -105,6 +113,8 @@ const ALL_PERMISSIONS: Permission[] = [
   "analytics:view", "analytics:executive",
   "company:manage", "billing:manage", "users:manage",
   "audit:view", "notifications:view",
+  "portal:view_own", "portal:request_change", "portal:review_changes",
+  "leave:review", "attendance:manage",
 ];
 
 const READ_ONLY: Permission[] = [
@@ -120,6 +130,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "payroll:view", "payroll:create", "payroll:edit", "payroll:submit",
     "compliance:view", "report:view", "report:export",
     "analytics:view", "notifications:view",
+    "attendance:manage",
   ],
   finance_manager: [
     "employee:view",
@@ -133,6 +144,9 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "payroll:view", "payroll:approve",
     "compliance:view", "report:view", "report:export",
     "analytics:view", "notifications:view",
+    "portal:review_changes",
+    "leave:review",
+    "attendance:manage",
   ],
   auditor: [
     ...READ_ONLY,
@@ -145,6 +159,8 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ],
   employee: [
     "notifications:view",
+    "portal:view_own",
+    "portal:request_change",
   ],
 };
 

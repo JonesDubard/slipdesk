@@ -25,7 +25,13 @@ export type AuditAction =
   | "payroll.release"
   | "payroll.paid"
   | "report.export"
-  | "user.login";
+  | "user.login"
+  | "employee.change_request"
+  | "employee.change_request.approve"
+  | "employee.change_request.reject"
+  | "employee.portal_password_assign"
+  | "employee.portal_password_reset"
+  | "employee.portal_disabled";
 
 export interface AuditEntry {
   companyId: string;
@@ -137,6 +143,12 @@ export function auditActionLabel(action: string): string {
     "payroll.paid": "Payroll marked paid",
     "report.export": "Report exported",
     "user.login": "User signed in",
+    "employee.change_request": "Employee change request submitted",
+    "employee.change_request.approve": "Employee change request approved",
+    "employee.change_request.reject": "Employee change request rejected",
+    "employee.portal_password_assign": "Employee portal PIN assigned",
+    "employee.portal_password_reset": "Employee portal PIN reset",
+    "employee.portal_disabled": "Employee portal access disabled",
   };
   return map[action] ?? action;
 }

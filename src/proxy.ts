@@ -5,10 +5,12 @@ import { isPlatformAdminRole } from "@/lib/auth/platform-admin";
 const PROTECTED_PREFIXES = [
   "/dashboard", "/employees", "/payroll", "/organization", "/analytics", "/compliance",
   "/reports", "/audit", "/team", "/notifications", "/billing", "/settings", "/admin",
+  "/hr",
 ];
+
 // Note: /api/v1/* uses Bearer API keys — intentionally not cookie-protected here.
 
-const AUTH_PAGES = new Set(["/login", "/signup"]);
+const AUTH_PAGES = new Set(["/login", "/signup", "/portal/login"]);
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -18,9 +20,12 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const isProtected = PROTECTED_PREFIXES.some(
-    (p) => pathname === p || pathname.startsWith(`${p}/`),
-  );
+  const isEmployeePortal =
+    pathname === "/portal" ||
+    (pathname.startsWith("/portal/") && pathname !== "/portal/login");
+  const isProtected =
+    PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`)) ||
+    isEmployeePortal;
   const isAuthPage = AUTH_PAGES.has(pathname);
 
   // Marketing + public API: do NOT call supabase.auth.getUser().
@@ -62,11 +67,19 @@ export async function proxy(request: NextRequest) {
   const user = session?.user ?? null;
 
   if (!user && isProtected) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    const loginPath = isEmployeePortal ? "/portal/login" : "/login";
+    return NextResponse.redirect(new URL(loginPath, request.url));
   }
 
   if (user && isAuthPage) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    // Portal login → portal home; HR login → dashboard
+    const dest = pathname === "/portal/login" ? "/portal" : "/dashboard";
+    return NextResponse.redirect(new URL(dest, request.url));
+  }
+
+  // Employee portal skips company billing gate (employees are not billing principals).
+  if (isEmployeePortal) {
+    return response;
   }
 
   // Billing / trial gate. Interactive demo sessions skip (query flag or cookie).

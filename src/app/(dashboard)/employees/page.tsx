@@ -1736,6 +1736,7 @@ const EMPTY_FORM: Omit<Employee, "id" | "employeeNumber" | "fullName" | "isArchi
   allowances: 0, paymentMethod: "bank_transfer",
   bankName: "", accountNumber: "", momoNumber: "",
   branch: "", position: "", taxId: "", employmentStatus: "active", bankBranch: "",
+  portalEnabled: false,
 };
 
 function getInitials(first: string, last: string) {
@@ -1903,6 +1904,137 @@ const inputBase: React.CSSProperties = {
   outline: "none", transition: "border-color 0.2s",
 };
 
+function PortalAccessPanel({
+  employeeId,
+  enabled,
+  onEnabledChange,
+}: {
+  employeeId?: string;
+  enabled: boolean;
+  onEnabledChange: (v: boolean) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [tempPin, setTempPin] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function callCredentials(action: "assign" | "reset" | "disable") {
+    if (!employeeId) {
+      setErr("Save the employee first, then assign a portal PIN.");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    setMsg(null);
+    setTempPin(null);
+    try {
+      const res = await fetch(`/api/hr/employees/${employeeId}/portal-credentials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErr(data.error ?? "Request failed.");
+        return;
+      }
+      if (action === "disable") {
+        onEnabledChange(false);
+        setMsg("Portal access disabled.");
+        return;
+      }
+      onEnabledChange(true);
+      setTempPin(data.temporaryPassword ?? null);
+      setMsg(
+        action === "reset"
+          ? "PIN reset. Relay the temporary PIN to the employee — it will not be shown again."
+          : "Portal enabled. Relay the temporary PIN to the employee — it will not be shown again.",
+      );
+    } catch {
+      setErr("Network error.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{
+      background: "var(--background)", border: "1px solid var(--border)",
+      borderRadius: 12, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12,
+    }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "var(--foreground)" }}>
+            Employee portal access
+          </p>
+          <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--muted-foreground)", lineHeight: 1.4 }}>
+            Sign-in uses phone + HR-assigned PIN (no SMS). Employee must set a new password on first login.
+          </p>
+        </div>
+        <span style={{
+          flexShrink: 0, fontSize: 11, fontWeight: 700, padding: "4px 8px", borderRadius: 999,
+          background: enabled ? "color-mix(in oklch, var(--primary) 18%, transparent)" : "color-mix(in oklch, var(--foreground) 8%, transparent)",
+          color: enabled ? "var(--primary)" : "var(--muted-foreground)",
+        }}>
+          {enabled ? "Enabled" : "Off"}
+        </span>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => callCredentials(enabled ? "reset" : "assign")}
+          style={{
+            padding: "8px 12px", borderRadius: 8, border: "none", cursor: busy ? "wait" : "pointer",
+            background: "var(--primary)", color: "var(--primary-foreground)", fontSize: 12, fontWeight: 700,
+            opacity: busy ? 0.6 : 1,
+          }}
+        >
+          {busy ? "Working…" : enabled ? "Reset PIN" : "Enable & assign PIN"}
+        </button>
+        {enabled && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => callCredentials("disable")}
+            style={{
+              padding: "8px 12px", borderRadius: 8, cursor: busy ? "wait" : "pointer",
+              background: "transparent", border: "1px solid var(--border)",
+              color: "var(--muted-foreground)", fontSize: 12, fontWeight: 600,
+            }}
+          >
+            Disable portal
+          </button>
+        )}
+      </div>
+      {!employeeId && (
+        <p style={{ margin: 0, fontSize: 11, color: "#D97706" }}>
+          Save this employee record first, then return here to assign a PIN.
+        </p>
+      )}
+      {err && <p style={{ margin: 0, fontSize: 12, color: "#DC2626" }}>{err}</p>}
+      {msg && <p style={{ margin: 0, fontSize: 12, color: "var(--muted-foreground)" }}>{msg}</p>}
+      {tempPin && (
+        <div style={{
+          background: "color-mix(in oklch, var(--primary) 12%, transparent)",
+          border: "1px solid color-mix(in oklch, var(--primary) 35%, transparent)",
+          borderRadius: 10, padding: "12px 14px",
+        }}>
+          <p style={{ margin: 0, fontSize: 11, color: "var(--muted-foreground)" }}>
+            Temporary PIN (shown once — relay to employee)
+          </p>
+          <p style={{
+            margin: "6px 0 0", fontSize: 22, fontWeight: 800, letterSpacing: "0.12em",
+            fontFamily: "'DM Mono',monospace", color: "var(--foreground)",
+          }}>
+            {tempPin}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
@@ -1965,6 +2097,7 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
       branch: employee.branch ?? "", position: employee.position ?? "",
       taxId: employee.taxId ?? "", employmentStatus: employee.employmentStatus ?? "active",
       bankBranch: employee.bankBranch ?? "",
+      portalEnabled: employee.portalEnabled ?? false,
     } : { ...EMPTY_FORM, employeeNumber: "" }
   );
   const [saving, setSaving] = useState(false);
@@ -2082,6 +2215,11 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
               </div>
               <Field label="Email"><Inp type="email" value={form.email} onChange={(v) => set("email", v)} placeholder="employee@company.lr"/></Field>
               <Field label="Phone"><Inp value={form.phone} onChange={(v) => set("phone", v)} placeholder="+231770000000"/></Field>
+              <PortalAccessPanel
+                employeeId={employee?.id}
+                enabled={!!form.portalEnabled}
+                onEnabledChange={(v) => set("portalEnabled", v)}
+              />
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                 <Field label="Start Date"><Inp type="date" value={form.startDate} onChange={(v) => set("startDate", v)}/></Field>
                 <Field label="Employment Type">

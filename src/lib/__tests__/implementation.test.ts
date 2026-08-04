@@ -54,7 +54,9 @@ describe("RBAC families", () => {
     expect(roleFamily("payroll_officer")).toBe("manager");
     expect(roleFamily("employee")).toBe("employee");
     expect(can(normalizeRole("employee"), "payroll:view")).toBe(false);
+    expect(can(normalizeRole("employee"), "portal:view_own")).toBe(true);
     expect(can(normalizeRole("admin"), "users:manage")).toBe(true);
+    expect(can(normalizeRole("hr_manager"), "portal:review_changes")).toBe(true);
   });
 });
 

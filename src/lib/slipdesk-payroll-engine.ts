@@ -284,6 +284,8 @@
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+import { LABOR_RULES } from "@/lib/labor-rules";
+
 export type Currency = "USD" | "LRD";
 
 export interface PayrollInput {
@@ -333,8 +335,9 @@ export interface PayrollResult {
 
 const NASSCORP_EE_RATE   = 0.04;
 const NASSCORP_ER_RATE   = 0.06;
-const OT_MULTIPLIER      = 1.5;
-const HOLIDAY_MULTIPLIER = 2.0;
+/** Sourced from LABOR_RULES — do not hardcode a separate OT rate here. */
+const OT_MULTIPLIER      = LABOR_RULES.OT_MULTIPLIER;
+const HOLIDAY_MULTIPLIER = LABOR_RULES.HOLIDAY_MULTIPLIER;
 const MIN_WAGE_USD       = 150;
 
 /**

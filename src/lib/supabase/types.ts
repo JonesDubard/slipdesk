@@ -74,6 +74,11 @@ type EmployeeRow = {
   employment_status?: string | null;
   bank_branch?:       string | null;
   date_terminated?:   string | null;
+  // ── Employee portal (migration 0010 / 0011) ──
+  user_id?:           string | null;
+  phone_e164?:        string | null;
+  address?:           string | null;
+  portal_enabled?:    boolean | null;
 };
 
 type PayRunRow = {
@@ -185,10 +190,39 @@ type CompanyMemberRow = {
   company_id:    string;
   user_id:       string | null;
   role:          "super_admin" | "company_owner" | "payroll_officer" |
-                 "finance_manager" | "hr_manager" | "auditor" | "executive";
+                 "finance_manager" | "hr_manager" | "auditor" | "executive" | "employee";
   invited_email: string | null;
   status:        "pending" | "active";
   created_at:    string;
+};
+
+type EmployeeOtpRow = {
+  id:           string;
+  phone_e164:   string;
+  employee_id:  string;
+  company_id:   string;
+  code_hash:    string;
+  attempts:     number;
+  max_attempts: number;
+  expires_at:   string;
+  consumed_at:  string | null;
+  created_at:   string;
+};
+
+type EmployeeChangeRequestRow = {
+  id:               string;
+  company_id:       string;
+  employee_id:      string;
+  requested_by:     string | null;
+  field_type:       "address" | "bank_details" | "phone";
+  old_value:        Json;
+  new_value:        Json;
+  status:           "pending" | "approved" | "rejected";
+  reviewed_by:      string | null;
+  reviewed_at:      string | null;
+  rejection_reason: string | null;
+  created_at:       string;
+  updated_at:       string;
 };
 
 type AuditLogRow = {
@@ -297,6 +331,60 @@ export interface Database {
         Insert: Omit<ComplianceSnapshotRow, "id" | "created_at"> & { id?: string };
         Update: Partial<Omit<ComplianceSnapshotRow, "id" | "created_at">>;
       };
+      employee_otps: {
+        Row:    EmployeeOtpRow;
+        Insert: Omit<EmployeeOtpRow, "id" | "created_at" | "attempts" | "max_attempts" | "consumed_at"> & {
+          id?: string;
+          attempts?: number;
+          max_attempts?: number;
+          consumed_at?: string | null;
+        };
+        Update: Partial<Omit<EmployeeOtpRow, "id" | "created_at">>;
+      };
+      employee_change_requests: {
+        Row:    EmployeeChangeRequestRow;
+        Insert: Omit<EmployeeChangeRequestRow, "id" | "created_at" | "updated_at" | "status" | "reviewed_by" | "reviewed_at" | "rejection_reason"> & {
+          id?: string;
+          status?: "pending" | "approved" | "rejected";
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+          rejection_reason?: string | null;
+        };
+        Update: Partial<Omit<EmployeeChangeRequestRow, "id" | "created_at">>;
+      };
+      employee_credentials: {
+        Row: {
+          employee_id: string;
+          company_id: string;
+          password_hash: string;
+          must_change_password: boolean;
+          failed_attempts: number;
+          locked_until: string | null;
+          last_login_at: string | null;
+          password_changed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          employee_id: string;
+          company_id: string;
+          password_hash: string;
+          must_change_password?: boolean;
+          failed_attempts?: number;
+          locked_until?: string | null;
+          last_login_at?: string | null;
+          password_changed_at?: string | null;
+        };
+        Update: Partial<{
+          password_hash: string;
+          must_change_password: boolean;
+          failed_attempts: number;
+          locked_until: string | null;
+          last_login_at: string | null;
+          password_changed_at: string | null;
+          updated_at: string;
+        }>;
+      };
       // ═══ ADD THIS NEW TABLE ═══
       payslip_generations: {
         Row: {
@@ -340,3 +428,5 @@ export type DbCompanyMember  = CompanyMemberRow;
 export type DbAuditLog       = AuditLogRow;
 export type DbNotification   = NotificationRow;
 export type DbComplianceSnapshot = ComplianceSnapshotRow;
+export type DbEmployeeOtp = EmployeeOtpRow;
+export type DbEmployeeChangeRequest = EmployeeChangeRequestRow;

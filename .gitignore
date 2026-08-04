@@ -44,3 +44,6 @@ next-env.d.ts
 
 # local Lighthouse / CDP audit artifacts
 .lighthouse/
+
+# local portable Node toolkit (not part of the app)
+.tools/

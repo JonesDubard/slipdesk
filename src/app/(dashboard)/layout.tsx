@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Users, FileText, Settings,
   LogOut, ChevronRight, Bell, Menu, X, CreditCard, Loader,
   BarChart3, ShieldCheck, FileBarChart, ScrollText, UserCog, Network, CalendarDays,
-  AlertTriangle, CheckCircle2, Info,
+  Clock, AlertTriangle, CheckCircle2, Info,
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { AppProvider, useApp } from "@/context/AppContext";
@@ -36,6 +36,10 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/reports",    label: "Reports",    icon: FileBarChart, permission: "report:view" },
   { href: "/audit",      label: "Audit",      icon: ScrollText,   feature: "auditTrail", permission: "audit:view" },
   { href: "/team",       label: "Team & Roles", icon: UserCog,    feature: "advancedRoles", permission: "users:manage" },
+  { href: "/hr/change-requests", label: "Change Requests", icon: ScrollText, permission: "portal:review_changes" },
+  { href: "/hr/leave", label: "Leave", icon: CalendarDays, permission: "leave:review" },
+  { href: "/hr/attendance", label: "Attendance", icon: Clock, permission: "attendance:manage" },
+  { href: "/hr/notifications", label: "Email Log", icon: Bell, permission: "notifications:view" },
   { href: "/billing",    label: "Billing",    icon: CreditCard,   permission: "billing:manage" },
   { href: "/settings",   label: "Settings",   icon: Settings },
 ];
@@ -414,12 +418,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { user, loading, company } = useApp();
+  const { user, loading, company, role } = useApp();
   const router = useRouter();
 
   useEffect(() => {
     if (!loading && !user) {
       router.replace("/login");
+      return;
+    }
+    // Employee portal principals belong on /portal, not the HR dashboard.
+    if (!loading && user && role === "employee") {
+      router.replace("/portal");
       return;
     }
     // Account lock guard — redirect to billing with a lock flag
@@ -428,7 +437,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
       const path = window.location.pathname;
       if (path !== "/billing") router.replace("/billing");
     }
-  }, [loading, user, company.isLocked, router]);
+  }, [loading, user, company.isLocked, role, router]);
 
   if (loading) {
     return (

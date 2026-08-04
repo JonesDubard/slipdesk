@@ -223,6 +223,12 @@ function LoginForm() {
         <p className="text-center text-xs text-slate-400 mt-6">
           LRA & NASSCORP compliant payroll for Liberian businesses
         </p>
+        <p className="text-center text-xs text-slate-400 mt-2">
+          Employee?{" "}
+          <Link href="/portal/login" className="text-[#002147] font-medium hover:underline">
+            Sign in to the self-service portal
+          </Link>
+        </p>
         <p className="text-center text-xs text-slate-300 mt-2">
           <Link href="/legal" className="hover:text-slate-500 transition-colors">Terms of Service</Link>
           <span className="mx-2">·</span>

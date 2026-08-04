@@ -20,12 +20,16 @@ export const DASHBOARD_NAV_ITEMS: NavItemDef[] = [
   { href: "/reports",    label: "Reports",    permission: "report:view" },
   { href: "/audit",      label: "Audit",      feature: "auditTrail", permission: "audit:view" },
   { href: "/team",       label: "Team & Roles", feature: "advancedRoles", permission: "users:manage" },
+  { href: "/hr/change-requests", label: "Change Requests", permission: "portal:review_changes" },
+  { href: "/hr/leave", label: "Leave", permission: "leave:review" },
+  { href: "/hr/attendance", label: "Attendance", permission: "attendance:manage" },
+  { href: "/hr/notifications", label: "Email Log", permission: "notifications:view" },
   { href: "/billing",    label: "Billing",    permission: "billing:manage" },
   { href: "/settings",   label: "Settings" },
 ];
 
 /** Resolve effective RBAC role for sidebar/API checks. Owners always get company_owner. */
-export function resolveAppRole(memberRole: Role | null, profileRole: string | null | undefined): Role {
+export function resolveAppRole(memberRole: Role | null, _profileRole: string | null | undefined): Role {
   if (memberRole) return memberRole;
   return "company_owner";
 }
