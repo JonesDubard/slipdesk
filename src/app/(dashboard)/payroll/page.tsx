@@ -3,6 +3,7 @@
 import {
   useReducer, useMemo, useState, useCallback, useEffect, useRef,
 } from "react";
+import { formatEmployeeFullName } from "@/lib/employee-name";
 import {
   createColumnHelper, flexRender,
   getCoreRowModel, useReactTable,
@@ -90,7 +91,7 @@ function bulkRowToPayRunLine(r: BulkRow, exchangeRate: number, realId?: string):
   const id  = realId ?? `BULK-${emp.employeeNumber||Date.now()}-${Math.random().toString(36).slice(2,7)}`;
   return {
     id, employeeId: id, employeeNumber: emp.employeeNumber,
-    fullName: `${emp.firstName} ${emp.lastName}`.trim(),
+    fullName: formatEmployeeFullName(emp.firstName, emp.lastName, emp.middleName),
     jobTitle: emp.jobTitle, department: emp.department,
     currency: emp.currency, rate: emp.rate,
     regularHours: r.regularHours, overtimeHours: r.overtimeHours, holidayHours: r.holidayHours,

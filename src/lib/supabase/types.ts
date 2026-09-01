@@ -41,6 +41,7 @@ type EmployeeRow = {
   company_id:       string;
   employee_number:  string;
   first_name:       string;
+  middle_name:      string;
   last_name:        string;
   full_name:        string;
   job_title:        string;

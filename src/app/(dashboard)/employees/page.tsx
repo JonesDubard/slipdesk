@@ -1721,7 +1721,7 @@ const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
 ];
 
 const CSV_HEADERS = [
-  "employee_number","first_name","last_name","job_title","department",
+  "employee_number","first_name","middle_name","last_name","job_title","department",
   "email","phone","county","start_date","employment_type","currency",
   "rate","standard_hours","allowances","nasscorp_number","payment_method",
   "bank_name","account_number","momo_number","regular_hours","overtime_hours",
@@ -1729,7 +1729,7 @@ const CSV_HEADERS = [
 ];
 
 const EMPTY_FORM: Omit<Employee, "id" | "employeeNumber" | "fullName" | "isArchived"> = {
-  firstName: "", lastName: "", jobTitle: "", department: "Operations",
+  firstName: "", middleName: "", lastName: "", jobTitle: "", department: "Operations",
   email: "", phone: "", county: "Montserrado", startDate: "",
   employmentType: "full_time", currency: "USD", rate: 0,
   standardHours: 173.33, isActive: true, nasscorpNumber: "",
@@ -1751,8 +1751,8 @@ function getAvatarColor(name: string) {
 function downloadTemplate() {
   const rows = [
     CSV_HEADERS.join(","),
-    "EMP-001,Moses,Kollie,Operations Manager,Operations,m.kollie@co.lr,+231770000001,Montserrado,2023-01-15,full_time,USD,8.50,173.33,0,NSC-001-2024,bank_transfer,Ecobank Liberia,1234567890,,173.33,0,0,100,30,20,0,0",
-    "EMP-002,Fanta,Kamara,Finance Officer,Finance,f.kamara@co.lr,+231770000002,Montserrado,2023-03-01,full_time,LRD,1500,173.33,50000,NSC-002-2024,mtn_momo,,,0770000002,173.33,0,8,0,0,0,250,0",
+    "EMP-001,Moses,James,Kollie,Operations Manager,Operations,m.kollie@co.lr,+231770000001,Montserrado,2023-01-15,full_time,USD,8.50,173.33,0,NSC-001-2024,bank_transfer,Ecobank Liberia,1234567890,,173.33,0,0,100,30,20,0,0",
+    "EMP-002,Fanta,,Kamara,Finance Officer,Finance,f.kamara@co.lr,+231770000002,Montserrado,2023-03-01,full_time,LRD,1500,173.33,50000,NSC-002-2024,mtn_momo,,,0770000002,173.33,0,8,0,0,0,250,0",
   ];
   const blob = new Blob([rows.join("\n")], { type: "text/csv" });
   const url  = URL.createObjectURL(blob);
@@ -1800,6 +1800,7 @@ function parseEmployeeCSV(text: string): ParsedRow[] {
 
     const errors: string[] = [];
     const firstName = raw.first_name || raw.firstname || "";
+    const middleName = raw.middle_name || raw.middlename || "";
     const lastName  = raw.last_name  || raw.lastname  || "";
     const currency  = (raw.currency  || "USD").toUpperCase();
     const pm        = raw.payment_method || raw.paymentmethod || "bank_transfer";
@@ -1811,11 +1812,18 @@ function parseEmployeeCSV(text: string): ParsedRow[] {
 
     const n = (v: string | undefined) => (v ? parseFloat(v) : null);
 
+    const employeeNumber = (
+      raw.employee_number ||
+      raw.employeenumber ||
+      raw["employee#"] ||
+      ""
+    ).trim();
+
     results.push({
       errors,
       data: {
-        employeeNumber: "",
-        firstName, lastName,
+        employeeNumber,
+        firstName, middleName, lastName,
         jobTitle:       raw.job_title   || "",
         department:     raw.department  || "Operations",
         email:          raw.email       || "",
@@ -2085,7 +2093,7 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
   const [form, setForm] = useState<Omit<Employee, "id" | "fullName" | "isArchived">>(
     employee ? {
       employeeNumber: employee.employeeNumber,
-      firstName: employee.firstName, lastName: employee.lastName,
+      firstName: employee.firstName, middleName: employee.middleName, lastName: employee.lastName,
       jobTitle: employee.jobTitle, department: employee.department,
       email: employee.email, phone: employee.phone, county: employee.county,
       startDate: employee.startDate, employmentType: employee.employmentType,
@@ -2183,6 +2191,7 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                 <Field label="First Name"><Inp value={form.firstName} onChange={(v) => set("firstName", v)} placeholder="Moses"/></Field>
+                <Field label="Middle Name"><Inp value={form.middleName} onChange={(v) => set("middleName", v)} placeholder="James"/></Field>
                 <Field label="Last Name"><Inp value={form.lastName} onChange={(v) => set("lastName", v)} placeholder="Kollie"/></Field>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
@@ -2672,9 +2681,9 @@ function CSVUploadModal({ onClose, onImport }: {
                             ROW {i + 2}
                           </span>
                           <div>
-                            {r.data.firstName || r.data.lastName ? (
+                            {r.data.firstName || r.data.middleName || r.data.lastName ? (
                               <p style={{ color: "var(--foreground)", fontSize: 12, margin: "0 0 2px", fontWeight: 600 }}>
-                                {[r.data.firstName, r.data.lastName].filter(Boolean).join(" ") || "Unknown"}
+                                {[r.data.firstName, r.data.middleName, r.data.lastName].filter(Boolean).join(" ") || "Unknown"}
                               </p>
                             ) : null}
                             <p style={{ color: "var(--muted-foreground)", fontSize: 11, margin: 0 }}>
@@ -2930,7 +2939,9 @@ export default function EmployeesPage() {
       if (!q) return true;
       return (
         e.firstName.toLowerCase().includes(q) ||
+        e.middleName.toLowerCase().includes(q) ||
         e.lastName.toLowerCase().includes(q)  ||
+        e.fullName.toLowerCase().includes(q)  ||
         e.jobTitle.toLowerCase().includes(q)  ||
         e.email.toLowerCase().includes(q)     ||
         e.employeeNumber.toLowerCase().includes(q)
@@ -2954,21 +2965,45 @@ export default function EmployeesPage() {
     if (!guardAction("import_employees")) {
       return { imported: 0, skipped: [{ rowNum: 0, name: "Import", reasons: ["Demo read-only"] }] };
     }
+    const usedNumbers = new Set(
+      allEmployees.map((e) => e.employeeNumber.trim().toLowerCase()).filter(Boolean),
+    );
     const existingNums = allEmployees
       .map((e) => parseInt(e.employeeNumber.replace(/\D/g, ""), 10))
       .filter(Boolean);
     let nextNum = existingNums.length ? Math.max(...existingNums) + 1 : 1;
+
+    const nextAutoNumber = () => {
+      let candidate = `EMP-${String(nextNum++).padStart(3, "0")}`;
+      while (usedNumbers.has(candidate.toLowerCase())) {
+        candidate = `EMP-${String(nextNum++).padStart(3, "0")}`;
+      }
+      return candidate;
+    };
 
     let imported = 0;
     const skipped: ImportResult["skipped"] = [];
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      const empNum = `EMP-${String(nextNum++).padStart(3, "0")}`;
+      const csvNum = (row.employeeNumber ?? "").trim();
+      const name = [row.firstName, row.middleName, row.lastName].filter(Boolean).join(" ");
+
+      if (csvNum && usedNumbers.has(csvNum.toLowerCase())) {
+        skipped.push({
+          rowNum: i + 2,
+          name,
+          reasons: [`Employee number "${csvNum}" already exists`],
+        });
+        continue;
+      }
+
+      const empNum = csvNum || nextAutoNumber();
+      usedNumbers.add(empNum.toLowerCase());
 
       try {
         await addEmployee(
-          { ...(row as Omit<Employee, "id" | "fullName" | "isArchived">), isActive: true },
+          { ...(row as Omit<Employee, "id" | "fullName" | "isArchived">), isActive: true, employeeNumber: empNum },
           empNum,
         );
         imported++;
@@ -2985,7 +3020,7 @@ export default function EmployeesPage() {
         console.error(`Row ${i + 2} failed:`, err);
         skipped.push({
           rowNum: i + 2,
-          name: [row.firstName, row.lastName].filter(Boolean).join(" "),
+          name: [row.firstName, row.middleName, row.lastName].filter(Boolean).join(" "),
           reasons: [errorMessage],
         });
       }
@@ -3344,7 +3379,7 @@ export default function EmployeesPage() {
                         <Avatar firstName={emp.firstName} lastName={emp.lastName}/>
                         <div>
                           <p style={{ color: "var(--foreground)", fontWeight: 600, fontSize: 13, margin: 0 }}>
-                            {emp.firstName} {emp.lastName}
+                            {emp.fullName || [emp.firstName, emp.middleName, emp.lastName].filter(Boolean).join(" ")}
                           </p>
                           <p style={{ color: "var(--muted-foreground)", fontSize: 11, margin: "2px 0 0", fontFamily: "'DM Mono',monospace" }}>
                             {emp.employeeNumber || emp.jobTitle}

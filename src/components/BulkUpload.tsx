@@ -59,7 +59,7 @@ interface Props {
 
 // Core columns that always appear in the template
 const CORE_COLUMNS = [
-  "employee_number", "first_name", "last_name", "job_title", "department",
+  "employee_number", "first_name", "middle_name", "last_name", "job_title", "department",
   "email", "phone", "county", "start_date",
   "employment_type", "currency", "rate", "standard_hours", "allowances",
   "nasscorp_number",
@@ -76,7 +76,7 @@ const CORE_COLUMNS = [
 
 const EXAMPLE_ROWS = [
   [
-    "EMP-001","Moses","Kollie","Accountant","Finance",
+    "EMP-001","Moses","James","Kollie","Accountant","Finance",
     "moses@company.lr","+231770000001","Montserrado","2023-01-15",
     "full_time","USD","15.00","173.33","50.00",
     "NASC-001",
@@ -85,7 +85,7 @@ const EXAMPLE_ROWS = [
     "100","30","20","0","0",
   ],
   [
-    "EMP-002","Grace","Tamba","HR Officer","Human Resources",
+    "EMP-002","Grace","","Tamba","HR Officer","Human Resources",
     "grace@company.lr","+231770000002","Margibi","2023-03-01",
     "full_time","LRD","2500","173.33","0",
     "NASC-002",
@@ -94,7 +94,7 @@ const EXAMPLE_ROWS = [
     "500","0","0","250","0",
   ],
   [
-    "EMP-003","James","Freeman","Driver","Operations",
+    "EMP-003","James","","Freeman","Driver","Operations",
     "james@company.lr","+231770000003","Bong","2024-06-01",
     "casual","USD","8.50","0","0",
     "",
@@ -162,6 +162,7 @@ function parseRow(
   dedColumns: string[],
 ): { row: BulkRow | null; error: string | null } {
   const firstName = raw.first_name?.trim();
+  const middleName = raw.middle_name?.trim() || raw.middlename?.trim() || "";
   const lastName  = raw.last_name?.trim();
   if (!firstName || !lastName)
     return { row: null, error: `Line ${lineNum}: first_name and last_name are required.` };
@@ -183,6 +184,7 @@ function parseRow(
   const employee: Omit<Employee, "id" | "fullName"> = {
     employeeNumber: raw.employee_number?.trim() || "",
     firstName,
+    middleName,
     lastName,
     jobTitle:       raw.job_title?.trim()   || "",
     department:     raw.department?.trim()  || "",

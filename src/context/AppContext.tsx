@@ -13,6 +13,7 @@ import { logAudit } from "@/lib/audit";
 import { createNotification } from "@/lib/notifications";
 import { DemoReadonlyError } from "@/lib/demo/errors";
 import type { DemoFeatureName } from "@/lib/demo/constants";
+import { formatEmployeeFullName } from "@/lib/employee-name";
 
 function blockIfDemo(isDemo: boolean, feature: DemoFeatureName) {
   if (!isDemo) return;
@@ -34,6 +35,7 @@ export interface Employee {
   id:             string;
   employeeNumber: string;
   firstName:      string;
+  middleName:     string;
   lastName:       string;
   fullName:       string;
   jobTitle:       string;
@@ -120,8 +122,9 @@ function dbToEmployee(row: DbEmployee): Employee {
     id:             row.id,
     employeeNumber: row.employee_number,
     firstName:      row.first_name,
+    middleName:     row.middle_name ?? "",
     lastName:       row.last_name,
-    fullName:       row.full_name,
+    fullName:       row.full_name || formatEmployeeFullName(row.first_name, row.last_name, row.middle_name),
     jobTitle:       row.job_title,
     department:     row.department,
     email:          row.email,
@@ -542,6 +545,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       company_id:      coId,
       employee_number: finalNumber,
       first_name:      data.firstName,
+      middle_name:     data.middleName ?? "",
       last_name:       data.lastName,
       job_title:       data.jobTitle,
       department:      data.department,
@@ -599,6 +603,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const prev = allEmployees.find((e) => e.id === id);
     const baseUpdate = {
       ...(data.firstName      !== undefined && { first_name:      data.firstName      }),
+      ...(data.middleName     !== undefined && { middle_name:     data.middleName     }),
       ...(data.lastName       !== undefined && { last_name:       data.lastName       }),
       ...(data.jobTitle       !== undefined && { job_title:       data.jobTitle       }),
       ...(data.department     !== undefined && { department:      data.department     }),

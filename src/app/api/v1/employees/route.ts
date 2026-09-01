@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (auth.admin as any)
     .from("employees")
-    .select("id, employee_number, first_name, last_name, email, department, branch, job_title, is_active, currency, rate")
+    .select("id, employee_number, first_name, middle_name, last_name, email, department, branch, job_title, is_active, currency, rate")
     .eq("company_id", auth.companyId)
     .order("last_name");
 
@@ -69,6 +69,7 @@ export async function GET(req: NextRequest) {
       id: e.id,
       employeeNumber: e.employee_number,
       firstName: e.first_name,
+      middleName: e.middle_name ?? "",
       lastName: e.last_name,
       email: e.email,
       department: e.department,
