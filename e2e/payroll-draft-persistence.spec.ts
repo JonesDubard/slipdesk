@@ -56,20 +56,40 @@ test.describe("Localhost comparison (if dev server is up)", () => {
 
 async function login(page: Page, base: string) {
   await page.goto(`${base}/login`, { waitUntil: "domcontentloaded" });
-  await page.getByLabel(/email/i).fill(EMAIL);
-  await page.getByLabel(/password/i).fill(PASSWORD);
-  await page.getByRole("button", { name: /^sign in$/i }).click();
+  await page.locator('input[type="email"]').fill(EMAIL);
+  await page.locator('input[type="password"]').fill(PASSWORD);
+  await page.locator("button.w-full", { hasText: /^Sign In$/ }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 30_000 });
 }
 
-async function startOrOpenDraft(page: Page) {
-  await page.goto("/payroll", { waitUntil: "domcontentloaded" });
+async function startOrOpenDraft(page: Page, base: string) {
+  await page.goto(`${base}/payroll`, { waitUntil: "domcontentloaded" });
   const startBtn = page.getByRole("button", { name: /start pay run/i });
   const startVisible = await startBtn.isVisible().catch(() => false);
   if (startVisible) {
     await startBtn.click();
   }
-  await expect(page.getByText(/start pay run/i)).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByRole("button", { name: /start pay run/i })).toHaveCount(0, { timeout: 20_000 });
+}
+
+/** OT is the 3rd EditableCell button in a payroll row (Rate, Reg, OT, …). */
+async function setFirstRowOvertime(page: Page, hours: string) {
+  const row = page.locator("table tbody tr").first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.locator("button").nth(2).click();
+  const input = row.locator("input");
+  await expect(input).toBeVisible();
+  await input.fill(hours);
+  await input.blur();
+}
+
+async function firstRowOvertimeValue(page: Page) {
+  const row = page.locator("table tbody tr").first();
+  const editing = row.locator("input");
+  if (await editing.isVisible().catch(() => false)) {
+    return editing.inputValue();
+  }
+  return (await row.locator("button").nth(2).innerText()).replace(/[^\d.]/g, "");
 }
 
 test.describe("Payroll draft restore (requires E2E_EMAIL / E2E_PASSWORD)", () => {
@@ -80,28 +100,25 @@ test.describe("Payroll draft restore (requires E2E_EMAIL / E2E_PASSWORD)", () =>
     console.log(`Precondition LIVE /api/payroll/runs: ${api.status}`);
     test.skip(api.status === 404, "Draft API is not on slipdesk.com — restore cannot work until this branch is the production deploy");
 
+    test.setTimeout(90_000);
     await login(page, LIVE);
-    await startOrOpenDraft(page);
+    await startOrOpenDraft(page, LIVE);
 
-    const overtime = page.locator('input[type="number"]').first();
-    await expect(overtime).toBeVisible({ timeout: 20_000 });
-    await overtime.fill("7");
-    await overtime.blur();
+    await setFirstRowOvertime(page, "7");
 
-    await expect(page.getByText(/^Saved$|^Saving|^Draft autosave enabled$/i).first()).toBeVisible({
+    await expect(page.getByText(/^Saved$|^Saving…$|^Draft autosave enabled$/i).first()).toBeVisible({
       timeout: 15_000,
     });
     await page.waitForTimeout(1800);
 
-    await page.goto("/employees", { waitUntil: "domcontentloaded" });
-    await page.goto("/payroll", { waitUntil: "domcontentloaded" });
+    await page.goto(`${LIVE}/employees`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${LIVE}/payroll`, { waitUntil: "domcontentloaded" });
 
     await expect(page.getByRole("button", { name: /start pay run/i })).toHaveCount(0);
-    await expect(overtime).toBeVisible();
-    await expect(overtime).toHaveValue("7");
+    await expect.poll(async () => firstRowOvertimeValue(page), { timeout: 15_000 }).toMatch(/^7(\.0+)?$/);
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByRole("button", { name: /start pay run/i })).toHaveCount(0);
-    await expect(page.locator('input[type="number"]').first()).toHaveValue("7");
+    await expect.poll(async () => firstRowOvertimeValue(page), { timeout: 15_000 }).toMatch(/^7(\.0+)?$/);
   });
 });
