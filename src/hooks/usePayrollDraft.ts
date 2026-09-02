@@ -98,6 +98,25 @@ export function usePayrollDraftAutosave(snapshot: DraftSnapshot, enabled: boolea
     saveNow,
   ]);
 
+  // Flush immediately on tab switch / refresh / route unmount so a 1.5s debounce
+  // cannot drop the latest edit before the user leaves Payroll.
+  useEffect(() => {
+    const flush = () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      void saveNow();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+      flush();
+    };
+  }, [saveNow]);
+
   return { autosaveState, saveNow };
 }
 
@@ -109,18 +128,26 @@ export async function createPayrollDraft(body: {
   runStarted: boolean;
   lines: PayRunLine[];
   branchId?: string | null;
-}): Promise<{ id: string } | null> {
+}): Promise<{ id: string } | { error: string; status: number }> {
   const res = await fetch("/api/payroll/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) return null;
-  const data = await res.json();
-  return data.run?.id ? { id: data.run.id as string } : null;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return {
+      error: typeof data.error === "string" ? data.error : `Could not create draft (${res.status})`,
+      status: res.status,
+    };
+  }
+  if (!data.run?.id) {
+    return { error: "Draft created but the server returned no run id", status: res.status };
+  }
+  return { id: data.run.id as string };
 }
 
-export async function loadActivePayrollDraft(branchId: string | null = null): Promise<{
+export async function loadActivePayrollDraft(branchId?: string | null): Promise<{
   payRunId: string;
   periodLabel: string;
   payDate: string;
@@ -132,8 +159,13 @@ export async function loadActivePayrollDraft(branchId: string | null = null): Pr
   branchId: string | null;
   branchName: string | null;
 } | null> {
-  const scopeParam = branchId ? branchId : "all";
-  const listRes = await fetch(`/api/payroll/runs?active=true&branchId=${encodeURIComponent(scopeParam)}`);
+  const params = new URLSearchParams({ active: "true" });
+  // undefined = most recent draft in any branch scope (used on first mount).
+  // null = org-wide only; string = that branch.
+  if (branchId !== undefined) {
+    params.set("branchId", branchId ?? "all");
+  }
+  const listRes = await fetch(`/api/payroll/runs?${params.toString()}`);
   if (!listRes.ok) return null;
   const list = await listRes.json();
   const first = list.runs?.[0];

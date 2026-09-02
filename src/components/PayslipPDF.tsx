@@ -473,6 +473,19 @@ function PayslipDocument({ line, company, payDate, periodLabel, payment }: Paysl
     }] : []),
   ];
 
+  const ded = line.deductions ?? 0;
+  const dedItems = line.deductionItems ?? [];
+  const otherDedRows =
+    dedItems.length > 0
+      ? dedItems.map((item) => ({
+          label: item.label,
+          note: item.note ?? "",
+          amount: item.amount,
+        }))
+      : ded > 0
+        ? [{ label: "Other Deductions", note: "Pay advance / loan repayment / etc.", amount: ded }]
+        : [];
+
   const deductionRows = [
     {
       label:  "NASSCORP (Employee 4%)",
@@ -484,6 +497,7 @@ function PayslipDocument({ line, company, payDate, periodLabel, payment }: Paysl
       note:   `Effective rate: ${(calc.Paye.effectiveRate * 100).toFixed(1)}%`,
       amount: calc.Paye.taxInBase,
     },
+    ...otherDedRows,
   ];
 
   const generated = new Date().toLocaleDateString("en-LR", {

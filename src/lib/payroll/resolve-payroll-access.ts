@@ -15,8 +15,17 @@ export const DRAFT_AUTOSAVE_STATUSES: PayRunStatus[] = ["draft", "review", "appr
 /** Statuses that are finalized — never overwrite via draft save. */
 export const FINALIZED_PAY_RUN_STATUSES: PayRunStatus[] = ["paid", "locked", "archived"];
 
-export async function resolvePayrollAccess(userId: string) {
-  const admin = createAdminClient();
+export async function resolvePayrollAccess(
+  userId: string,
+  fallbackClient?: unknown,
+) {
+  let admin: unknown;
+  try {
+    admin = createAdminClient();
+  } catch {
+    if (!fallbackClient) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured");
+    admin = fallbackClient;
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = admin as any;
 

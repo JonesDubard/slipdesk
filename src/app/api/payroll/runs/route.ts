@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const access = await resolvePayrollAccess(user.id);
+  const access = await resolvePayrollAccess(user.id, supabase);
   if (!access || !canViewPayroll(access.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -36,10 +36,11 @@ export async function GET(req: NextRequest) {
   const branchFilter = parseBranchIdParam(req.nextUrl.searchParams.get("branchId"));
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let query = (access.admin as any)
+  const db = access.admin as any;
+  let query = db
     .from("pay_runs")
     .select(
-      "id, period_label, pay_date, status, run_type, exchange_rate, employee_count, branch_id, updated_at, created_at, branches(name)",
+      "id, period_label, pay_date, status, run_type, exchange_rate, employee_count, branch_id, updated_at, created_at",
     )
     .eq("company_id", access.companyId)
     .order("updated_at", { ascending: false })
@@ -56,7 +57,28 @@ export async function GET(req: NextRequest) {
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
-  return NextResponse.json({ runs: data ?? [] });
+  const rows = data ?? [];
+  const branchIds = [...new Set(
+    rows.map((r: { branch_id?: string | null }) => r.branch_id).filter(Boolean),
+  )] as string[];
+  let nameById = new Map<string, string>();
+  if (branchIds.length) {
+    const { data: branchRows } = await db
+      .from("branches")
+      .select("id, name")
+      .eq("company_id", access.companyId)
+      .in("id", branchIds);
+    nameById = new Map(
+      (branchRows ?? []).map((b: { id: string; name: string }) => [b.id, b.name]),
+    );
+  }
+
+  return NextResponse.json({
+    runs: rows.map((r: { branch_id?: string | null }) => ({
+      ...r,
+      branches: r.branch_id ? { name: nameById.get(r.branch_id) ?? null } : null,
+    })),
+  });
 }
 
 /** POST /api/payroll/runs — create a new draft pay run. */
@@ -67,7 +89,7 @@ export async function POST(req: NextRequest) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const access = await resolvePayrollAccess(user.id);
+  const access = await resolvePayrollAccess(user.id, supabase);
   if (!access || !canEditPayrollDraft(access.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

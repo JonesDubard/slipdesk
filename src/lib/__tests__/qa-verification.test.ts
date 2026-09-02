@@ -120,6 +120,8 @@ describe("QA: branch-scoped payroll helpers", () => {
   it("parses org-wide branch query param", () => {
     expect(parseBranchIdParam("all")).toBe(null);
     expect(parseBranchIdParam("uuid-1")).toBe("uuid-1");
+    expect(parseBranchIdParam(null)).toBeUndefined();
+    expect(parseBranchIdParam("")).toBeUndefined();
     expect(branchScopeKey(null)).toBe(ORG_WIDE_BRANCH_PARAM);
   });
 });

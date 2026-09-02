@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const access = await resolvePayrollAccess(user.id);
+  const access = await resolvePayrollAccess(user.id, supabase);
   if (!access || !canViewPayroll(access.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

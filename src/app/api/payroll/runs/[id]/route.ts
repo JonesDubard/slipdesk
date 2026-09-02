@@ -39,7 +39,7 @@ export async function GET(_req: NextRequest, ctx: RouteCtx) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const access = await resolvePayrollAccess(user.id);
+  const access = await resolvePayrollAccess(user.id, supabase);
   if (!access || !canViewPayroll(access.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -134,7 +134,7 @@ export async function PATCH(req: NextRequest, ctx: RouteCtx) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const access = await resolvePayrollAccess(user.id);
+  const access = await resolvePayrollAccess(user.id, supabase);
   if (!access || !canEditPayrollDraft(access.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

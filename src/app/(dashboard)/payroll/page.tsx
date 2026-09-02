@@ -1042,7 +1042,17 @@ export default function PayrollPage() {
       lines: calcRows,
       branchId,
     });
-    if (created?.id) setPayRunId(created.id);
+    if ("id" in created) {
+      setPayRunId(created.id);
+    } else {
+      toast.error(
+        created.error === "Unauthorized" || created.status === 401
+          ? "Could not save this draft — you may need to sign in again."
+          : created.status === 404
+            ? "Draft save is not available on this deployment. Leaving Payroll will reset the run."
+            : `Could not save this draft: ${created.error}. Leaving Payroll will reset the run.`,
+      );
+    }
   }
 
   async function advanceStatus() {
@@ -2333,6 +2343,11 @@ export default function PayrollPage() {
             {autosaveState === "saved" && "Saved"}
             {autosaveState === "error" && "Unable to save — check connection"}
             {autosaveState === "idle" && "Draft autosave enabled"}
+          </p>
+        )}
+        {runStarted && !payRunId && status !== "paid" && (
+          <p style={{ margin: "10px 0 0", fontSize: 11, color: "var(--destructive)", fontFamily: "'DM Mono',monospace" }}>
+            Draft not saved to the server — leaving this page will reset payroll.
           </p>
         )}
         {status === "approved" && (
