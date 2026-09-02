@@ -937,8 +937,6 @@ export default function PayrollPage() {
     });
   }, [lines, nameFilter, nameSort]);
 
-  if (initializing) return <PageSkeleton />;
-
   const isLocked = status === "approved" || status === "paid";
   const warningCount = lines.filter((l) => l.calc && l.calc.warnings.length > 0).length;
 
@@ -1554,6 +1552,8 @@ export default function PayrollPage() {
     getCoreRowModel: getCoreRowModel(),
     getRowId: (row) => row.id,
   });
+
+  if (initializing) return <PageSkeleton />;
 
   // ── Setup screen ──────────────────────────────────────────────────────────
   if (!runStarted) {
