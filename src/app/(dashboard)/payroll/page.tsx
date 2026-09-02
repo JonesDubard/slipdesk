@@ -12,7 +12,7 @@ import {
   AlertTriangle, CheckCircle2, Upload, ChevronRight,
   FileText, Lock, Play, Clock, Download, FileDown,
   Loader, Plus, Calendar, RefreshCw, DollarSign, Users,
-  TrendingUp, Zap, Shield, Mail,
+  TrendingUp, Zap, Shield, Mail, Search, ChevronDown, ArrowUpDown,
 } from "lucide-react";
 import { calculatePayroll } from "@/lib/slipdesk-payroll-engine";
 import type { PayRunLine } from "@/lib/mock-data";
@@ -22,7 +22,8 @@ import PageSkeleton from "@/components/PageSkeleton";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
-import { canGeneratePayslips, recordPayslipGeneration, getDistinctEmployeeIdsGeneratedThisMonth } from '@/lib/billing';
+import { usePayrollDraftAutosave, createPayrollDraft, loadActivePayrollDraft, finalizePayrollRun, patchPayrollRunStatus, abandonPayrollDraft } from "@/hooks/usePayrollDraft";
+import { filterEmployeesForBranchScope } from "@/lib/payroll/branch-scope";
 import { can, type Permission } from "@/lib/rbac";
 import { logAudit, type AuditAction } from "@/lib/audit";
 import { createNotification, sendEmailNotification, type NotificationType, type NotificationSeverity } from "@/lib/notifications";
@@ -157,24 +158,24 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
 
   const buildDoc = (logoSrc?: string) => {
   const S=StyleSheet.create({
-    page:{fontFamily:"Helvetica",fontSize:9,color:"#1e293b",backgroundColor:"#fff",paddingHorizontal:36,paddingVertical:32},
-    header:{flexDirection:"row",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,paddingBottom:16,borderBottomWidth:2,borderBottomColor:NAVY},
-    coLeft:{flexDirection:"row",alignItems:"center",gap:10},logo:{width:48,height:48,objectFit:"contain"},
-    coName:{fontSize:16,fontFamily:"Helvetica-Bold",color:NAVY,marginBottom:3},
-    coMeta:{fontSize:8,color:PDF_SLATE,lineHeight:1.5},
+    page:{fontFamily:"Helvetica",fontSize:8.5,color:"#1e293b",backgroundColor:"#fff",paddingHorizontal:28,paddingVertical:22},
+    header:{flexDirection:"row",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12,paddingBottom:10,borderBottomWidth:2,borderBottomColor:NAVY},
+    coLeft:{flexDirection:"row",alignItems:"center",gap:8},logo:{width:40,height:40,objectFit:"contain"},
+    coName:{fontSize:14,fontFamily:"Helvetica-Bold",color:NAVY,marginBottom:2},
+    coMeta:{fontSize:7,color:PDF_SLATE,lineHeight:1.35},
     badge:{backgroundColor:NAVY,paddingHorizontal:12,paddingVertical:6,borderRadius:4},
     badgeText:{fontSize:10,fontFamily:"Helvetica-Bold",color:"#fff",letterSpacing:1},
-    infoGrid:{flexDirection:"row",gap:12,marginBottom:18},
-    infoBox:{flex:1,backgroundColor:PDF_LIGHT,borderRadius:6,padding:10,borderWidth:1,borderColor:PDF_BORDER},
+    infoGrid:{flexDirection:"row",gap:8,marginBottom:10},
+    infoBox:{flex:1,backgroundColor:PDF_LIGHT,borderRadius:5,padding:7,borderWidth:1,borderColor:PDF_BORDER},
     infoLbl:{fontSize:7,fontFamily:"Helvetica-Bold",color:PDF_SLATE,textTransform:"uppercase",letterSpacing:0.5,marginBottom:2},
     infoVal:{fontSize:9,color:NAVY,fontFamily:"Helvetica-Bold"},infoSub:{fontSize:8,color:"#374151"},
-    secTitle:{fontSize:8,fontFamily:"Helvetica-Bold",color:PDF_SLATE,textTransform:"uppercase",letterSpacing:0.8,marginBottom:6,marginTop:14},
+    secTitle:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:PDF_SLATE,textTransform:"uppercase",letterSpacing:0.6,marginBottom:4,marginTop:8},
     table:{borderWidth:1,borderColor:PDF_BORDER,borderRadius:6,overflow:"hidden"},
     tHead:{flexDirection:"row",backgroundColor:NAVY,paddingHorizontal:10,paddingVertical:6},
     thDesc:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:"#fff",width:140},
     thNotes:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:"#fff",flex:1},
     thAmt:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:"#fff",textAlign:"right",width:90},
-    tRow:{flexDirection:"row",paddingHorizontal:10,paddingVertical:8,borderTopWidth:1,borderTopColor:PDF_BORDER,alignItems:"flex-start"},
+    tRow:{flexDirection:"row",paddingHorizontal:8,paddingVertical:5,borderTopWidth:1,borderTopColor:PDF_BORDER,alignItems:"flex-start"},
     tAlt:{backgroundColor:PDF_LIGHT},
     tdDesc:{width:140,fontSize:8.5,fontFamily:"Helvetica-Bold",color:NAVY},
     tdNotes:{flex:1,fontSize:8,color:"#374151",lineHeight:1.6},
@@ -182,28 +183,28 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
     tdAmtBold:{width:90,fontSize:8.5,fontFamily:"Helvetica-Bold",color:NAVY,textAlign:"right"},
     tdRed:{width:90,fontSize:8.5,color:"#dc2626",textAlign:"right"},
     tdNote:{flex:1,fontSize:7.5,color:PDF_SLATE,lineHeight:1.5},
-    erBox:{marginTop:10,backgroundColor:PDF_LIGHT,borderRadius:6,padding:8,borderWidth:1,borderColor:PDF_BORDER},
+    erBox:{marginTop:6,backgroundColor:PDF_LIGHT,borderRadius:5,padding:6,borderWidth:1,borderColor:PDF_BORDER},
     erLabel:{fontSize:7,fontFamily:"Helvetica-Bold",color:PDF_SLATE,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4},
     erRow:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},
     erText:{fontSize:7.5,color:PDF_SLATE},erAmount:{fontSize:8,fontFamily:"Helvetica-Bold",color:NAVY},
-    netBox:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",backgroundColor:NAVY,borderRadius:6,paddingHorizontal:14,paddingVertical:10,marginTop:12},
-    netLabel:{fontSize:10,fontFamily:"Helvetica-Bold",color:"#fff"},
-    netValue:{fontSize:16,fontFamily:"Helvetica-Bold",color:EMERALD,textAlign:"right"},
-    netWords:{backgroundColor:PDF_LIGHT,borderRadius:6,paddingHorizontal:12,paddingVertical:7,marginTop:6,borderWidth:1,borderColor:PDF_BORDER,flexDirection:"row",alignItems:"center",gap:6},
+    netBox:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",backgroundColor:NAVY,borderRadius:5,paddingHorizontal:12,paddingVertical:7,marginTop:8},
+    netLabel:{fontSize:9,fontFamily:"Helvetica-Bold",color:"#fff"},
+    netValue:{fontSize:14,fontFamily:"Helvetica-Bold",color:EMERALD,textAlign:"right"},
+    netWords:{backgroundColor:PDF_LIGHT,borderRadius:5,paddingHorizontal:10,paddingVertical:5,marginTop:4,borderWidth:1,borderColor:PDF_BORDER,flexDirection:"row",alignItems:"center",gap:4},
     netWordsLbl:{fontSize:7,fontFamily:"Helvetica-Bold",color:PDF_SLATE,textTransform:"uppercase",letterSpacing:0.4},
     netWordsTxt:{fontSize:8,color:NAVY,fontFamily:"Helvetica-Bold",flex:1},
-    payBox:{marginTop:10,backgroundColor:"#f0fdf4",borderRadius:6,padding:8,borderWidth:1,borderColor:"#86efac"},
+    payBox:{marginTop:6,backgroundColor:"#f0fdf4",borderRadius:5,padding:6,borderWidth:1,borderColor:"#86efac"},
     payLbl:{fontSize:7,fontFamily:"Helvetica-Bold",color:"#166534",textTransform:"uppercase",letterSpacing:0.5,marginBottom:4},
     payRow:{flexDirection:"row",gap:20,flexWrap:"wrap"},payItem:{flex:1,minWidth:120},
     payItemLbl:{fontSize:7,color:"#166534",marginBottom:1},payItemVal:{fontSize:8.5,fontFamily:"Helvetica-Bold",color:NAVY},
-    compRow:{flexDirection:"row",gap:8,marginTop:10},
-    compBadge:{flex:1,flexDirection:"row",alignItems:"center",gap:4,backgroundColor:"#f0fdf4",borderWidth:1,borderColor:"#86efac",borderRadius:4,paddingHorizontal:8,paddingVertical:5},
+    compRow:{flexDirection:"row",gap:6,marginTop:6},
+    compBadge:{flex:1,flexDirection:"row",alignItems:"center",gap:3,backgroundColor:"#f0fdf4",borderWidth:1,borderColor:"#86efac",borderRadius:3,paddingHorizontal:6,paddingVertical:3},
     compDot:{width:5,height:5,borderRadius:3,backgroundColor:EMERALD},
     compText:{fontSize:7.5,color:"#166534",fontFamily:"Helvetica-Bold"},
-    sigSection:{flexDirection:"row",gap:30,marginTop:24,paddingTop:16,borderTopWidth:1,borderTopColor:PDF_BORDER},
-    sigBox:{flex:1},sigLine:{borderBottomWidth:1,borderBottomColor:"#cbd5e1",marginBottom:4,height:20},
+    sigSection:{flexDirection:"row",gap:16,marginTop:10,paddingTop:8,borderTopWidth:1,borderTopColor:PDF_BORDER},
+    sigBox:{flex:1},sigLine:{borderBottomWidth:1,borderBottomColor:"#cbd5e1",marginBottom:2,height:14},
     sigLabel:{fontSize:7.5,color:PDF_SLATE,textAlign:"center"},
-    footer:{marginTop:16,paddingTop:10,borderTopWidth:1,borderTopColor:PDF_BORDER,flexDirection:"row",justifyContent:"space-between",alignItems:"center"},
+    footer:{marginTop:8,paddingTop:6,borderTopWidth:1,borderTopColor:PDF_BORDER,flexDirection:"row",justifyContent:"space-between",alignItems:"center"},
     footerTxt:{fontSize:7,color:"#94a3b8"},footerBrand:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:NAVY},
   });
   const earningsRows=[
@@ -305,16 +306,15 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
         <View style={S.netBox}><Text style={S.netLabel}>NET PAY</Text><Text style={S.netValue}>{fmtMoney(calc.netPay,sym)}</Text></View>
         <View style={S.netWords}><Text style={S.netWordsLbl}>In Words: </Text><Text style={S.netWordsTxt}>{numberToWords(calc.netPay)}</Text></View>
         <View style={S.compRow}>
-          <View style={S.compBadge}><View style={S.compDot}/><Text style={S.compText}>LRA Income Tax Compliant</Text></View>
+          <View style={S.compBadge}><View style={S.compDot}/><Text style={S.compText}>LRA Compliant</Text></View>
           <View style={S.compBadge}><View style={S.compDot}/><Text style={S.compText}>NASSCORP Verified</Text></View>
-          <View style={S.compBadge}><View style={S.compDot}/><Text style={S.compText}>{"Generated by Slipdesk · "+generated}</Text></View>
         </View>
         <View style={S.sigSection}>
-          {["Authorised Signatory","Date","Employee Acknowledgement"].map(label=>(<View key={label} style={S.sigBox}><View style={S.sigLine}/><Text style={S.sigLabel}>{label}</Text></View>))}
+          {["Authorised Signatory","Employee Acknowledgement"].map(label=>(<View key={label} style={S.sigBox}><View style={S.sigLine}/><Text style={S.sigLabel}>{label}</Text></View>))}
         </View>
         <View style={S.footer}>
           <Text style={S.footerTxt}>{footerText}</Text>
-          <Text style={S.footerBrand}>Slipdesk · slipdesk.com</Text>
+          <Text style={S.footerBrand}>Slipdesk · {generated}</Text>
         </View>
       </Page>
     </Document>
@@ -784,8 +784,25 @@ export default function PayrollPage() {
   const { toast } = useToast();
   const { guardAction } = useDemoGuard();
 
-  // Auth shell can paint early; wait for company/employees before heavy payroll UI.
-  if (initializing) return <PageSkeleton />;
+  const defaultPeriod = getCurrentPeriod();
+
+  const [periodLabel, setPeriodLabel] = useState(defaultPeriod.label);
+  const [payDate, setPayDate] = useState(defaultPeriod.payDate);
+  const [runType, setRunType] = useState<RunType>("monthly");
+  const [exchangeRate, setExchangeRate] = useState(185.44);
+  const [runStarted, setRunStarted] = useState(false);
+  const [lines, dispatch] = useReducer(gridReducer, []);
+  const [status, setStatus] = useState<RunStatus>("draft");
+  const [showUpload, setShowUpload] = useState(false);
+  const [history, setHistory] = useState<SavedRun[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [payRunId, setPayRunId] = useState<string | null>(null);
+  const [draftLoaded, setDraftLoaded] = useState(false);
+  const [branchId, setBranchId] = useState<string | null>(null);
+  const [branchName, setBranchName] = useState<string | null>(null);
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
+  const [nameFilter, setNameFilter] = useState("");
+  const [nameSort, setNameSort] = useState<"asc" | "desc">("asc");
 
   const effectiveTier = getEffectiveTier(company.subscriptionTier, company.billingBypass);
   const pdfCompany: PdfCompany = {
@@ -800,19 +817,6 @@ export default function PayrollPage() {
     brandPrimaryColor: canUse("companyBranding", effectiveTier) ? company.brandPrimaryColor : undefined,
     brandSecondaryColor: canUse("companyBranding", effectiveTier) ? company.brandSecondaryColor : undefined,
   };
-
-  const defaultPeriod = getCurrentPeriod();
-
-  const [periodLabel, setPeriodLabel] = useState(defaultPeriod.label);
-  const [payDate, setPayDate] = useState(defaultPeriod.payDate);
-  const [runType, setRunType] = useState<RunType>("monthly");
-  const [exchangeRate, setExchangeRate] = useState(185.44);
-  const [runStarted, setRunStarted] = useState(false);
-  const [lines, dispatch] = useReducer(gridReducer, []);
-  const [status, setStatus] = useState<RunStatus>("draft");
-  const [showUpload, setShowUpload] = useState(false);
-  const [history, setHistory] = useState<SavedRun[]>([]);
-  const [saving, setSaving] = useState(false);
 
   // ═══ USAGE STATE ═══
   const [usage, setUsage] = useState<{ current: number; limit: number } | null>(null);
@@ -867,11 +871,103 @@ export default function PayrollPage() {
     }
   }, [company.id, company.subscriptionTier, company.billingBypass]);
 
+  useEffect(() => {
+    void fetch("/api/org/units?kind=branches")
+      .then((r) => r.json())
+      .then((d) => setBranches(d.units ?? []))
+      .catch(() => setBranches([]));
+  }, []);
+
+  const { autosaveState } = usePayrollDraftAutosave(
+    {
+      payRunId,
+      periodLabel,
+      payDate,
+      runType,
+      exchangeRate,
+      status,
+      runStarted,
+      lines,
+    },
+    Boolean(payRunId) && status !== "paid",
+  );
+
+  useEffect(() => {
+    if (draftLoaded || initializing) return;
+    void loadActivePayrollDraft().then((draft) => {
+      setDraftLoaded(true);
+      if (!draft) return;
+      setPayRunId(draft.payRunId);
+      setPeriodLabel(draft.periodLabel);
+      setPayDate(draft.payDate);
+      setRunType(draft.runType);
+      setExchangeRate(draft.exchangeRate);
+      setStatus(draft.status);
+      setRunStarted(draft.runStarted);
+      setBranchId(draft.branchId ?? null);
+      setBranchName(draft.branchName ?? null);
+      if (draft.lines.length) dispatch({ type: "SET_ROWS", rows: draft.lines });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftLoaded, initializing]);
+
+  const scopedEmployees = useMemo(
+    () => filterEmployeesForBranchScope(employees, branchName),
+    [employees, branchName],
+  );
+
+  const displayLines = useMemo(() => {
+    let result = lines;
+    const q = nameFilter.trim().toLowerCase();
+    if (q) {
+      result = result.filter(
+        (l) =>
+          l.fullName.toLowerCase().includes(q) ||
+          l.employeeNumber.toLowerCase().includes(q),
+      );
+    }
+    return [...result].sort((a, b) => {
+      const cmp = a.fullName.localeCompare(b.fullName);
+      return nameSort === "asc" ? cmp : -cmp;
+    });
+  }, [lines, nameFilter, nameSort]);
+
+  if (initializing) return <PageSkeleton />;
+
   const isLocked = status === "approved" || status === "paid";
   const warningCount = lines.filter((l) => l.calc && l.calc.warnings.length > 0).length;
-  const activeEmployees = employees.filter((e) => e.isActive);
 
-  function handleStartRun() {
+  async function handleBranchScopeChange(value: string) {
+    const newBranchId = value === "all" ? null : value;
+    const newBranchName = newBranchId
+      ? branches.find((b) => b.id === newBranchId)?.name ?? null
+      : null;
+    setBranchId(newBranchId);
+    setBranchName(newBranchName);
+    if (runStarted || status === "paid") return;
+    const draft = await loadActivePayrollDraft(newBranchId);
+    if (draft) {
+      setPayRunId(draft.payRunId);
+      setPeriodLabel(draft.periodLabel);
+      setPayDate(draft.payDate);
+      setRunType(draft.runType);
+      setExchangeRate(draft.exchangeRate);
+      setStatus(draft.status);
+      setRunStarted(draft.runStarted);
+      if (draft.lines.length) {
+        dispatch({ type: "SET_ROWS", rows: draft.lines });
+      } else {
+        dispatch({ type: "CLEAR" });
+      }
+    } else {
+      setPayRunId(null);
+      dispatch({ type: "CLEAR" });
+      setRunStarted(false);
+      setStatus("draft");
+    }
+  }
+
+  async function handleStartRun() {
     // Pre-payroll validation (non-blocking UI warnings)
     if (company.id) {
       void fetch("/api/payroll/validate", {
@@ -893,7 +989,7 @@ export default function PayrollPage() {
         });
     }
 
-    const rows: PayRunLine[] = activeEmployees.map((emp) => ({
+    const rows: PayRunLine[] = scopedEmployees.map((emp) => ({
       id: emp.id,
       employeeId: emp.id,
       employeeNumber: emp.employeeNumber,
@@ -916,8 +1012,32 @@ export default function PayrollPage() {
       mobileNumber: emp.momoNumber,
       mobileProvider: undefined,
     }));
-    dispatch({ type: "SET_ROWS", rows });
+    const calcRows = rows.map((r) => recalcLine(r));
+    dispatch({ type: "SET_ROWS", rows: calcRows });
     setRunStarted(true);
+
+    if (payRunId) {
+      await patchPayrollRunStatus(payRunId, "draft", {
+        periodLabel,
+        payDate,
+        runType,
+        exchangeRate,
+        runStarted: true,
+        lines: calcRows,
+      });
+      return;
+    }
+
+    const created = await createPayrollDraft({
+      periodLabel,
+      payDate,
+      runType,
+      exchangeRate,
+      runStarted: true,
+      lines: calcRows,
+      branchId,
+    });
+    if (created?.id) setPayRunId(created.id);
   }
 
   async function advanceStatus() {
@@ -934,7 +1054,19 @@ export default function PayrollPage() {
       return;
     }
 
+    const prevStatus = status;
     setStatus(next);
+
+    if (payRunId && next !== "paid") {
+      void patchPayrollRunStatus(payRunId, next, {
+        periodLabel,
+        payDate,
+        runType,
+        exchangeRate,
+        runStarted,
+        lines,
+      });
+    }
 
     // Audit + notify the transition (best-effort, non-blocking).
     if (transition && company.id) {
@@ -976,65 +1108,73 @@ export default function PayrollPage() {
             s + (l.calc ? toUSD(l.calc.nasscorp.employeeContribution, l.currency) : 0),
           0
         );
-        const companyId: string | null = company.id || null;
-        const baseRun = {
-          ...(companyId ? { company_id: companyId } : {}),
-          period_label: periodLabel,
-          pay_period_start: payDate,
-          pay_period_end: payDate,
-          pay_date: payDate,
-          exchange_rate: FX,
-          status: "paid",
-          employee_count: lines.length,
-          total_gross: totalGross,
-          total_net: totalNet,
-          total_income_tax: totalTax,
-          total_nasscorp: totalNasscorp,
-        };
-        // run_type comes from migration 0001 — retry without it if not present.
-        let runRes = await (supabase as any).from("pay_runs").insert({ ...baseRun, run_type: runType }).select().single();
-        if (runRes.error) {
-          runRes = await (supabase as any).from("pay_runs").insert(baseRun).select().single();
-        }
-        const run = runRes.data;
-        const runErr = runRes.error;
-        if (runErr) throw runErr;
-        if (run && lines.length > 0) {
-          const lineRows = lines
-            .filter((l) => l.calc !== null)
-            .map((l) => ({
-              pay_run_id: run.id,
-              ...(companyId ? { company_id: companyId } : {}),
-              employee_id: l.employeeId,
-              employee_number: l.employeeNumber,
-              full_name: l.fullName,
-              job_title: l.jobTitle,
-              department: l.department,
-              currency: l.currency,
-              rate: l.rate,
-              regular_hours: l.regularHours,
-              overtime_hours: l.overtimeHours,
-              holiday_hours: l.holidayHours,
-              additional_earnings: l.additionalEarnings,
-              deductions: l.deductions ?? 0,
-              exchange_rate: l.exchangeRate,
-              gross_pay: l.calc!.grossPay,
-              income_tax: l.calc!.Paye.taxInBase,
-              nasscorp_ee: l.calc!.nasscorp.employeeContribution,
-              nasscorp_er: l.calc!.nasscorp.employerContribution,
-              net_pay: l.calc!.netPay,
-            }));
-          const { error: lineErr } = await (supabase as any)
-            .from("pay_run_lines")
-            .insert(lineRows);
-          if (lineErr) {
-            console.error("pay_run_lines insert error:", lineErr);
-            toast.error("Pay run saved but some line items failed.");
+
+        let runId = payRunId;
+
+        if (payRunId) {
+          const fin = await finalizePayrollRun(payRunId, lines);
+          if (!fin.ok) throw new Error(fin.error ?? "Finalize failed");
+        } else {
+          const companyId: string | null = company.id || null;
+          const baseRun = {
+            ...(companyId ? { company_id: companyId } : {}),
+            period_label: periodLabel,
+            pay_period_start: payDate,
+            pay_period_end: payDate,
+            pay_date: payDate,
+            exchange_rate: FX,
+            status: "paid",
+            employee_count: lines.length,
+            total_gross: totalGross,
+            total_net: totalNet,
+            total_income_tax: totalTax,
+            total_nasscorp: totalNasscorp,
+          };
+          let runRes = await (supabase as any).from("pay_runs").insert({ ...baseRun, run_type: runType }).select().single();
+          if (runRes.error) {
+            runRes = await (supabase as any).from("pay_runs").insert(baseRun).select().single();
+          }
+          const run = runRes.data;
+          if (runRes.error) throw runRes.error;
+          runId = run?.id ?? null;
+          if (run && lines.length > 0) {
+            const lineRows = lines
+              .filter((l) => l.calc !== null)
+              .map((l) => ({
+                pay_run_id: run.id,
+                ...(companyId ? { company_id: companyId } : {}),
+                employee_id: l.employeeId,
+                employee_number: l.employeeNumber,
+                full_name: l.fullName,
+                job_title: l.jobTitle,
+                department: l.department,
+                currency: l.currency,
+                rate: l.rate,
+                regular_hours: l.regularHours,
+                overtime_hours: l.overtimeHours,
+                holiday_hours: l.holidayHours,
+                additional_earnings: l.additionalEarnings,
+                deductions: l.deductions ?? 0,
+                exchange_rate: l.exchangeRate,
+                gross_pay: l.calc!.grossPay,
+                income_tax: l.calc!.Paye.taxInBase,
+                nasscorp_ee: l.calc!.nasscorp.employeeContribution,
+                nasscorp_er: l.calc!.nasscorp.employerContribution,
+                net_pay: l.calc!.netPay,
+              }));
+            const { error: lineErr } = await (supabase as any)
+              .from("pay_run_lines")
+              .insert(lineRows);
+            if (lineErr) {
+              console.error("pay_run_lines insert error:", lineErr);
+              toast.error("Pay run saved but some line items failed.");
+            }
           }
         }
+
         setHistory((prev) => [
           {
-            id: run?.id ?? `LOCAL-${Date.now()}`,
+            id: runId ?? `LOCAL-${Date.now()}`,
             periodLabel,
             payDate,
             status: "paid",
@@ -1055,13 +1195,12 @@ export default function PayrollPage() {
           } paid.`
         );
 
-        // Email employees with secure View Payslip links (no PDF). Best-effort.
-        if (run?.id) {
+        if (runId) {
           try {
             const notifyRes = await fetch("/api/payroll/notify-payslips", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ payRunId: run.id }),
+              body: JSON.stringify({ payRunId: runId }),
             });
             if (notifyRes.ok) {
               const n = await notifyRes.json();
@@ -1076,7 +1215,7 @@ export default function PayrollPage() {
             await fetch("/api/payroll/apply-attendance", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ payRunId: run.id }),
+              body: JSON.stringify({ payRunId: runId }),
             });
           } catch (attErr) {
             console.warn("Attendance apply-after-paid failed:", attErr);
@@ -1084,7 +1223,8 @@ export default function PayrollPage() {
         }
       } catch (err) {
         console.error("Failed to save pay run:", err);
-        toast.error("Pay run marked paid locally but could not save to Supabase.");
+        setStatus(prevStatus);
+        toast.error(err instanceof Error ? err.message : "Could not finalize pay run. Status reverted.");
       } finally {
         setSaving(false);
       }
@@ -1097,6 +1237,16 @@ export default function PayrollPage() {
       return;
     }
     setStatus("review");
+    if (payRunId) {
+      void patchPayrollRunStatus(payRunId, "review", {
+        periodLabel,
+        payDate,
+        runType,
+        exchangeRate,
+        runStarted,
+        lines,
+      });
+    }
     if (company.id) {
       logAudit({ companyId: company.id, action: "payroll.reopen", entityType: "pay_run", entityId: periodLabel, oldValue: { status: "approved" }, newValue: { status: "review" } });
       createNotification({ companyId: company.id, type: "general", title: "Pay run reopened", body: `${periodLabel} was reopened for edits.`, severity: "warning", link: "/payroll" });
@@ -1104,8 +1254,16 @@ export default function PayrollPage() {
     toast.success("Pay run reopened for editing.");
   }
 
-  function startNewRun() {
+  async function startNewRun() {
+    if (payRunId && status !== "paid") {
+      await abandonPayrollDraft(payRunId);
+    }
     dispatch({ type: "CLEAR" });
+    setPayRunId(null);
+    setDraftLoaded(true);
+    setBranchId(null);
+    setBranchName(null);
+    setNameFilter("");
     setStatus("draft");
     setRunType("monthly");
     const p = getCurrentPeriod();
@@ -1376,7 +1534,7 @@ export default function PayrollPage() {
   );
 
   const table = useReactTable({
-    data: lines,
+    data: displayLines,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getRowId: (row) => row.id,
@@ -1384,7 +1542,7 @@ export default function PayrollPage() {
 
   // ── Setup screen ──────────────────────────────────────────────────────────
   if (!runStarted) {
-    const withHours = activeEmployees.filter(
+    const withHours = scopedEmployees.filter(
       (e) => (e.pendingOvertimeHours ?? 0) > 0 || (e.pendingHolidayHours ?? 0) > 0
     ).length;
     return (
@@ -1423,7 +1581,7 @@ export default function PayrollPage() {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, maxWidth: 920 }}>
           {/* Left: config form */}
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {activeEmployees.length === 0 && (
+            {scopedEmployees.length === 0 && (
               <div
                 style={{
                   background:
@@ -1501,6 +1659,45 @@ export default function PayrollPage() {
                 <span style={{ color: "var(--foreground)", fontWeight: 700, fontSize: 15 }}>
                   New Pay Run
                 </span>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                <label
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "var(--muted-foreground)",
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    fontFamily: "'DM Mono',monospace",
+                  }}
+                >
+                  Branch / Entity Scope
+                </label>
+                <select
+                  value={branchId ?? "all"}
+                  onChange={(e) => void handleBranchScopeChange(e.target.value)}
+                  style={{
+                    padding: "10px 12px",
+                    background: "var(--background)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 9,
+                    color: "var(--foreground)",
+                    fontSize: 13,
+                    outline: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  <option value="all">All branches (organization-wide)</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+                <p style={{ margin: 0, fontSize: 11, color: "var(--muted-foreground)" }}>
+                  {branchName
+                    ? `${scopedEmployees.length} active employee(s) in ${branchName}. Each branch can have its own draft.`
+                    : `${scopedEmployees.length} active employee(s) org-wide. Legacy single-org behavior.`}
+                </p>
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
@@ -1667,7 +1864,7 @@ export default function PayrollPage() {
 
               <button
                 onClick={handleStartRun}
-                disabled={activeEmployees.length === 0}
+                disabled={scopedEmployees.length === 0}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -1676,9 +1873,9 @@ export default function PayrollPage() {
                   padding: "13px",
                   borderRadius: 11,
                   border: "none",
-                  cursor: activeEmployees.length === 0 ? "not-allowed" : "pointer",
+                  cursor: scopedEmployees.length === 0 ? "not-allowed" : "pointer",
                   background:
-                    activeEmployees.length === 0
+                    scopedEmployees.length === 0
                       ? "color-mix(in oklch, var(--primary) 30%, transparent)"
                       : "var(--primary)",
                   color: "var(--primary-foreground)",
@@ -1688,21 +1885,21 @@ export default function PayrollPage() {
                   marginTop: 4,
                 }}
                 onMouseEnter={(e) => {
-                  if (activeEmployees.length > 0)
+                  if (scopedEmployees.length > 0)
                     e.currentTarget.style.opacity = "0.88";
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.opacity = "1";
                 }}
               >
-                <Zap size={15} /> Start Pay Run · {activeEmployees.length} employees
+                <Zap size={15} /> Start Pay Run · {scopedEmployees.length} employees
               </button>
             </div>
           </div>
 
           {/* Right: summary + history */}
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {activeEmployees.length > 0 && (
+            {scopedEmployees.length > 0 && (
               <div
                 style={{
                   background: "var(--card)",
@@ -1736,11 +1933,11 @@ export default function PayrollPage() {
                       fontWeight: 700,
                     }}
                   >
-                    {activeEmployees.length} Active
+                    {scopedEmployees.length} Active
                   </span>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {activeEmployees.slice(0, 5).map((emp) => (
+                  {scopedEmployees.slice(0, 5).map((emp) => (
                     <div
                       key={emp.id}
                       style={{
@@ -1819,7 +2016,7 @@ export default function PayrollPage() {
                       </div>
                     </div>
                   ))}
-                  {activeEmployees.length > 5 && (
+                  {scopedEmployees.length > 5 && (
                     <p
                       style={{
                         textAlign: "center",
@@ -1829,7 +2026,7 @@ export default function PayrollPage() {
                         margin: "4px 0 0",
                       }}
                     >
-                      +{activeEmployees.length - 5} more employees
+                      +{scopedEmployees.length - 5} more employees
                     </p>
                   )}
                 </div>
@@ -2020,6 +2217,12 @@ export default function PayrollPage() {
               color: "var(--primary)", background: "color-mix(in oklch, var(--primary) 12%, transparent)",
               border: "1px solid color-mix(in oklch, var(--primary) 30%, transparent)", textTransform: "uppercase", letterSpacing: "0.04em",
             }}>{RUN_TYPE_LABELS[runType]}</span>
+            {branchName && (
+              <>
+                <span style={{ color: "var(--border)" }}>·</span>
+                <span style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{branchName}</span>
+              </>
+            )}
             <span style={{ color: "var(--border)" }}>·</span>
             <Users size={12} color="var(--muted-foreground)" />
             {lines.length} employees
@@ -2119,6 +2322,14 @@ export default function PayrollPage() {
           allowed={!TRANSITIONS[status] || can(role, TRANSITIONS[status]!.permission)}
           roleHint={TRANSITIONS[status]?.roleHint}
         />
+        {payRunId && status !== "paid" && (
+          <p style={{ margin: "10px 0 0", fontSize: 11, color: "var(--muted-foreground)", fontFamily: "'DM Mono',monospace" }}>
+            {autosaveState === "saving" && "Saving…"}
+            {autosaveState === "saved" && "Saved"}
+            {autosaveState === "error" && "Unable to save — check connection"}
+            {autosaveState === "idle" && "Draft autosave enabled"}
+          </p>
+        )}
         {status === "approved" && (
           <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
             <span style={{ fontSize: 11.5, color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: 6 }}>
@@ -2297,6 +2508,67 @@ export default function PayrollPage() {
                   {lines.length} employees
                 </span>
               </div>
+            </div>
+
+            <div
+              style={{
+                padding: "10px 16px",
+                borderBottom: "1px solid var(--border)",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                flexWrap: "wrap",
+                background: "var(--background)",
+              }}
+            >
+              <div style={{ position: "relative", flex: "1 1 220px", maxWidth: 320 }}>
+                <Search
+                  size={14}
+                  color="var(--muted-foreground)"
+                  style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)" }}
+                />
+                <input
+                  value={nameFilter}
+                  onChange={(e) => setNameFilter(e.target.value)}
+                  placeholder="Filter by name or employee #…"
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px 9px 34px",
+                    background: "var(--card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 10,
+                    color: "var(--foreground)",
+                    fontSize: 13,
+                    outline: "none",
+                  }}
+                />
+              </div>
+              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <select
+                  value={nameSort}
+                  onChange={(e) => setNameSort(e.target.value as "asc" | "desc")}
+                  style={{
+                    padding: "9px 32px 9px 12px",
+                    background: "var(--card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 10,
+                    color: "var(--foreground)",
+                    fontSize: 13,
+                    outline: "none",
+                    cursor: "pointer",
+                    appearance: "none",
+                  }}
+                >
+                  <option value="asc">Name A → Z</option>
+                  <option value="desc">Name Z → A</option>
+                </select>
+                <ChevronDown size={13} color="var(--muted-foreground)" style={{ position: "absolute", right: 10, pointerEvents: "none" }} />
+              </div>
+              {(nameFilter || displayLines.length !== lines.length) && (
+                <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
+                  Showing {displayLines.length} of {lines.length}
+                </span>
+              )}
             </div>
 
             <div style={{ overflowX: "auto" }}>

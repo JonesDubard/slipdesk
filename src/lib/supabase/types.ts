@@ -60,6 +60,7 @@ type EmployeeRow = {
   bank_name:        string;
   account_number:   string;
   momo_number:      string;
+  gender?:          string | null;
   is_active:        boolean;
   is_archived:      boolean;
   created_at:       string;
@@ -106,6 +107,8 @@ type PayRunRow = {
   approved_by?:      string | null;
   reopened_by?:      string | null;
   reopened_at?:      string | null;
+  draft_payload?:    Record<string, unknown> | null;
+  branch_id?:        string | null;
 };
 
 type PayRunLineRow = {

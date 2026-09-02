@@ -54,6 +54,8 @@ export interface Employee {
   bankName:       string;
   accountNumber:  string;
   momoNumber:     string;
+  /** Optional — male | female | other | prefer_not_to_say */
+  gender?:        string;
   isActive:       boolean;
   isArchived:     boolean;
   // ── Extended profile (migration 0001) ── optional so existing call sites
@@ -141,6 +143,7 @@ function dbToEmployee(row: DbEmployee): Employee {
     bankName:       row.bank_name,
     accountNumber:  row.account_number,
     momoNumber:     row.momo_number,
+    gender:         row.gender ?? "",
     isActive:       row.is_active,
     isArchived:     row.is_archived,
     branch:            row.branch ?? "",
@@ -563,6 +566,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       bank_name:       data.bankName,
       account_number:  data.accountNumber,
       momo_number:     data.momoNumber,
+      ...(data.gender !== undefined && data.gender !== "" && { gender: data.gender }),
       is_active:       data.isActive,
       is_archived:     false,
       ...(data.pendingRegularHours  !== undefined && { pending_regular_hours:  data.pendingRegularHours  }),
@@ -621,6 +625,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...(data.bankName       !== undefined && { bank_name:       data.bankName       }),
       ...(data.accountNumber  !== undefined && { account_number:  data.accountNumber  }),
       ...(data.momoNumber          !== undefined && { momo_number:           data.momoNumber          }),
+      ...(data.gender               !== undefined && { gender:                data.gender || null      }),
       ...(data.isActive            !== undefined && { is_active:             data.isActive            }),
       ...(data.pendingRegularHours  !== undefined && { pending_regular_hours:  data.pendingRegularHours  }),
       ...(data.pendingOvertimeHours !== undefined && { pending_overtime_hours: data.pendingOvertimeHours }),

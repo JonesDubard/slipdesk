@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   FileBarChart, Users, Building2, Landmark, ShieldCheck, TrendingUp,
-  FileText, FileSpreadsheet, FileDown, Lock,
+  FileText, FileSpreadsheet, FileDown, Lock, Wallet,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { getEffectiveTier, canUse, PLAN_LABELS } from "@/lib/plan-features";
@@ -14,6 +14,22 @@ import {
   CUSTOM_REPORT_COLUMNS, buildCustomReport, type CustomReportColumn,
 } from "@/lib/reporting";
 import { downloadReportPdf, type ReportSection } from "@/components/ReportPDF";
+import {
+  disbursementReportHeaders,
+  disbursementReportRows,
+  bankDisbursementHeaders,
+  bankDisbursementRows,
+  mobileMoneyDisbursementHeaders,
+  mobileMoneyDisbursementRows,
+  rowsFromFinalizedPayroll,
+} from "@/lib/reports/disbursement";
+import {
+  lraExportHeaders,
+  lraExportRowsFromFinalized,
+  nasscorpExportHeaders,
+  nasscorpExportRowsFromFinalized,
+  type FinalizedPayrollLine,
+} from "@/lib/compliance/statutory-exports";
 import {
   ModuleShell, ModuleHeader, Card, UpgradeNotice, btnGhost,
 } from "@/components/module-ui";
@@ -27,6 +43,8 @@ interface ReportDef {
   icon: React.ReactNode;
   /** Requires departmentReports feature (Professional+). */
   proOnly?: boolean;
+  /** Disbursement / statutory exports require a finalized pay run. */
+  requiresFinalized?: boolean;
   build: (rows: EmployeePayroll[], totals: PayrollTotals) => {
     headers: string[];
     dataRows: Cell[][];
@@ -43,18 +61,94 @@ export default function ReportsPage() {
     "employeeNumber", "fullName", "department", "gross", "net",
   ]);
   const [customGroup, setCustomGroup] = useState<"department" | "branch" | "">("");
+  const [paidRuns, setPaidRuns] = useState<Array<{
+    id: string;
+    period_label: string;
+    branch_id?: string | null;
+    branches?: { name: string } | { name: string }[] | null;
+  }>>([]);
+  const [selectedRunId, setSelectedRunId] = useState("");
+  const [finalizedLines, setFinalizedLines] = useState<FinalizedPayrollLine[] | null>(null);
+
+  useEffect(() => {
+    void fetch("/api/payroll/runs?finalized=true")
+      .then((r) => r.json())
+      .then((d) => setPaidRuns(d.runs ?? []))
+      .catch(() => setPaidRuns([]));
+  }, []);
+
+  const consolidatedPeriods = useMemo(() => {
+    const byPeriod = new Map<string, number>();
+    for (const run of paidRuns) {
+      byPeriod.set(run.period_label, (byPeriod.get(run.period_label) ?? 0) + 1);
+    }
+    return [...byPeriod.entries()].filter(([, count]) => count > 1).map(([label]) => label);
+  }, [paidRuns]);
+
+  function runOptionLabel(run: (typeof paidRuns)[0]): string {
+    const branchJoin = run.branches;
+    const branchName = Array.isArray(branchJoin)
+      ? branchJoin[0]?.name
+      : branchJoin?.name;
+    const scope = branchName ?? (run.branch_id ? "Branch" : "All branches");
+    return `${run.period_label} — ${scope}`;
+  }
+
+  useEffect(() => {
+    if (!selectedRunId) {
+      setFinalizedLines(null);
+      return;
+    }
+    if (selectedRunId.startsWith("consolidated:")) {
+      const period = selectedRunId.slice("consolidated:".length);
+      void fetch(`/api/payroll/runs/consolidated?periodLabel=${encodeURIComponent(period)}`)
+        .then((r) => r.json())
+        .then((d) => setFinalizedLines(d.finalizedLines ?? null))
+        .catch(() => setFinalizedLines(null));
+      return;
+    }
+    void fetch(`/api/payroll/runs/${selectedRunId}`)
+      .then((r) => r.json())
+      .then((d) => setFinalizedLines(d.run?.finalizedLines ?? null))
+      .catch(() => setFinalizedLines(null));
+  }, [selectedRunId]);
 
   const active = useMemo(() => employees.filter((e) => e.isActive && !e.isArchived), [employees]);
   const rows = useMemo(() => computePayroll(active), [active]);
   const totals = useMemo(() => sumTotals(rows), [rows]);
 
   const period = new Date().toLocaleString("default", { month: "long", year: "numeric" });
+  const payrollPeriodLabel = selectedRunId.startsWith("consolidated:")
+    ? selectedRunId.slice("consolidated:".length)
+    : selectedRunId
+      ? (paidRuns.find((r) => r.id === selectedRunId)?.period_label ?? period)
+      : period;
+
+  const finalizedDisbursementRows = useMemo(
+    () => (finalizedLines?.length ? rowsFromFinalizedPayroll(finalizedLines) : []),
+    [finalizedLines],
+  );
+
   const companyMeta = [
     { label: "Company", value: company.name || "—" },
-    { label: "Period", value: period },
+    { label: "Period", value: payrollPeriodLabel },
     { label: "Employees", value: String(active.length) },
     { label: "Gross (USD)", value: fmtUSD(totals.gross) },
   ];
+
+  function finalizedNotice() {
+    const headers = ["Notice"];
+    const dataRows: Cell[][] = [["Select a finalized payroll period above to generate this export."]];
+    return {
+      headers,
+      dataRows,
+      sections: [{
+        heading: "Finalized payroll required",
+        columns: [{ header: "Notice", width: 3 }],
+        rows: dataRows,
+      }],
+    };
+  }
 
   if (!can(role, "report:view")) {
     return (
@@ -230,13 +324,105 @@ export default function ReportsPage() {
         };
       },
     },
+    {
+      id: "disbursement-report", title: "Payroll Disbursement Report", icon: <Wallet size={16} />,
+      requiresFinalized: true,
+      description: "Human-readable payroll disbursement listing from a finalized pay run (not a validated bank upload file).",
+      build: () => {
+        if (!finalizedDisbursementRows.length) return finalizedNotice();
+        const headers = disbursementReportHeaders();
+        const dataRows: Cell[][] = disbursementReportRows(finalizedDisbursementRows);
+        return {
+          headers, dataRows,
+          sections: [{
+            heading: `Payroll Disbursement — ${payrollPeriodLabel}`,
+            columns: headers.map((h) => ({ header: h, width: 1.1 })),
+            rows: dataRows,
+          }],
+        };
+      },
+    },
+    {
+      id: "bank-disbursement", title: "Bank Disbursement File", icon: <Landmark size={16} />,
+      requiresFinalized: true,
+      description: "PLACEHOLDER bank payment export from finalized payroll — not validated for bank upload.",
+      build: () => {
+        if (!finalizedDisbursementRows.length) return finalizedNotice();
+        const headers = bankDisbursementHeaders();
+        const dataRows: Cell[][] = bankDisbursementRows(finalizedDisbursementRows);
+        return {
+          headers, dataRows,
+          sections: [{
+            heading: `Bank Disbursement (placeholder) — ${payrollPeriodLabel}`,
+            columns: headers.map((h) => ({ header: h, width: 1.2 })),
+            rows: dataRows,
+          }],
+        };
+      },
+    },
+    {
+      id: "momo-disbursement", title: "Mobile Money Disbursement File", icon: <Wallet size={16} />,
+      requiresFinalized: true,
+      description: "PLACEHOLDER MTN/Orange bulk file from finalized payroll — not validated against provider specs.",
+      build: () => {
+        if (!finalizedDisbursementRows.length) return finalizedNotice();
+        const headers = mobileMoneyDisbursementHeaders();
+        const dataRows: Cell[][] = mobileMoneyDisbursementRows(finalizedDisbursementRows);
+        return {
+          headers, dataRows,
+          sections: [{
+            heading: `Mobile Money Disbursement (placeholder) — ${payrollPeriodLabel}`,
+            columns: headers.map((h) => ({ header: h, width: 1.2 })),
+            rows: dataRows,
+          }],
+        };
+      },
+    },
+    {
+      id: "lra-statutory", title: "LRA Statutory Export", icon: <Landmark size={16} />,
+      requiresFinalized: true,
+      description: "Authority-specific LRA export from finalized payroll (placeholder until spec confirmed).",
+      build: () => {
+        if (!finalizedLines?.length) return finalizedNotice();
+        const headers = lraExportHeaders();
+        const employer = { companyName: company.name, tin: company.tin, periodLabel: payrollPeriodLabel };
+        const dataRows: Cell[][] = lraExportRowsFromFinalized(employer, finalizedLines);
+        return {
+          headers, dataRows,
+          sections: [{
+            heading: `LRA Export (placeholder) — ${payrollPeriodLabel}`,
+            columns: headers.map((h) => ({ header: h, width: 1.1 })),
+            rows: dataRows,
+          }],
+        };
+      },
+    },
+    {
+      id: "nasscorp-statutory", title: "NASSCORP Statutory Export", icon: <ShieldCheck size={16} />,
+      requiresFinalized: true,
+      description: "Authority-specific NASSCORP export from finalized payroll (placeholder until spec confirmed).",
+      build: () => {
+        if (!finalizedLines?.length) return finalizedNotice();
+        const headers = nasscorpExportHeaders();
+        const employer = { companyName: company.name, nasscorpRegNo: company.nasscorpRegNo, periodLabel: payrollPeriodLabel };
+        const dataRows: Cell[][] = nasscorpExportRowsFromFinalized(employer, finalizedLines);
+        return {
+          headers, dataRows,
+          sections: [{
+            heading: `NASSCORP Export (placeholder) — ${payrollPeriodLabel}`,
+            columns: headers.map((h) => ({ header: h, width: 1.1 })),
+            rows: dataRows,
+          }],
+        };
+      },
+    },
   ];
 
   async function runExport(def: ReportDef, kind: ExportKind) {
     setBusy(`${def.id}-${kind}`);
     try {
       const built = def.build(rows, totals);
-      const fname = `${def.title.replace(/\s+/g, "_")}_${period.replace(/\s+/g, "_")}`;
+      const fname = `${def.title.replace(/\s+/g, "_")}_${payrollPeriodLabel.replace(/\s+/g, "_")}`;
       if (kind === "csv") {
         downloadCSV(fname, built.headers, built.total ? [...built.dataRows, built.total] : built.dataRows);
       } else if (kind === "excel") {
@@ -251,11 +437,44 @@ export default function ReportsPage() {
 
   return (
     <ModuleShell>
-      <ModuleHeader title="Reporting Center" subtitle={`${period} · export to PDF, Excel or CSV`} />
+      <ModuleHeader title="Reporting Center" subtitle={`${payrollPeriodLabel} · export to PDF, Excel or CSV`} />
+
+      <Card style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+        <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: "var(--foreground)" }}>
+          Payroll &amp; Disbursement period
+        </p>
+        <p style={{ margin: 0, fontSize: 12, color: "var(--muted-foreground)" }}>
+          Disbursement and statutory exports use finalized (paid) payroll runs only.
+        </p>
+        <select
+          value={selectedRunId}
+          onChange={(e) => setSelectedRunId(e.target.value)}
+          style={{
+            maxWidth: 360, padding: "9px 12px", borderRadius: 10,
+            border: "1px solid var(--border)", background: "var(--background)", fontSize: 13,
+          }}
+        >
+          <option value="">Select finalized payroll period…</option>
+          {consolidatedPeriods.map((p) => (
+            <option key={`c-${p}`} value={`consolidated:${p}`}>
+              {p} — Consolidated (all branches)
+            </option>
+          ))}
+          {paidRuns.map((r) => (
+            <option key={r.id} value={r.id}>{runOptionLabel(r)}</option>
+          ))}
+        </select>
+        {paidRuns.length === 0 && (
+          <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
+            No finalized pay runs yet — complete a payroll run to unlock disbursement exports.
+          </span>
+        )}
+      </Card>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
         {REPORTS.map((def) => {
           const locked = def.proOnly && !hasDeptReports;
+          const needsRun = def.requiresFinalized && !selectedRunId;
           return (
             <Card key={def.id} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -280,6 +499,8 @@ export default function ReportsPage() {
                 </div>
               ) : !canExport ? (
                 <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>View only — your role cannot export.</span>
+              ) : needsRun ? (
+                <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>Select a finalized payroll period above.</span>
               ) : (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button onClick={() => runExport(def, "pdf")} disabled={!!busy} style={btnGhost()}><FileText size={14} /> PDF</button>
@@ -338,7 +559,7 @@ export default function ReportsPage() {
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 18, color: "var(--muted-foreground)" }}>
         <FileBarChart size={14} />
-        <span style={{ fontSize: 12 }}>Reports are computed from your active employees for the current period. Historical period selection arrives with the payroll periods module.</span>
+        <span style={{ fontSize: 12 }}>Standard reports use active employees for the current calendar month. Disbursement and statutory exports require a finalized pay run.</span>
       </div>
     </ModuleShell>
   );

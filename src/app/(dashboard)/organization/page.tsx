@@ -30,18 +30,44 @@ export default function OrganizationPage() {
     <ModuleShell>
       <ModuleHeader
         title="Organization"
-        subtitle="Manage departments and branches for employee assignment"
+        subtitle="Branches (entities), departments, and how employees are grouped for payroll"
       />
+
+      <Card style={{ marginBottom: 16, borderColor: "color-mix(in oklch, var(--primary) 25%, var(--border))" }}>
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+          <GitBranch size={18} color="var(--primary)" style={{ flexShrink: 0, marginTop: 2 }} />
+          <div>
+            <p style={{ margin: "0 0 6px", fontSize: 14, fontWeight: 700, color: "var(--foreground)" }}>
+              Branches &amp; entities (batches)
+            </p>
+            <p style={{ margin: 0, fontSize: 13, color: "var(--muted-foreground)", lineHeight: 1.55 }}>
+              A <strong style={{ color: "var(--foreground)" }}>branch</strong> is a location or entity under your company
+              (for example &ldquo;Monrovia HQ&rdquo; or &ldquo;Buchanan Office&rdquo;). Branches are used for branch-scoped
+              payroll and reporting. This is <strong style={{ color: "var(--foreground)" }}>not</strong> your company logo
+              — logo upload lives under <strong style={{ color: "var(--foreground)" }}>Settings</strong> → Company Logo.
+            </p>
+          </div>
+        </div>
+      </Card>
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
+        {canBranches ? (
+          <UnitPanel
+            kind="branches"
+            title="Branches & Entities"
+            subtitle="Add each branch or batch under your organization, then assign employees to it."
+            icon={<GitBranch size={15} />}
+            addLabel="Add Branch"
+            namePlaceholder="e.g. Monrovia HQ, Buchanan Office"
+            emptyHint="No branches yet. Type a name above and click Add Branch."
+          />
+        ) : (
+          <LockedCard label="Branches & entities" plan={PLAN_LABELS.standard} />
+        )}
         {canDepts ? (
           <UnitPanel kind="departments" title="Departments" icon={<Building2 size={15} />} />
         ) : (
           <LockedCard label="Departments" plan={PLAN_LABELS.standard} />
-        )}
-        {canBranches ? (
-          <UnitPanel kind="branches" title="Branches" icon={<GitBranch size={15} />} />
-        ) : (
-          <LockedCard label="Branches" plan={PLAN_LABELS.standard} />
         )}
       </div>
       {canMulti ? (
@@ -78,11 +104,19 @@ function LockedCard({ label, plan }: { label: string; plan: string }) {
 function UnitPanel({
   kind,
   title,
+  subtitle,
   icon,
+  addLabel = "Add",
+  namePlaceholder,
+  emptyHint,
 }: {
   kind: Kind;
   title: string;
+  subtitle?: string;
   icon: React.ReactNode;
+  addLabel?: string;
+  namePlaceholder?: string;
+  emptyHint?: string;
 }) {
   const [items, setItems] = useState<Unit[]>([]);
   const [name, setName] = useState("");
@@ -144,17 +178,25 @@ function UnitPanel({
   }
 
   return (
-    <Card>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-        <span style={{ color: "var(--primary)" }}>{icon}</span>
-        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{title}</h2>
+    <Card data-testid={kind === "branches" ? "branches-entities-panel" : undefined}>
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: subtitle ? 6 : 0 }}>
+          <span style={{ color: "var(--primary)" }}>{icon}</span>
+          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{title}</h2>
+        </div>
+        {subtitle && (
+          <p style={{ margin: 0, fontSize: 12, color: "var(--muted-foreground)", lineHeight: 1.5, paddingLeft: 23 }}>
+            {subtitle}
+          </p>
+        )}
       </div>
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && void add()}
-          placeholder={`New ${kind === "departments" ? "department" : "branch"}`}
+          placeholder={namePlaceholder ?? `New ${kind === "departments" ? "department" : "branch"}`}
+          aria-label={kind === "branches" ? "Branch or entity name" : `New ${kind}`}
           style={{
             flex: 1, padding: "9px 12px", borderRadius: 10,
             border: "1px solid var(--border)", background: "var(--background)",
@@ -164,15 +206,17 @@ function UnitPanel({
         <button
           onClick={() => void add()}
           disabled={saving || !name.trim()}
+          data-testid={kind === "branches" ? "add-branch-button" : undefined}
           style={{
             display: "flex", alignItems: "center", gap: 6,
-            padding: "9px 12px", borderRadius: 10, border: "none",
+            padding: "9px 14px", borderRadius: 10, border: "none",
             background: "var(--primary)", color: "var(--primary-foreground)",
             fontWeight: 700, fontSize: 12, cursor: "pointer",
+            whiteSpace: "nowrap",
           }}
         >
           {saving ? <Loader size={13} className="animate-spin" /> : <Plus size={13} />}
-          Add
+          {addLabel}
         </button>
       </div>
       {error && <p style={{ color: "var(--destructive)", fontSize: 12, margin: "0 0 10px" }}>{error}</p>}
@@ -180,7 +224,7 @@ function UnitPanel({
         <p style={{ color: "var(--muted-foreground)", fontSize: 12 }}>Loading…</p>
       ) : items.length === 0 ? (
         <p style={{ color: "var(--muted-foreground)", fontSize: 12 }}>
-          No {kind} yet. Add one to assign on the Employees page.
+          {emptyHint ?? `No ${kind} yet. Add one to assign on the Employees page.`}
         </p>
       ) : (
         <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6 }}>
@@ -206,6 +250,12 @@ function UnitPanel({
             </li>
           ))}
         </ul>
+      )}
+      {kind === "branches" && items.length > 0 && (
+        <p style={{ margin: "12px 0 0", fontSize: 11, color: "var(--muted-foreground)", lineHeight: 1.5 }}>
+          Next: on <strong style={{ color: "var(--foreground)" }}>Employees</strong>, set each person&apos;s Branch field to match a name here.
+          On <strong style={{ color: "var(--foreground)" }}>Payroll</strong>, choose a branch scope when starting a run.
+        </p>
       )}
     </Card>
   );

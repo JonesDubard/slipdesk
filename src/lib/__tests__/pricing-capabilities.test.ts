@@ -75,6 +75,12 @@ describe("plan feature gates vs nav (UI matches backend)", () => {
     expect(hrefs).not.toContain("/team");
   });
 
+  it("CHRES-like account: basic tier + billing_bypass unlocks branch management", () => {
+    expect(getEffectiveTier("basic", true)).toBe("premium");
+    expect(canUse("branchManagement", getEffectiveTier("basic", true))).toBe(true);
+    expect(canUse("branchManagement", getEffectiveTier("basic", false))).toBe(false);
+  });
+
   it("shows Enterprise routes on premium or billing bypass", () => {
     const premium = visibleNavItems("premium", false, "company_owner").map((i) => i.href);
     expect(premium).toContain("/audit");
@@ -83,6 +89,7 @@ describe("plan feature gates vs nav (UI matches backend)", () => {
     const bypass = visibleNavItems("basic", true, "company_owner").map((i) => i.href);
     expect(bypass).toContain("/audit");
     expect(bypass).toContain("/team");
+    expect(bypass).toContain("/organization");
     expect(getEffectiveTier("basic", true)).toBe("premium");
   });
 

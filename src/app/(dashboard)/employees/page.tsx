@@ -1671,6 +1671,7 @@ import PageSkeleton from "@/components/PageSkeleton";
 import { createClient } from "@/lib/supabase/client";
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
 import { useDemoGuard } from "@/components/demo/DemoGuard";
+import { normalizeGender, genderLabel } from "@/lib/employee-gender";
 
 function parseDateToISO(dateStr: string | undefined): string {
   if (!dateStr) return "";
@@ -1721,7 +1722,7 @@ const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
 ];
 
 const CSV_HEADERS = [
-  "employee_number","first_name","middle_name","last_name","job_title","department",
+  "employee_number","first_name","middle_name","last_name","gender","job_title","department",
   "email","phone","county","start_date","employment_type","currency",
   "rate","standard_hours","allowances","nasscorp_number","payment_method",
   "bank_name","account_number","momo_number","regular_hours","overtime_hours",
@@ -1736,7 +1737,7 @@ const EMPTY_FORM: Omit<Employee, "id" | "employeeNumber" | "fullName" | "isArchi
   allowances: 0, paymentMethod: "bank_transfer",
   bankName: "", accountNumber: "", momoNumber: "",
   branch: "", position: "", taxId: "", employmentStatus: "active", bankBranch: "",
-  portalEnabled: false,
+  portalEnabled: false, gender: "",
 };
 
 function getInitials(first: string, last: string) {
@@ -1810,6 +1811,9 @@ function parseEmployeeCSV(text: string): ParsedRow[] {
     if (!raw.currency) errors.push("Currency required");
     if (!raw.rate)     errors.push("Rate required");
 
+    const genderParsed = normalizeGender(raw.gender);
+    if (genderParsed.error) errors.push(genderParsed.error);
+
     const n = (v: string | undefined) => (v ? parseFloat(v) : null);
 
     const employeeNumber = (
@@ -1824,6 +1828,7 @@ function parseEmployeeCSV(text: string): ParsedRow[] {
       data: {
         employeeNumber,
         firstName, middleName, lastName,
+        gender: genderParsed.value,
         jobTitle:       raw.job_title   || "",
         department:     raw.department  || "Operations",
         email:          raw.email       || "",
@@ -2106,6 +2111,7 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
       taxId: employee.taxId ?? "", employmentStatus: employee.employmentStatus ?? "active",
       bankBranch: employee.bankBranch ?? "",
       portalEnabled: employee.portalEnabled ?? false,
+      gender: employee.gender ?? "",
     } : { ...EMPTY_FORM, employeeNumber: "" }
   );
   const [saving, setSaving] = useState(false);
@@ -2192,6 +2198,15 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                 <Field label="First Name"><Inp value={form.firstName} onChange={(v) => set("firstName", v)} placeholder="Moses"/></Field>
                 <Field label="Middle Name"><Inp value={form.middleName} onChange={(v) => set("middleName", v)} placeholder="James"/></Field>
+                <Field label="Gender (optional)">
+                  <select value={form.gender ?? ""} onChange={(e) => set("gender", e.target.value)} style={{ width: "100%", padding: "10px 13px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: 9, color: "var(--foreground)", fontSize: 13 }}>
+                    <option value="">—</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                    <option value="prefer_not_to_say">Prefer not to say</option>
+                  </select>
+                </Field>
                 <Field label="Last Name"><Inp value={form.lastName} onChange={(v) => set("lastName", v)} placeholder="Kollie"/></Field>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
@@ -2920,6 +2935,8 @@ export default function EmployeesPage() {
 
   const [search,        setSearch]        = useState("");
   const [deptFilter,    setDeptFilter]    = useState("All");
+  const [branchFilter,  setBranchFilter]  = useState("All");
+  const [genderFilter,  setGenderFilter]  = useState("All");
   const [showArchived,  setShowArchived]  = useState(false);
   const [showUpload,    setShowUpload]    = useState(false);
   const [drawerEmp,     setDrawerEmp]     = useState<Employee | undefined>(undefined);
@@ -2935,6 +2952,8 @@ export default function EmployeesPage() {
     return employees.filter((e) => {
       if (e.isArchived !== showArchived) return false;
       if (deptFilter !== "All" && e.department !== deptFilter) return false;
+      if (branchFilter !== "All" && (e.branch ?? "") !== branchFilter) return false;
+      if (genderFilter !== "All" && (e.gender ?? "") !== genderFilter) return false;
       const q = search.toLowerCase();
       if (!q) return true;
       return (
@@ -2947,7 +2966,12 @@ export default function EmployeesPage() {
         e.employeeNumber.toLowerCase().includes(q)
       );
     });
-  }, [employees, showArchived, deptFilter, search]);
+  }, [employees, showArchived, deptFilter, branchFilter, genderFilter, search]);
+
+  const branchOptions = useMemo(
+    () => ["All", ...Array.from(new Set(employees.map((e) => e.branch).filter(Boolean))) as string[]],
+    [employees],
+  );
 
   const stats = useMemo(() => ({
     total:    employees.filter((e) => !e.isArchived).length,
@@ -3288,6 +3312,44 @@ export default function EmployeesPage() {
           <ChevronDown size={13} color="var(--muted-foreground)" style={{ position: "absolute", right: 10, pointerEvents: "none" }}/>
         </div>
 
+        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+          <select
+            value={branchFilter}
+            onChange={(e) => setBranchFilter(e.target.value)}
+            style={{
+              padding: "9px 32px 9px 12px", background: "var(--card)",
+              border: "1px solid var(--border)", borderRadius: 10,
+              color: branchFilter === "All" ? "var(--muted-foreground)" : "var(--foreground)",
+              fontSize: 13, fontFamily: "'DM Sans',sans-serif",
+              outline: "none", cursor: "pointer", appearance: "none",
+            }}
+          >
+            {branchOptions.map((d) => <option key={d} value={d}>{d === "All" ? "All Branches" : d}</option>)}
+          </select>
+          <ChevronDown size={13} color="var(--muted-foreground)" style={{ position: "absolute", right: 10, pointerEvents: "none" }}/>
+        </div>
+
+        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+          <select
+            value={genderFilter}
+            onChange={(e) => setGenderFilter(e.target.value)}
+            style={{
+              padding: "9px 32px 9px 12px", background: "var(--card)",
+              border: "1px solid var(--border)", borderRadius: 10,
+              color: genderFilter === "All" ? "var(--muted-foreground)" : "var(--foreground)",
+              fontSize: 13, fontFamily: "'DM Sans',sans-serif",
+              outline: "none", cursor: "pointer", appearance: "none",
+            }}
+          >
+            <option value="All">All Genders</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="other">Other</option>
+            <option value="prefer_not_to_say">Prefer not to say</option>
+          </select>
+          <ChevronDown size={13} color="var(--muted-foreground)" style={{ position: "absolute", right: 10, pointerEvents: "none" }}/>
+        </div>
+
         <button onClick={() => { setShowArchived((v) => !v); setSelected(new Set()); }} style={{
           padding: "9px 14px", borderRadius: 10, cursor: "pointer",
           background: showArchived ? "color-mix(in oklch, var(--warning) 18%, transparent)" : "transparent",
@@ -3383,6 +3445,7 @@ export default function EmployeesPage() {
                           </p>
                           <p style={{ color: "var(--muted-foreground)", fontSize: 11, margin: "2px 0 0", fontFamily: "'DM Mono',monospace" }}>
                             {emp.employeeNumber || emp.jobTitle}
+                            {emp.gender ? ` · ${genderLabel(emp.gender)}` : ""}
                           </p>
                         </div>
                       </div>

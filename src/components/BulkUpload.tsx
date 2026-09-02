@@ -18,6 +18,7 @@ import { useRef, useState } from "react";
 import { Upload, Download, AlertCircle, CheckCircle2, X, Info, ChevronDown } from "lucide-react";
 import type { Employee, EmploymentType, Currency, PaymentMethod } from "@/context/AppContext";
 import type { DeductionItem } from "@/lib/mock-data";
+import { normalizeGender } from "@/lib/employee-gender";
 
 function parseDateToISO(dateStr: string | undefined): string {
   if (!dateStr) return "";
@@ -59,7 +60,7 @@ interface Props {
 
 // Core columns that always appear in the template
 const CORE_COLUMNS = [
-  "employee_number", "first_name", "middle_name", "last_name", "job_title", "department",
+  "employee_number", "first_name", "middle_name", "last_name", "gender", "job_title", "department",
   "email", "phone", "county", "start_date",
   "employment_type", "currency", "rate", "standard_hours", "allowances",
   "nasscorp_number",
@@ -76,7 +77,7 @@ const CORE_COLUMNS = [
 
 const EXAMPLE_ROWS = [
   [
-    "EMP-001","Moses","James","Kollie","Accountant","Finance",
+    "EMP-001","Moses","James","Kollie","male","Accountant","Finance",
     "moses@company.lr","+231770000001","Montserrado","2023-01-15",
     "full_time","USD","15.00","173.33","50.00",
     "NASC-001",
@@ -85,7 +86,7 @@ const EXAMPLE_ROWS = [
     "100","30","20","0","0",
   ],
   [
-    "EMP-002","Grace","","Tamba","HR Officer","Human Resources",
+    "EMP-002","Grace","","Tamba","female","HR Officer","Human Resources",
     "grace@company.lr","+231770000002","Margibi","2023-03-01",
     "full_time","LRD","2500","173.33","0",
     "NASC-002",
@@ -94,7 +95,7 @@ const EXAMPLE_ROWS = [
     "500","0","0","250","0",
   ],
   [
-    "EMP-003","James","","Freeman","Driver","Operations",
+    "EMP-003","James","","Freeman","","Driver","Operations",
     "james@company.lr","+231770000003","Bong","2024-06-01",
     "casual","USD","8.50","0","0",
     "",
@@ -179,6 +180,10 @@ function parseRow(
   if (!VALID_PAYMENT_METHODS.includes(payMethod))
     return { row: null, error: `Line ${lineNum}: invalid payment_method "${raw.payment_method}".` };
 
+  const genderParsed = normalizeGender(raw.gender?.trim() ?? "");
+  if (genderParsed.error)
+    return { row: null, error: `Line ${lineNum}: ${genderParsed.error}` };
+
   const standardHours = parseNum(raw.standard_hours, 173.33);
 
   const employee: Omit<Employee, "id" | "fullName"> = {
@@ -186,6 +191,7 @@ function parseRow(
     firstName,
     middleName,
     lastName,
+    gender: genderParsed.value,
     jobTitle:       raw.job_title?.trim()   || "",
     department:     raw.department?.trim()  || "",
     email:          raw.email?.trim()       || "",
