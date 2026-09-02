@@ -36,7 +36,7 @@ export function normalizeGender(raw: string | undefined | null): {
   return { value: mapped };
 }
 
-export function genderLabel(value: EmployeeGender | "" | null | undefined): string {
+export function genderLabel(value: string | null | undefined): string {
   if (!value) return "—";
   return value.replace(/_/g, " ");
 }

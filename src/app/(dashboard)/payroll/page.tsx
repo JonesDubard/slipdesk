@@ -21,6 +21,11 @@ import { useApp } from "@/context/AppContext";
 import PageSkeleton from "@/components/PageSkeleton";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
+import {
+  canGeneratePayslips,
+  getDistinctEmployeeIdsGeneratedThisMonth,
+  recordPayslipGeneration,
+} from "@/lib/billing";
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
 import { usePayrollDraftAutosave, createPayrollDraft, loadActivePayrollDraft, finalizePayrollRun, patchPayrollRunStatus, abandonPayrollDraft } from "@/hooks/usePayrollDraft";
 import { filterEmployeesForBranchScope } from "@/lib/payroll/branch-scope";
