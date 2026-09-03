@@ -1672,6 +1672,7 @@ import { createClient } from "@/lib/supabase/client";
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
 import { useDemoGuard } from "@/components/demo/DemoGuard";
 import { normalizeGender, genderLabel } from "@/lib/employee-gender";
+import GenderHeadcountCard from "@/components/GenderHeadcountCard";
 
 function parseDateToISO(dateStr: string | undefined): string {
   if (!dateStr) return "";
@@ -2979,6 +2980,31 @@ export default function EmployeesPage() {
     archived: employees.filter((e) => e.isArchived).length,
   }), [employees]);
 
+  /** Same filters as the table, except gender — so the breakdown does not collapse to one bar. */
+  const headcountViewed = useMemo(() => {
+    return employees.filter((e) => {
+      if (e.isArchived !== showArchived) return false;
+      if (deptFilter !== "All" && e.department !== deptFilter) return false;
+      if (branchFilter !== "All" && (e.branch ?? "") !== branchFilter) return false;
+      const q = search.toLowerCase();
+      if (!q) return true;
+      return (
+        e.firstName.toLowerCase().includes(q) ||
+        e.middleName.toLowerCase().includes(q) ||
+        e.lastName.toLowerCase().includes(q)  ||
+        e.fullName.toLowerCase().includes(q)  ||
+        e.jobTitle.toLowerCase().includes(q)  ||
+        e.email.toLowerCase().includes(q)     ||
+        e.employeeNumber.toLowerCase().includes(q)
+      );
+    });
+  }, [employees, showArchived, deptFilter, branchFilter, search]);
+
+  const allActiveForHeadcount = useMemo(
+    () => employees.filter((e) => !e.isArchived),
+    [employees],
+  );
+
   const activeCount   = employees.filter(e => e.isActive && !e.isArchived).length;
   const tierLimits    = { basic: 80, standard: 499, premium: Infinity } as const;
   const currentLimit  = tierLimits[effectiveTier] ?? 80;
@@ -3361,6 +3387,16 @@ export default function EmployeesPage() {
           <Archive size={14}/> {showArchived ? "Showing Archived" : "View Archived"}
         </button>
       </div>
+
+      <GenderHeadcountCard
+        viewed={headcountViewed}
+        allActive={allActiveForHeadcount}
+        branchFilter={branchFilter}
+        branchOptions={branchOptions}
+        genderFilterActive={genderFilter !== "All"}
+        companyName={company.name}
+        onBlocked={() => guardAction("export_download")}
+      />
 
       <div style={{
         background: "var(--card)", border: "1px solid var(--border)",
