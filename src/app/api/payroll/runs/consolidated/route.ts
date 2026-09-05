@@ -4,6 +4,10 @@ import {
   canViewPayroll,
   resolvePayrollAccess,
 } from "@/lib/payroll/resolve-payroll-access";
+import {
+  FINALIZED_EMPLOYEE_SELECT,
+  mapFinalizedPayrollLine,
+} from "@/lib/payroll/map-finalized-line";
 
 /**
  * GET /api/payroll/runs/consolidated?periodLabel=Sep%202026
@@ -31,7 +35,7 @@ export async function GET(req: NextRequest) {
 
   const { data: runs, error: runsErr } = await db
     .from("pay_runs")
-    .select("id, period_label, branch_id, pay_date, employee_count")
+    .select("id, period_label, branch_id, pay_date, run_type, employee_count")
     .eq("company_id", access.companyId)
     .eq("status", "paid")
     .eq("period_label", periodLabel)
@@ -58,44 +62,34 @@ export async function GET(req: NextRequest) {
   if (empIds.length) {
     const { data: emps } = await db
       .from("employees")
-      .select("id, payment_method, account_number, momo_number, branch, nasscorp_number")
-      .in("id", empIds);
+        .select(FINALIZED_EMPLOYEE_SELECT)
+        .in("id", empIds);
     empById = new Map((emps ?? []).map((e: { id: string }) => [e.id, e]));
   }
 
+  const runById = new Map<string, { id: string; pay_date?: string; run_type?: string }>(
+    (runs ?? []).map((r: { id: string; pay_date?: string; run_type?: string }) => [r.id, r]),
+  );
   const seenEmployees = new Set<string>();
-  const finalizedLines: Array<Record<string, unknown>> = [];
+  const finalizedLines: ReturnType<typeof mapFinalizedPayrollLine>[] = [];
+  const disbursementSource: ReturnType<typeof mapFinalizedPayrollLine>[] = [];
 
   for (const l of lineRows ?? []) {
+    const emp = l.employee_id ? empById.get(l.employee_id as string) : undefined;
+    const parent = runById.get(l.pay_run_id as string);
+    const mapped = mapFinalizedPayrollLine(l, emp, {
+      payDate: parent?.pay_date,
+      runType: parent?.run_type ?? "monthly",
+    });
+    finalizedLines.push(mapped);
     const empKey = (l.employee_id as string) || (l.employee_number as string);
     if (seenEmployees.has(empKey)) continue;
     seenEmployees.add(empKey);
-    const emp = l.employee_id ? empById.get(l.employee_id as string) : undefined;
-    finalizedLines.push({
-      employeeNumber: l.employee_number,
-      fullName: l.full_name,
-      department: l.department,
-      currency: l.currency,
-      grossPay: Number(l.gross_pay ?? 0),
-      additionalEarnings: Number(l.additional_earnings ?? 0),
-      deductions: Number(l.deductions ?? 0),
-      netPay: Number(l.net_pay ?? 0),
-      incomeTax: Number(l.income_tax ?? 0),
-      nasscorpEe: Number(l.nasscorp_ee ?? 0),
-      nasscorpEr: Number(l.nasscorp_er ?? 0),
-      nasscorpBase: Number(l.gross_pay ?? 0),
-      nasscorpNumber: (emp?.nasscorp_number as string) ?? "",
-      paymentMethod: (emp?.payment_method as string) ?? "cash",
-      accountNumber: (emp?.account_number as string) ?? "",
-      mobileNumber: (emp?.momo_number as string) ?? "",
-      branch: (emp?.branch as string) ?? "",
-    });
+    disbursementSource.push(mapped);
   }
 
   const { rowsFromFinalizedPayroll } = await import("@/lib/reports/disbursement");
-  const disbursementRows = rowsFromFinalizedPayroll(
-    finalizedLines as Parameters<typeof rowsFromFinalizedPayroll>[0],
-  );
+  const disbursementRows = rowsFromFinalizedPayroll(disbursementSource);
 
   return NextResponse.json({
     periodLabel,

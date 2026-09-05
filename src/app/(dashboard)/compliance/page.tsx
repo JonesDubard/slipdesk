@@ -80,7 +80,7 @@ export default function CompliancePage() {
   const companyMeta = [
     { label: "Company", value: company.name || "—" },
     { label: "LRA TIN", value: company.tin || "MISSING" },
-    { label: "NASSCORP Reg", value: company.nasscorpRegNo || "MISSING" },
+    { label: "NASSCORP Employer ID", value: company.nasscorpRegNo || "MISSING" },
     { label: "Period", value: period },
     { label: "Employees", value: String(active.length) },
   ];

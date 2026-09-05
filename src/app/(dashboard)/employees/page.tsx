@@ -2257,8 +2257,8 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
                 </Field>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                <Field label="NASSCORP Number">
-                  <Inp value={form.nasscorpNumber} onChange={(v) => set("nasscorpNumber", v)} placeholder="NSC-001-2024"/>
+                <Field label="NASSCORP SS Number">
+                  <Inp value={form.nasscorpNumber} onChange={(v) => set("nasscorpNumber", v)} placeholder="123456789"/>
                 </Field>
                 <Field label="Tax ID (TIN)">
                   <Inp value={form.taxId ?? ""} onChange={(v) => set("taxId", v)} placeholder="LR-TIN-XXXXXXX"/>

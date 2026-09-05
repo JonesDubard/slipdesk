@@ -2,65 +2,49 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  FileBarChart, Users, Building2, Landmark, ShieldCheck, TrendingUp,
-  FileText, FileSpreadsheet, FileDown, Lock, Wallet,
+  FileBarChart, Users,
+  FileText, FileSpreadsheet, FileDown, Wallet,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
-import { getEffectiveTier, canUse, PLAN_LABELS } from "@/lib/plan-features";
 import { can } from "@/lib/rbac";
-import {
-  computePayroll, sumTotals, groupByDepartment, fmtUSD, fmtMoney,
-  downloadCSV, downloadExcel, type Cell, type EmployeePayroll, type PayrollTotals,
-  CUSTOM_REPORT_COLUMNS, buildCustomReport, type CustomReportColumn,
-} from "@/lib/reporting";
+import { downloadCSV, downloadExcel, type Cell } from "@/lib/reporting";
 import { downloadReportPdf, type ReportSection } from "@/components/ReportPDF";
+import type { FinalizedPayrollLine } from "@/lib/compliance/statutory-exports";
 import {
-  disbursementReportHeaders,
-  disbursementReportRows,
-  bankDisbursementHeaders,
-  bankDisbursementRows,
-  mobileMoneyDisbursementHeaders,
-  mobileMoneyDisbursementRows,
-  rowsFromFinalizedPayroll,
-} from "@/lib/reports/disbursement";
-import {
-  lraExportHeaders,
-  lraExportRowsFromFinalized,
-  nasscorpExportHeaders,
-  nasscorpExportRowsFromFinalized,
-  type FinalizedPayrollLine,
-} from "@/lib/compliance/statutory-exports";
+  FINALIZED_CUSTOM_COLUMNS,
+  PAYROLL_DISBURSEMENT_HEADERS,
+  PAYROLL_REGISTER_HEADERS,
+  buildCustomReportFromFinalized,
+  payrollDisbursementRows,
+  payrollDisbursementTotalRows,
+  payrollRegisterRows,
+  payrollRegisterTotalRows,
+  summarizeFinalizedPeriod,
+  type FinalizedCustomColumn,
+} from "@/lib/reports/finalized-period-reports";
+import NasscorpStatutoryCard from "@/components/NasscorpStatutoryCard";
+import LraStatutoryCard from "@/components/LraStatutoryCard";
 import {
   ModuleShell, ModuleHeader, Card, UpgradeNotice, btnGhost,
 } from "@/components/module-ui";
 
 type ExportKind = "pdf" | "excel" | "csv";
 
-interface ReportDef {
-  id: string;
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-  /** Requires departmentReports feature (Professional+). */
-  proOnly?: boolean;
-  /** Disbursement / statutory exports require a finalized pay run. */
-  requiresFinalized?: boolean;
-  build: (rows: EmployeePayroll[], totals: PayrollTotals) => {
-    headers: string[];
-    dataRows: Cell[][];
-    total?: Cell[];
-    sections: ReportSection[];
-  };
+function SectionLabel({ children }: { children: string }) {
+  return (
+    <p style={{
+      margin: "20px 0 10px", fontSize: 12, fontWeight: 700, letterSpacing: "0.06em",
+      textTransform: "uppercase", color: "var(--muted-foreground)",
+      fontFamily: "'DM Mono',monospace",
+    }}>
+      {children}
+    </p>
+  );
 }
 
 export default function ReportsPage() {
-  const { employees, company, role } = useApp();
-  const effectiveTier = getEffectiveTier(company.subscriptionTier, company.billingBypass);
+  const { company, role } = useApp();
   const [busy, setBusy] = useState<string | null>(null);
-  const [customCols, setCustomCols] = useState<CustomReportColumn[]>([
-    "employeeNumber", "fullName", "department", "gross", "net",
-  ]);
-  const [customGroup, setCustomGroup] = useState<"department" | "branch" | "">("");
   const [paidRuns, setPaidRuns] = useState<Array<{
     id: string;
     period_label: string;
@@ -69,6 +53,10 @@ export default function ReportsPage() {
   }>>([]);
   const [selectedRunId, setSelectedRunId] = useState("");
   const [finalizedLines, setFinalizedLines] = useState<FinalizedPayrollLine[] | null>(null);
+  const [customCols, setCustomCols] = useState<FinalizedCustomColumn[]>([
+    "employeeNumber", "fullName", "gross", "net",
+  ]);
+  const [customGroup, setCustomGroup] = useState<"" | "department" | "branch">("");
 
   useEffect(() => {
     void fetch("/api/payroll/runs?finalized=true")
@@ -113,10 +101,6 @@ export default function ReportsPage() {
       .catch(() => setFinalizedLines(null));
   }, [selectedRunId]);
 
-  const active = useMemo(() => employees.filter((e) => e.isActive && !e.isArchived), [employees]);
-  const rows = useMemo(() => computePayroll(active), [active]);
-  const totals = useMemo(() => sumTotals(rows), [rows]);
-
   const period = new Date().toLocaleString("default", { month: "long", year: "numeric" });
   const payrollPeriodLabel = selectedRunId.startsWith("consolidated:")
     ? selectedRunId.slice("consolidated:".length)
@@ -124,31 +108,15 @@ export default function ReportsPage() {
       ? (paidRuns.find((r) => r.id === selectedRunId)?.period_label ?? period)
       : period;
 
-  const finalizedDisbursementRows = useMemo(
-    () => (finalizedLines?.length ? rowsFromFinalizedPayroll(finalizedLines) : []),
-    [finalizedLines],
-  );
+  const lines = finalizedLines ?? [];
+  const summary = useMemo(() => summarizeFinalizedPeriod(lines), [lines]);
+  const selected = !!selectedRunId;
 
   const companyMeta = [
     { label: "Company", value: company.name || "—" },
     { label: "Period", value: payrollPeriodLabel },
-    { label: "Employees", value: String(active.length) },
-    { label: "Gross (USD)", value: fmtUSD(totals.gross) },
+    { label: "Employees", value: selected ? String(summary.employees) : "—" },
   ];
-
-  function finalizedNotice() {
-    const headers = ["Notice"];
-    const dataRows: Cell[][] = [["Select a finalized payroll period above to generate this export."]];
-    return {
-      headers,
-      dataRows,
-      sections: [{
-        heading: "Finalized payroll required",
-        columns: [{ header: "Notice", width: 3 }],
-        rows: dataRows,
-      }],
-    };
-  }
 
   if (!can(role, "report:view")) {
     return (
@@ -158,33 +126,29 @@ export default function ReportsPage() {
   }
 
   const canExport = can(role, "report:export");
-  const hasDeptReports = canUse("departmentReports", effectiveTier);
-  const hasCustom = canUse("customReports", effectiveTier);
 
-  function toggleCol(id: CustomReportColumn) {
-    setCustomCols((prev) =>
-      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id],
-    );
-  }
-
-  async function exportCustom(kind: ExportKind) {
-    setBusy(`custom-${kind}`);
+  async function exportTable(
+    id: string,
+    title: string,
+    headers: string[],
+    dataRows: Cell[][],
+    totalRows: Cell[][],
+    columns: ReportSection["columns"],
+    kind: ExportKind,
+  ) {
+    setBusy(`${id}-${kind}`);
     try {
-      const built = buildCustomReport(rows, customCols, customGroup || null);
-      const fname = `Custom_Report_${period.replace(/\s+/g, "_")}`;
-      if (kind === "csv") downloadCSV(fname, built.headers, built.dataRows);
-      else if (kind === "excel") downloadExcel(fname, [{ name: "Custom", headers: built.headers, rows: built.dataRows }]);
+      const allRows = [...dataRows, ...totalRows];
+      const fname = `${title.replace(/\s+/g, "_")}_${payrollPeriodLabel.replace(/\s+/g, "_")}`;
+      if (kind === "csv") downloadCSV(fname, headers, allRows);
+      else if (kind === "excel") downloadExcel(fname, [{ name: title, headers, rows: allRows }]);
       else {
         await downloadReportPdf({
-          title: "Custom Payroll Report",
-          subtitle: period,
+          title,
+          subtitle: payrollPeriodLabel,
           companyName: company.name,
           meta: companyMeta,
-          sections: [{
-            heading: customGroup ? `Grouped by ${customGroup}` : "Custom columns",
-            columns: built.headers.map((h) => ({ header: h, width: 1.2 })),
-            rows: built.dataRows.map((r) => r.map(String)),
-          }],
+          sections: [{ heading: title, columns, rows: dataRows.map((r) => r.map(String)), totalRow: totalRows[0] }],
         }, fname);
       }
     } finally {
@@ -192,259 +156,80 @@ export default function ReportsPage() {
     }
   }
 
-  const REPORTS: ReportDef[] = [
-    {
-      id: "payroll-register", title: "Payroll Register", icon: <Users size={16} />,
-      description: "Every employee with gross, deductions and net pay.",
-      build: (rws, tot) => {
-        const headers = ["Emp #", "Name", "Dept", "CCY", "Gross", "Income Tax", "NASSCORP EE", "Net"];
-        const dataRows: Cell[][] = rws.map((r) => [
-          r.employee.employeeNumber, r.employee.fullName, r.employee.department || "—", r.employee.currency,
-          fmtMoney(r.result.grossPay, r.employee.currency),
-          fmtMoney(r.result.Paye.taxInBase, r.employee.currency),
-          fmtMoney(r.result.nasscorp.employeeContribution, r.employee.currency),
-          fmtMoney(r.result.netPay, r.employee.currency),
-        ]);
-        const total: Cell[] = ["", "TOTAL (USD)", "", "", fmtUSD(tot.gross), fmtUSD(tot.incomeTax), fmtUSD(tot.nasscorpEe), fmtUSD(tot.net)];
-        return {
-          headers, dataRows, total,
-          sections: [{
-            heading: "Payroll Register",
-            columns: [
-              { header: "Emp #", width: 0.9 }, { header: "Name", width: 1.8 }, { header: "Dept", width: 1.2 },
-              { header: "CCY", width: 0.5 }, { header: "Gross", width: 1, align: "right" },
-              { header: "Tax", width: 1, align: "right" }, { header: "NASSCORP", width: 1, align: "right" },
-              { header: "Net", width: 1, align: "right" },
-            ],
-            rows: dataRows, totalRow: total,
-          }],
-        };
-      },
-    },
-    {
-      id: "department-report", title: "Department Payroll Report", icon: <Building2 size={16} />, proOnly: true,
-      description: "Cost and headcount grouped by department.",
-      build: (rws) => {
-        const groups = groupByDepartment(rws);
-        const headers = ["Department", "Employees", "Gross (USD)", "Net (USD)"];
-        const dataRows: Cell[][] = groups.map((g) => [g.key, g.employees, fmtUSD(g.gross), fmtUSD(g.net)]);
-        const total: Cell[] = ["TOTAL", groups.reduce((s, g) => s + g.employees, 0), fmtUSD(groups.reduce((s, g) => s + g.gross, 0)), fmtUSD(groups.reduce((s, g) => s + g.net, 0))];
-        return {
-          headers, dataRows, total,
-          sections: [{
-            heading: "Department Breakdown",
-            columns: [{ header: "Department", width: 2 }, { header: "Employees", width: 1, align: "right" }, { header: "Gross", width: 1.2, align: "right" }, { header: "Net", width: 1.2, align: "right" }],
-            rows: dataRows, totalRow: total,
-          }],
-        };
-      },
-    },
-    {
-      id: "earnings", title: "Employee Earnings Report", icon: <TrendingUp size={16} />,
-      description: "Per-employee earnings breakdown (base, allowances, gross).",
-      build: (rws) => {
-        const headers = ["Emp #", "Name", "CCY", "Base", "Allowances", "Gross", "Net"];
-        const dataRows: Cell[][] = rws.map((r) => [
-          r.employee.employeeNumber, r.employee.fullName, r.employee.currency,
-          fmtMoney(r.result.regularSalary, r.employee.currency),
-          fmtMoney(r.result.additionalEarnings, r.employee.currency),
-          fmtMoney(r.result.grossPay, r.employee.currency),
-          fmtMoney(r.result.netPay, r.employee.currency),
-        ]);
-        return {
-          headers, dataRows,
-          sections: [{
-            heading: "Employee Earnings",
-            columns: [
-              { header: "Emp #", width: 0.9 }, { header: "Name", width: 1.8 }, { header: "CCY", width: 0.5 },
-              { header: "Base", width: 1, align: "right" }, { header: "Allow.", width: 1, align: "right" },
-              { header: "Gross", width: 1, align: "right" }, { header: "Net", width: 1, align: "right" },
-            ],
-            rows: dataRows,
-          }],
-        };
-      },
-    },
-    {
-      id: "tax-summary", title: "Tax Summary", icon: <Landmark size={16} />,
-      description: "LRA income tax withheld across the workforce.",
-      build: (rws, tot) => {
-        const headers = ["Emp #", "Name", "CCY", "Taxable (LRD)", "Effective %", "Income Tax"];
-        const dataRows: Cell[][] = rws.map((r) => [
-          r.employee.employeeNumber, r.employee.fullName, r.employee.currency,
-          fmtMoney(r.result.Paye.grossInLRD, "LRD"),
-          `${(r.result.Paye.effectiveRate * 100).toFixed(1)}%`,
-          fmtMoney(r.result.Paye.taxInBase, r.employee.currency),
-        ]);
-        const total: Cell[] = ["", "TOTAL (USD)", "", "", "", fmtUSD(tot.incomeTax)];
-        return {
-          headers, dataRows, total,
-          sections: [{
-            heading: "LRA Tax Summary",
-            columns: [
-              { header: "Emp #", width: 0.9 }, { header: "Name", width: 2 }, { header: "CCY", width: 0.6 },
-              { header: "Taxable (LRD)", width: 1.3, align: "right" }, { header: "Eff %", width: 0.8, align: "right" },
-              { header: "Income Tax", width: 1.2, align: "right" },
-            ],
-            rows: dataRows, totalRow: total,
-          }],
-        };
-      },
-    },
-    {
-      id: "nasscorp-summary", title: "NASSCORP Summary", icon: <ShieldCheck size={16} />,
-      description: "Employee (4%) and employer (6%) contributions.",
-      build: (rws, tot) => {
-        const headers = ["Emp #", "Name", "NASSCORP #", "Base", "EE 4%", "ER 6%", "Total"];
-        const dataRows: Cell[][] = rws.map((r) => [
-          r.employee.employeeNumber, r.employee.fullName, r.employee.nasscorpNumber || "MISSING",
-          fmtMoney(r.result.nasscorp.base, r.employee.currency),
-          fmtMoney(r.result.nasscorp.employeeContribution, r.employee.currency),
-          fmtMoney(r.result.nasscorp.employerContribution, r.employee.currency),
-          fmtMoney(r.result.nasscorp.employeeContribution + r.result.nasscorp.employerContribution, r.employee.currency),
-        ]);
-        const total: Cell[] = ["", "TOTAL (USD)", "", "", fmtUSD(tot.nasscorpEe), fmtUSD(tot.nasscorpEr), fmtUSD(tot.nasscorpEe + tot.nasscorpEr)];
-        return {
-          headers, dataRows, total,
-          sections: [{
-            heading: "NASSCORP Contributions",
-            columns: [
-              { header: "Emp #", width: 0.9 }, { header: "Name", width: 1.7 }, { header: "NASSCORP #", width: 1.3 },
-              { header: "EE 4%", width: 1, align: "right" }, { header: "ER 6%", width: 1, align: "right" },
-              { header: "Total", width: 1, align: "right" },
-            ],
-            rows: rws.map((r) => [
-              r.employee.employeeNumber, r.employee.fullName, r.employee.nasscorpNumber || "MISSING",
-              fmtMoney(r.result.nasscorp.employeeContribution, r.employee.currency),
-              fmtMoney(r.result.nasscorp.employerContribution, r.employee.currency),
-              fmtMoney(r.result.nasscorp.employeeContribution + r.result.nasscorp.employerContribution, r.employee.currency),
-            ]),
-            totalRow: ["", "TOTAL (USD)", "", fmtUSD(tot.nasscorpEe), fmtUSD(tot.nasscorpEr), fmtUSD(tot.nasscorpEe + tot.nasscorpEr)],
-          }],
-        };
-      },
-    },
-    {
-      id: "disbursement-report", title: "Payroll Disbursement Report", icon: <Wallet size={16} />,
-      requiresFinalized: true,
-      description: "Human-readable payroll disbursement listing from a finalized pay run (not a validated bank upload file).",
-      build: () => {
-        if (!finalizedDisbursementRows.length) return finalizedNotice();
-        const headers = disbursementReportHeaders();
-        const dataRows: Cell[][] = disbursementReportRows(finalizedDisbursementRows);
-        return {
-          headers, dataRows,
-          sections: [{
-            heading: `Payroll Disbursement — ${payrollPeriodLabel}`,
-            columns: headers.map((h) => ({ header: h, width: 1.1 })),
-            rows: dataRows,
-          }],
-        };
-      },
-    },
-    {
-      id: "bank-disbursement", title: "Bank Disbursement File", icon: <Landmark size={16} />,
-      requiresFinalized: true,
-      description: "PLACEHOLDER bank payment export from finalized payroll — not validated for bank upload.",
-      build: () => {
-        if (!finalizedDisbursementRows.length) return finalizedNotice();
-        const headers = bankDisbursementHeaders();
-        const dataRows: Cell[][] = bankDisbursementRows(finalizedDisbursementRows);
-        return {
-          headers, dataRows,
-          sections: [{
-            heading: `Bank Disbursement (placeholder) — ${payrollPeriodLabel}`,
-            columns: headers.map((h) => ({ header: h, width: 1.2 })),
-            rows: dataRows,
-          }],
-        };
-      },
-    },
-    {
-      id: "momo-disbursement", title: "Mobile Money Disbursement File", icon: <Wallet size={16} />,
-      requiresFinalized: true,
-      description: "PLACEHOLDER MTN/Orange bulk file from finalized payroll — not validated against provider specs.",
-      build: () => {
-        if (!finalizedDisbursementRows.length) return finalizedNotice();
-        const headers = mobileMoneyDisbursementHeaders();
-        const dataRows: Cell[][] = mobileMoneyDisbursementRows(finalizedDisbursementRows);
-        return {
-          headers, dataRows,
-          sections: [{
-            heading: `Mobile Money Disbursement (placeholder) — ${payrollPeriodLabel}`,
-            columns: headers.map((h) => ({ header: h, width: 1.2 })),
-            rows: dataRows,
-          }],
-        };
-      },
-    },
-    {
-      id: "lra-statutory", title: "LRA Statutory Export", icon: <Landmark size={16} />,
-      requiresFinalized: true,
-      description: "Authority-specific LRA export from finalized payroll (placeholder until spec confirmed).",
-      build: () => {
-        if (!finalizedLines?.length) return finalizedNotice();
-        const headers = lraExportHeaders();
-        const employer = { companyName: company.name, tin: company.tin, periodLabel: payrollPeriodLabel };
-        const dataRows: Cell[][] = lraExportRowsFromFinalized(employer, finalizedLines);
-        return {
-          headers, dataRows,
-          sections: [{
-            heading: `LRA Export (placeholder) — ${payrollPeriodLabel}`,
-            columns: headers.map((h) => ({ header: h, width: 1.1 })),
-            rows: dataRows,
-          }],
-        };
-      },
-    },
-    {
-      id: "nasscorp-statutory", title: "NASSCORP Statutory Export", icon: <ShieldCheck size={16} />,
-      requiresFinalized: true,
-      description: "Authority-specific NASSCORP export from finalized payroll (placeholder until spec confirmed).",
-      build: () => {
-        if (!finalizedLines?.length) return finalizedNotice();
-        const headers = nasscorpExportHeaders();
-        const employer = { companyName: company.name, nasscorpRegNo: company.nasscorpRegNo, periodLabel: payrollPeriodLabel };
-        const dataRows: Cell[][] = nasscorpExportRowsFromFinalized(employer, finalizedLines);
-        return {
-          headers, dataRows,
-          sections: [{
-            heading: `NASSCORP Export (placeholder) — ${payrollPeriodLabel}`,
-            columns: headers.map((h) => ({ header: h, width: 1.1 })),
-            rows: dataRows,
-          }],
-        };
-      },
-    },
-  ];
-
-  async function runExport(def: ReportDef, kind: ExportKind) {
-    setBusy(`${def.id}-${kind}`);
-    try {
-      const built = def.build(rows, totals);
-      const fname = `${def.title.replace(/\s+/g, "_")}_${payrollPeriodLabel.replace(/\s+/g, "_")}`;
-      if (kind === "csv") {
-        downloadCSV(fname, built.headers, built.total ? [...built.dataRows, built.total] : built.dataRows);
-      } else if (kind === "excel") {
-        downloadExcel(fname, [{ name: def.title, headers: built.headers, rows: built.total ? [...built.dataRows, built.total] : built.dataRows }]);
-      } else {
-        await downloadReportPdf({ title: def.title, subtitle: period, companyName: company.name, meta: companyMeta, sections: built.sections }, fname);
-      }
-    } finally {
-      setBusy(null);
+  function ExportButtons({
+    id, disabled, onPdf, onExcel, onCsv,
+  }: {
+    id: string;
+    disabled: boolean;
+    onPdf?: () => void;
+    onExcel: () => void;
+    onCsv: () => void;
+  }) {
+    if (!canExport) {
+      return <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>View only — your role cannot export.</span>;
     }
+    if (!selected) {
+      return <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>Select a finalized payroll period above.</span>;
+    }
+    return (
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {onPdf && (
+          <button onClick={onPdf} disabled={disabled || !!busy} style={btnGhost()}>
+            <FileText size={14} /> PDF
+          </button>
+        )}
+        <button onClick={onExcel} disabled={disabled || !!busy} style={btnGhost()}>
+          <FileSpreadsheet size={14} /> Excel
+        </button>
+        <button onClick={onCsv} disabled={disabled || !!busy} style={btnGhost()}>
+          <FileDown size={14} /> CSV
+        </button>
+        {busy?.startsWith(id) && (
+          <span style={{ fontSize: 12, color: "var(--muted-foreground)", alignSelf: "center" }}>Generating…</span>
+        )}
+      </div>
+    );
+  }
+
+  function ReportCard({
+    icon, title, description, children,
+  }: {
+    icon: React.ReactNode;
+    title: string;
+    description: string;
+    children: React.ReactNode;
+  }) {
+    return (
+      <Card style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            width: 38, height: 38, borderRadius: 11, flexShrink: 0,
+            background: "color-mix(in oklch, var(--primary) 15%, transparent)",
+            border: "1px solid color-mix(in oklch, var(--primary) 35%, transparent)",
+            display: "flex", alignItems: "center", justifyContent: "center", color: "var(--primary)",
+          }}>
+            {icon}
+          </div>
+          <div>
+            <p style={{ color: "var(--foreground)", fontWeight: 700, fontSize: 14, margin: 0 }}>{title}</p>
+            <p style={{ color: "var(--muted-foreground)", fontSize: 11, margin: "2px 0 0" }}>{description}</p>
+          </div>
+        </div>
+        {children}
+      </Card>
+    );
   }
 
   return (
     <ModuleShell>
-      <ModuleHeader title="Reporting Center" subtitle={`${payrollPeriodLabel} · export to PDF, Excel or CSV`} />
+      <ModuleHeader title="Reports" subtitle="Select a finalized payroll period, then generate a report" />
 
-      <Card style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+      <Card style={{ marginBottom: 8, display: "flex", flexDirection: "column", gap: 8 }}>
         <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: "var(--foreground)" }}>
-          Payroll &amp; Disbursement period
+          Payroll period
         </p>
         <p style={{ margin: 0, fontSize: 12, color: "var(--muted-foreground)" }}>
-          Disbursement and statutory exports use finalized (paid) payroll runs only.
+          All reports below use the same finalized pay run. Nothing is recalculated from live employee rates.
         </p>
         <select
           value={selectedRunId}
@@ -466,71 +251,101 @@ export default function ReportsPage() {
         </select>
         {paidRuns.length === 0 && (
           <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
-            No finalized pay runs yet — complete a payroll run to unlock disbursement exports.
+            No finalized pay runs yet — complete a payroll run to unlock reports.
           </span>
         )}
       </Card>
 
+      <SectionLabel>Payroll</SectionLabel>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
-        {REPORTS.map((def) => {
-          const locked = def.proOnly && !hasDeptReports;
-          const needsRun = def.requiresFinalized && !selectedRunId;
-          return (
-            <Card key={def.id} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{
-                  width: 38, height: 38, borderRadius: 11, flexShrink: 0,
-                  background: "color-mix(in oklch, var(--primary) 15%, transparent)",
-                  border: "1px solid color-mix(in oklch, var(--primary) 35%, transparent)",
-                  display: "flex", alignItems: "center", justifyContent: "center", color: "var(--primary)",
-                }}>
-                  {def.icon}
-                </div>
-                <div>
-                  <p style={{ color: "var(--foreground)", fontWeight: 700, fontSize: 14, margin: 0 }}>{def.title}</p>
-                  <p style={{ color: "var(--muted-foreground)", fontSize: 11, margin: "2px 0 0" }}>{def.description}</p>
-                </div>
-              </div>
+        <ReportCard
+          icon={<Users size={16} />}
+          title="Payroll Register"
+          description="What happened in this payroll — earnings, deductions, and net by employee."
+        >
+          <ExportButtons
+            id="payroll-register"
+            disabled={!lines.length}
+            onPdf={() => void exportTable(
+              "payroll-register", "Payroll Register",
+              [...PAYROLL_REGISTER_HEADERS],
+              payrollRegisterRows(lines),
+              payrollRegisterTotalRows(lines),
+              [
+                { header: "Emp #", width: 0.9 }, { header: "Name", width: 1.5 }, { header: "Branch", width: 1 },
+                { header: "Gross", width: 0.9, align: "right" }, { header: "LRA", width: 0.8, align: "right" },
+                { header: "NASSCORP", width: 0.9, align: "right" }, { header: "Other", width: 0.7, align: "right" },
+                { header: "Net", width: 0.9, align: "right" }, { header: "CCY", width: 0.5 }, { header: "Account", width: 1 },
+              ],
+              "pdf",
+            )}
+            onExcel={() => void exportTable(
+              "payroll-register", "Payroll Register",
+              [...PAYROLL_REGISTER_HEADERS],
+              payrollRegisterRows(lines), payrollRegisterTotalRows(lines), [], "excel",
+            )}
+            onCsv={() => void exportTable(
+              "payroll-register", "Payroll Register",
+              [...PAYROLL_REGISTER_HEADERS],
+              payrollRegisterRows(lines), payrollRegisterTotalRows(lines), [], "csv",
+            )}
+          />
+        </ReportCard>
 
-              {locked ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 10, background: "color-mix(in oklch, var(--primary) 8%, transparent)", border: "1px solid var(--border)" }}>
-                  <Lock size={14} color="var(--muted-foreground)" />
-                  <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>Included in {PLAN_LABELS.standard}+</span>
-                </div>
-              ) : !canExport ? (
-                <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>View only — your role cannot export.</span>
-              ) : needsRun ? (
-                <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>Select a finalized payroll period above.</span>
-              ) : (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button onClick={() => runExport(def, "pdf")} disabled={!!busy} style={btnGhost()}><FileText size={14} /> PDF</button>
-                  <button onClick={() => runExport(def, "excel")} disabled={!!busy} style={btnGhost()}><FileSpreadsheet size={14} /> Excel</button>
-                  <button onClick={() => runExport(def, "csv")} disabled={!!busy} style={btnGhost()}><FileDown size={14} /> CSV</button>
-                  {busy?.startsWith(def.id) && <span style={{ fontSize: 12, color: "var(--muted-foreground)", alignSelf: "center" }}>Generating…</span>}
-                </div>
-              )}
-            </Card>
-          );
-        })}
+        <ReportCard
+          icon={<Wallet size={16} />}
+          title="Payroll Disbursement"
+          description="Who needs to be paid, how much, and to which account."
+        >
+          <ExportButtons
+            id="payroll-disbursement"
+            disabled={!lines.length}
+            onPdf={() => void exportTable(
+              "payroll-disbursement", "Payroll Disbursement",
+              [...PAYROLL_DISBURSEMENT_HEADERS],
+              payrollDisbursementRows(lines),
+              payrollDisbursementTotalRows(lines),
+              [
+                { header: "Emp #", width: 1 }, { header: "Name", width: 2 },
+                { header: "Net", width: 1.2, align: "right" }, { header: "CCY", width: 0.6 }, { header: "Account", width: 1.4 },
+              ],
+              "pdf",
+            )}
+            onExcel={() => void exportTable(
+              "payroll-disbursement", "Payroll Disbursement",
+              [...PAYROLL_DISBURSEMENT_HEADERS],
+              payrollDisbursementRows(lines), payrollDisbursementTotalRows(lines), [], "excel",
+            )}
+            onCsv={() => void exportTable(
+              "payroll-disbursement", "Payroll Disbursement",
+              [...PAYROLL_DISBURSEMENT_HEADERS],
+              payrollDisbursementRows(lines), payrollDisbursementTotalRows(lines), [], "csv",
+            )}
+          />
+        </ReportCard>
       </div>
 
-      <Card style={{ marginTop: 16 }} data-testid="custom-report-builder">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-          <FileBarChart size={16} color="var(--primary)" />
-          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Custom report builder</h3>
+      <Card data-testid="custom-report-builder" style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+        <div>
+          <p style={{ color: "var(--foreground)", fontWeight: 700, fontSize: 14, margin: 0 }}>Custom Report Builder</p>
+          <p style={{ color: "var(--muted-foreground)", fontSize: 11, margin: "2px 0 0" }}>
+            Pick columns from the same finalized payroll used by the register and disbursement. Values are not recalculated.
+          </p>
         </div>
-        {!hasCustom ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 10, background: "color-mix(in oklch, var(--primary) 8%, transparent)", border: "1px solid var(--border)" }}>
-            <Lock size={14} color="var(--muted-foreground)" />
-            <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>Custom column reports are included in {PLAN_LABELS.premium}.</span>
-          </div>
+        {!selected ? (
+          <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>Select a finalized payroll period above.</span>
         ) : (
           <>
-            <p style={{ fontSize: 12, color: "var(--muted-foreground)", margin: "0 0 10px" }}>Pick columns and optional grouping, then export.</p>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-              {CUSTOM_REPORT_COLUMNS.map((c) => (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {FINALIZED_CUSTOM_COLUMNS.map((c) => (
                 <label key={c.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", cursor: "pointer" }}>
-                  <input type="checkbox" checked={customCols.includes(c.id)} onChange={() => toggleCol(c.id)} />
+                  <input
+                    type="checkbox"
+                    checked={customCols.includes(c.id)}
+                    onChange={() => setCustomCols((prev) =>
+                      prev.includes(c.id) ? prev.filter((id) => id !== c.id) : [...prev, c.id],
+                    )}
+                  />
                   {c.label}
                 </label>
               ))}
@@ -545,22 +360,128 @@ export default function ReportsPage() {
                 <option value="department">Group by department</option>
                 <option value="branch">Group by branch</option>
               </select>
-              {canExport && (
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => exportCustom("pdf")} disabled={!!busy || customCols.length === 0} style={btnGhost()}><FileText size={14} /> PDF</button>
-                  <button onClick={() => exportCustom("excel")} disabled={!!busy || customCols.length === 0} style={btnGhost()}><FileSpreadsheet size={14} /> Excel</button>
-                  <button onClick={() => exportCustom("csv")} disabled={!!busy || customCols.length === 0} style={btnGhost()}><FileDown size={14} /> CSV</button>
-                </div>
-              )}
+              <ExportButtons
+                id="custom-report"
+                disabled={!lines.length || customCols.length === 0}
+                onPdf={() => {
+                  const built = buildCustomReportFromFinalized(lines, customCols, customGroup || null);
+                  void exportTable(
+                    "custom-report", "Custom Report",
+                    built.headers, built.dataRows, built.totalRows,
+                    built.headers.map((h) => ({ header: h, width: 1.1 })),
+                    "pdf",
+                  );
+                }}
+                onExcel={() => {
+                  const built = buildCustomReportFromFinalized(lines, customCols, customGroup || null);
+                  void exportTable("custom-report", "Custom Report", built.headers, built.dataRows, built.totalRows, [], "excel");
+                }}
+                onCsv={() => {
+                  const built = buildCustomReportFromFinalized(lines, customCols, customGroup || null);
+                  void exportTable("custom-report", "Custom Report", built.headers, built.dataRows, built.totalRows, [], "csv");
+                }}
+              />
             </div>
           </>
         )}
       </Card>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 18, color: "var(--muted-foreground)" }}>
-        <FileBarChart size={14} />
-        <span style={{ fontSize: 12 }}>Standard reports use active employees for the current calendar month. Disbursement and statutory exports require a finalized pay run.</span>
+      <SectionLabel>Compliance</SectionLabel>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
+        <NasscorpStatutoryCard
+          companyId={company.id}
+          companyName={company.name}
+          employerId={company.nasscorpRegNo}
+          lines={finalizedLines}
+          periodLabel={payrollPeriodLabel}
+          selected={selected}
+          canExport={canExport}
+        />
+        <LraStatutoryCard
+          companyName={company.name}
+          employerTin={company.tin}
+          periodLabel={payrollPeriodLabel}
+          lines={finalizedLines}
+          selected={selected}
+          canExport={canExport}
+          busy={!!busy}
+          onBusy={setBusy}
+        />
       </div>
+
+      <SectionLabel>Summary</SectionLabel>
+      <Card data-testid="payroll-summary" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            width: 38, height: 38, borderRadius: 11, flexShrink: 0,
+            background: "color-mix(in oklch, var(--primary) 15%, transparent)",
+            border: "1px solid color-mix(in oklch, var(--primary) 35%, transparent)",
+            display: "flex", alignItems: "center", justifyContent: "center", color: "var(--primary)",
+          }}>
+            <FileBarChart size={16} />
+          </div>
+          <div>
+            <p style={{ color: "var(--foreground)", fontWeight: 700, fontSize: 14, margin: 0 }}>Summary Report</p>
+            <p style={{ color: "var(--muted-foreground)", fontSize: 11, margin: "2px 0 0" }}>
+              Totals from the same finalized lines. Total LRA = PAYE withheld (income_tax). Total NASSCORP = employee deduction (nasscorp_ee).
+            </p>
+          </div>
+        </div>
+
+        {!selected ? (
+          <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>Select a finalized payroll period above.</span>
+        ) : (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
+              {([
+                ["Employees", String(summary.employees)],
+                ["Total Net Salary", moneyList(summary, "net")],
+                ["Total LRA", moneyList(summary, "lra")],
+                ["Total NASSCORP", moneyList(summary, "nasscorpEe")],
+              ] as const).map(([label, value]) => (
+                <div key={label} style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid var(--border)" }}>
+                  <p style={{ margin: 0, fontSize: 11, color: "var(--muted-foreground)" }}>{label}</p>
+                  <p style={{ margin: "4px 0 0", fontSize: 16, fontWeight: 800, fontFamily: "'DM Mono',monospace" }}>{value}</p>
+                </div>
+              ))}
+            </div>
+            <ExportButtons
+              id="payroll-summary"
+              disabled={!lines.length}
+              onExcel={() => {
+                const headers = ["Metric", ...summary.byCurrency.map((c) => c.currency)];
+                const rows: Cell[][] = [
+                  ["Total Net Salary", ...summary.byCurrency.map((c) => c.net.toFixed(2))],
+                  ["Total LRA (PAYE withheld)", ...summary.byCurrency.map((c) => c.lra.toFixed(2))],
+                  ["Total NASSCORP (employee deduction)", ...summary.byCurrency.map((c) => c.nasscorpEe.toFixed(2))],
+                  ["Employees", ...summary.byCurrency.map((c) => c.employees)],
+                ];
+                void exportTable("payroll-summary", "Payroll Summary", headers, rows, [], [], "excel");
+              }}
+              onCsv={() => {
+                const headers = ["Metric", ...summary.byCurrency.map((c) => c.currency)];
+                const rows: Cell[][] = [
+                  ["Total Net Salary", ...summary.byCurrency.map((c) => c.net.toFixed(2))],
+                  ["Total LRA (PAYE withheld)", ...summary.byCurrency.map((c) => c.lra.toFixed(2))],
+                  ["Total NASSCORP (employee deduction)", ...summary.byCurrency.map((c) => c.nasscorpEe.toFixed(2))],
+                  ["Employees", ...summary.byCurrency.map((c) => c.employees)],
+                ];
+                void exportTable("payroll-summary", "Payroll Summary", headers, rows, [], [], "csv");
+              }}
+            />
+          </>
+        )}
+      </Card>
     </ModuleShell>
   );
+}
+
+function moneyList(
+  summary: ReturnType<typeof summarizeFinalizedPeriod>,
+  key: "net" | "lra" | "nasscorpEe",
+): string {
+  if (!summary.byCurrency.length) return "—";
+  return summary.byCurrency
+    .map((c) => `${c.currency} ${c[key].toFixed(2)}`)
+    .join(" · ");
 }

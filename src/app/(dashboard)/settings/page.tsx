@@ -11,6 +11,8 @@ import LogoUploader from "@/components/LogoUploader";
 import { ApiAccessPanel } from "@/components/ApiAccessPanel";
 import { canUse, getEffectiveTier, PLAN_LABELS } from "@/lib/plan-features";
 import { KeyRound } from "lucide-react";
+import { isSevenDigitEmployerId, NASSCORP_PAYROLL_TYPE_LABELS, isNasscorpPayrollType, type NasscorpPayrollType } from "@/lib/compliance/nasscorp/spec";
+import { readStoredNasscorpPayrollType, storeNasscorpPayrollType } from "@/lib/compliance/nasscorp/payroll-type";
 
 const inputStyle: React.CSSProperties = {
   width: "100%", padding: "10px 13px",
@@ -142,10 +144,15 @@ export default function SettingsPage() {
   const [pwSaving,        setPwSaving]        = useState(false);
   const [pwSaved,         setPwSaved]         = useState(false);
   const [pwError,         setPwError]         = useState<string | null>(null);
+  const [payrollType,     setPayrollType]     = useState<NasscorpPayrollType>(1);
 
   useEffect(() => {
     if (company.id) setForm({ ...company });
   }, [company.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setPayrollType(readStoredNasscorpPayrollType(company.id));
+  }, [company.id]);
 
   function update(field: keyof CompanyProfile, value: string | null) {
     setForm((f) => ({ ...f, [field]: value }));
@@ -250,7 +257,40 @@ export default function SettingsPage() {
             />
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
               <Inp label="LRA Tax ID (TIN)"    value={form.tin}           onChange={(v) => update("tin", v)}           placeholder="LR-TIN-XXXXXXX"/>
-              <Inp label="NASSCORP Reg. No."   value={form.nasscorpRegNo} onChange={(v) => update("nasscorpRegNo", v)} placeholder="NASC-XXXXXXX"/>
+              <Inp
+                label="NASSCORP Employer ID"
+                value={form.nasscorpRegNo}
+                onChange={(v) => update("nasscorpRegNo", v)}
+                placeholder="1234567"
+                extra={
+                  <p style={{ margin: 0, fontSize: 11, color: form.nasscorpRegNo && !isSevenDigitEmployerId(form.nasscorpRegNo) ? "var(--destructive)" : "var(--muted-foreground)" }}>
+                    7-digit employer number as registered with NASSCORP. Required before the statutory export can be generated.
+                  </p>
+                }
+              />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              <label style={{
+                fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)",
+                letterSpacing: "0.06em", textTransform: "uppercase",
+                fontFamily: "'DM Mono',monospace",
+              }}>NASSCORP PayrollType</label>
+              <select
+                value={payrollType}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (!isNasscorpPayrollType(n)) return;
+                  setPayrollType(n);
+                  storeNasscorpPayrollType(company.id, n);
+                }}
+                style={{ ...inputStyle, cursor: "pointer" }}
+              >
+                <option value={1}>{NASSCORP_PAYROLL_TYPE_LABELS[1]} (1)</option>
+                <option value={2}>{NASSCORP_PAYROLL_TYPE_LABELS[2]} (2)</option>
+              </select>
+              <p style={{ margin: 0, fontSize: 11, color: "var(--muted-foreground)" }}>
+                Default for the official NASSCORP workbook. You can confirm or change it when generating the export. Not stored as a payroll calculation.
+              </p>
             </div>
             <Inp label="Business Address" value={form.address} onChange={(v) => update("address", v)} placeholder="Broad Street, Monrovia, Liberia"/>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>

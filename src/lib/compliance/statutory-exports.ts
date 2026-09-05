@@ -84,6 +84,9 @@ export function nasscorpExportRows(
 export interface FinalizedPayrollLine {
   employeeNumber: string;
   fullName: string;
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
   department?: string;
   currency: string;
   grossPay: number;
@@ -99,6 +102,8 @@ export interface FinalizedPayrollLine {
   accountNumber?: string;
   mobileNumber?: string;
   branch?: string;
+  payDate?: string;
+  runType?: string;
 }
 
 export function lraExportRowsFromFinalized(
