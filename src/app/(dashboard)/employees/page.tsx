@@ -1671,26 +1671,21 @@ import PageSkeleton from "@/components/PageSkeleton";
 import { createClient } from "@/lib/supabase/client";
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
 import { useDemoGuard } from "@/components/demo/DemoGuard";
-import { normalizeGender, genderLabel } from "@/lib/employee-gender";
+import { genderLabel } from "@/lib/employee-gender";
 import GenderHeadcountCard from "@/components/GenderHeadcountCard";
-
-function parseDateToISO(dateStr: string | undefined): string {
-  if (!dateStr) return "";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
-  const parts = dateStr.split('/');
-  if (parts.length === 3) {
-    const [day, month, year] = parts;
-    if (year.length === 4 && month.length === 2 && day.length === 2) {
-      return `${year}-${month}-${day}`;
-    }
-  }
-  const dashParts = dateStr.split('-');
-  if (dashParts.length === 3 && dashParts[2].length === 4) {
-    const [day, month, year] = dashParts;
-    return `${year}-${month}-${day}`;
-  }
-  return dateStr;
-}
+import {
+  buildEmployeeCsvTemplate,
+  parseEmployeeCSV,
+  EMPLOYEE_CSV_TEMPLATE_FILENAME,
+  type ParsedEmployeeCsvRow,
+} from "@/lib/employees/parse-employee-csv";
+import {
+  ALL_BRANCH_FILTER,
+  UNASSIGNED_BRANCH_FILTER,
+  branchFilterOptions,
+  employeeMatchesBranchFilter,
+  type RegisteredBranch,
+} from "@/lib/org/branch-assignment";
 
 const DEPARTMENTS = ["All", "Operations", "Finance", "Engineering", "Sales", "Human Resources"];
 const DEPT_LIST   = ["Operations", "Finance", "Engineering", "Sales", "Human Resources"];
@@ -1722,13 +1717,6 @@ const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "cash",          label: "Cash"             },
 ];
 
-const CSV_HEADERS = [
-  "employee_number","first_name","middle_name","last_name","gender","job_title","department",
-  "email","phone","county","start_date","employment_type","currency",
-  "rate","standard_hours","allowances","nasscorp_number","payment_method",
-  "bank_name","account_number","momo_number","regular_hours","overtime_hours",
-  "holiday_hours","ded_pay_advance","ded_food","ded_transportation","ded_loan_repayment","ded_other",
-];
 
 const EMPTY_FORM: Omit<Employee, "id" | "employeeNumber" | "fullName" | "isArchived"> = {
   firstName: "", middleName: "", lastName: "", jobTitle: "", department: "Operations",
@@ -1751,116 +1739,11 @@ function getAvatarColor(name: string) {
 }
 
 function downloadTemplate() {
-  const rows = [
-    CSV_HEADERS.join(","),
-    "EMP-001,Moses,James,Kollie,male,Operations Manager,Operations,m.kollie@co.lr,+231770000001,Montserrado,2023-01-15,full_time,USD,8.50,173.33,0,NSC-001-2024,bank_transfer,Ecobank Liberia,1234567890,,173.33,0,0,100,30,20,0,0",
-    "EMP-002,Fanta,,Kamara,female,Finance Officer,Finance,f.kamara@co.lr,+231770000002,Montserrado,2023-03-01,full_time,LRD,1500,173.33,50000,NSC-002-2024,mtn_momo,,,0770000002,173.33,0,8,0,0,0,250,0",
-  ];
-  const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+  const blob = new Blob([buildEmployeeCsvTemplate()], { type: "text/csv" });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement("a");
-  a.href = url; a.download = "slipdesk-employees-template.csv"; a.click();
+  a.href = url; a.download = EMPLOYEE_CSV_TEMPLATE_FILENAME; a.click();
   URL.revokeObjectURL(url);
-}
-
-interface ParsedRow { data: Partial<Employee>; errors: string[]; }
-
-function parseEmployeeCSV(text: string): ParsedRow[] {
-  const clean = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const lines = clean.split("\n");
-  if (lines.length < 2) return [];
-
-  const headers = lines[0].split(",").map((h) =>
-    h.trim().toLowerCase().replace(/\s+/g, "").replace(/^"|"$/g, "")
-  );
-
-  const results: ParsedRow[] = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line.trim()) continue;
-
-    const vals: string[] = [];
-    let cur = "";
-    let inQ = false;
-    for (let ci = 0; ci < line.length; ci++) {
-      const ch = line[ci];
-      if (ch === '"') {
-        if (inQ && line[ci + 1] === '"') { cur += '"'; ci++; }
-        else inQ = !inQ;
-      } else if (ch === "," && !inQ) {
-        vals.push(cur.trim());
-        cur = "";
-      } else {
-        cur += ch;
-      }
-    }
-    vals.push(cur.trim());
-
-    const raw: Record<string, string> = {};
-    headers.forEach((h, idx) => { raw[h] = vals[idx] ?? ""; });
-
-    const errors: string[] = [];
-    const firstName = raw.first_name || raw.firstname || "";
-    const middleName = raw.middle_name || raw.middlename || "";
-    const lastName  = raw.last_name  || raw.lastname  || "";
-    const currency  = (raw.currency  || "USD").toUpperCase();
-    const pm        = raw.payment_method || raw.paymentmethod || "bank_transfer";
-
-    if (!firstName) errors.push("First name required");
-    if (!lastName)  errors.push("Last name required");
-    if (!raw.currency) errors.push("Currency required");
-    if (!raw.rate)     errors.push("Rate required");
-
-    const genderParsed = normalizeGender(raw.gender);
-    if (genderParsed.error) errors.push(genderParsed.error);
-
-    const n = (v: string | undefined) => (v ? parseFloat(v) : null);
-
-    const employeeNumber = (
-      raw.employee_number ||
-      raw.employeenumber ||
-      raw["employee#"] ||
-      ""
-    ).trim();
-
-    results.push({
-      errors,
-      data: {
-        employeeNumber,
-        firstName, middleName, lastName,
-        gender: genderParsed.value,
-        jobTitle:       raw.job_title   || "",
-        department:     raw.department  || "Operations",
-        email:          raw.email       || "",
-        phone:          raw.phone       || "",
-        county:         raw.county      || "Montserrado",
-        startDate:      parseDateToISO(raw.start_date),
-        employmentType: (["full_time","part_time","contractor","casual"].includes(raw.employment_type)
-          ? raw.employment_type : "full_time") as EmploymentType,
-        currency:       currency === "LRD" ? "LRD" : "USD",
-        rate:           isNaN(parseFloat(raw.rate))           ? 0      : parseFloat(raw.rate),
-        standardHours:  isNaN(parseFloat(raw.standard_hours)) ? 173.33 : parseFloat(raw.standard_hours),
-        allowances:     isNaN(parseFloat(raw.allowances ?? "0")) ? 0   : parseFloat(raw.allowances ?? "0"),
-        nasscorpNumber: raw.nasscorp_number || "",
-        paymentMethod:  pm as PaymentMethod,
-        bankName:       raw.bank_name       || "",
-        accountNumber:  raw.account_number  || "",
-        momoNumber:     raw.momo_number     || "",
-        isActive:    true,
-        isArchived:  false,
-        pendingRegularHours:  n(raw.regular_hours),
-        pendingOvertimeHours: n(raw.overtime_hours),
-        pendingHolidayHours:  n(raw.holiday_hours),
-        pendingDeductions: Object.entries(raw)
-          .filter(([key]) => key.startsWith("ded_"))
-          .reduce((sum, [, val]) => sum + (parseFloat(val) || 0), 0) ||
-          n(raw.deductions) ||
-          null,
-      },
-    });
-  }
-  return results;
 }
 
 function Avatar({ firstName, lastName, size = 36 }: { firstName: string; lastName: string; size?: number }) {
@@ -2089,11 +1972,12 @@ function Sel({ value, onChange, children }: {
 
 type DrawerTab = "basic" | "pay" | "payment";
 
-function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
+function EmployeeDrawer({ employee, onClose, onSave, allowLRD, registeredBranches = [] }: {
   employee?: Employee;
   onClose: () => void;
   onSave: (data: Omit<Employee, "id" | "fullName" | "isArchived">) => Promise<void>;
   allowLRD?: boolean;
+  registeredBranches?: RegisteredBranch[];
 }) {
   const isEdit = !!employee;
   const [form, setForm] = useState<Omit<Employee, "id" | "fullName" | "isArchived">>(
@@ -2227,7 +2111,22 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
                 </Field>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                <Field label="Branch"><Inp value={form.branch ?? ""} onChange={(v) => set("branch", v)} placeholder="Head Office"/></Field>
+                <Field label="Branch">
+                  {registeredBranches.length > 0 ? (
+                    <Sel value={form.branch ?? ""} onChange={(v) => set("branch", v)}>
+                      <option value="">Unassigned</option>
+                      {registeredBranches.map((b) => (
+                        <option key={b.id} value={b.name}>{b.name}</option>
+                      ))}
+                      {form.branch &&
+                        !registeredBranches.some((b) => b.name === form.branch) && (
+                          <option value={form.branch}>{form.branch} (not registered)</option>
+                        )}
+                    </Sel>
+                  ) : (
+                    <Inp value={form.branch ?? ""} onChange={(v) => set("branch", v)} placeholder="e.g. Sinkor"/>
+                  )}
+                </Field>
                 <Field label="Employment Status">
                   <Sel value={form.employmentStatus ?? "active"} onChange={(v) => set("employmentStatus", v)}>
                     <option value="active">Active</option>
@@ -2501,12 +2400,13 @@ interface ImportResult {
   skipped:  { rowNum: number; name: string; reasons: string[] }[];
 }
 
-function CSVUploadModal({ onClose, onImport }: {
+function CSVUploadModal({ onClose, onImport, registeredBranches = [] }: {
   onClose:  () => void;
   onImport: (rows: Partial<Employee>[]) => Promise<ImportResult>;
+  registeredBranches?: RegisteredBranch[];
 }) {
   const { toast }   = useToast();
-  const [parsed,    setParsed]    = useState<ParsedRow[] | null>(null);
+  const [parsed,    setParsed]    = useState<ParsedEmployeeCsvRow[] | null>(null);
   const [importing, setImporting] = useState(false);
   const [result,    setResult]    = useState<ImportResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -2514,9 +2414,12 @@ function CSVUploadModal({ onClose, onImport }: {
   const handleFile = useCallback((file: File) => {
     if (!file.name.endsWith(".csv")) { toast.error("Please upload a .csv file."); return; }
     const reader = new FileReader();
-    reader.onload = (e) => { setParsed(parseEmployeeCSV(e.target?.result as string)); setResult(null); };
+    reader.onload = (e) => {
+      setParsed(parseEmployeeCSV(e.target?.result as string, registeredBranches));
+      setResult(null);
+    };
     reader.readAsText(file);
-  }, [toast]);
+  }, [toast, registeredBranches]);
 
   const validRows = parsed?.filter((r) => r.errors.length === 0) ?? [];
   const errRows   = parsed?.filter((r) => r.errors.length > 0)   ?? [];
@@ -2615,7 +2518,8 @@ function CSVUploadModal({ onClose, onImport }: {
                 Drop CSV or click to browse
               </p>
               <p style={{ color: "var(--muted-foreground)", fontSize: 12 }}>
-                Supports the Slipdesk employee template format
+                Use the Slipdesk employee template. Include a <strong style={{ color: "var(--foreground)" }}>Branch</strong> column
+                that matches a name on Organization (leave blank for Unassigned).
               </p>
               <input
                 ref={fileRef} type="file" accept=".csv"
@@ -2936,13 +2840,27 @@ export default function EmployeesPage() {
 
   const [search,        setSearch]        = useState("");
   const [deptFilter,    setDeptFilter]    = useState("All");
-  const [branchFilter,  setBranchFilter]  = useState("All");
+  const [branchFilter,  setBranchFilter]  = useState(ALL_BRANCH_FILTER);
   const [genderFilter,  setGenderFilter]  = useState("All");
   const [showArchived,  setShowArchived]  = useState(false);
   const [showUpload,    setShowUpload]    = useState(false);
   const [drawerEmp,     setDrawerEmp]     = useState<Employee | undefined>(undefined);
   const [showDrawer,    setShowDrawer]    = useState(false);
   const [selected,      setSelected]      = useState<Set<string>>(new Set());
+  const [registeredBranches, setRegisteredBranches] = useState<RegisteredBranch[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/org/units?kind=branches")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setRegisteredBranches(d.items ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setRegisteredBranches([]);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const allEmployees = useMemo(
     () => [...employees, ...archivedEmployees],
@@ -2953,7 +2871,7 @@ export default function EmployeesPage() {
     return employees.filter((e) => {
       if (e.isArchived !== showArchived) return false;
       if (deptFilter !== "All" && e.department !== deptFilter) return false;
-      if (branchFilter !== "All" && (e.branch ?? "") !== branchFilter) return false;
+      if (branchFilter !== ALL_BRANCH_FILTER && !employeeMatchesBranchFilter(e.branch, branchFilter, registeredBranches)) return false;
       if (genderFilter !== "All" && (e.gender ?? "") !== genderFilter) return false;
       const q = search.toLowerCase();
       if (!q) return true;
@@ -2967,11 +2885,11 @@ export default function EmployeesPage() {
         e.employeeNumber.toLowerCase().includes(q)
       );
     });
-  }, [employees, showArchived, deptFilter, branchFilter, genderFilter, search]);
+  }, [employees, showArchived, deptFilter, branchFilter, genderFilter, search, registeredBranches]);
 
   const branchOptions = useMemo(
-    () => ["All", ...Array.from(new Set(employees.map((e) => e.branch).filter(Boolean))) as string[]],
-    [employees],
+    () => branchFilterOptions(registeredBranches, employees),
+    [registeredBranches, employees],
   );
 
   const stats = useMemo(() => ({
@@ -2985,7 +2903,7 @@ export default function EmployeesPage() {
     return employees.filter((e) => {
       if (e.isArchived !== showArchived) return false;
       if (deptFilter !== "All" && e.department !== deptFilter) return false;
-      if (branchFilter !== "All" && (e.branch ?? "") !== branchFilter) return false;
+      if (branchFilter !== ALL_BRANCH_FILTER && !employeeMatchesBranchFilter(e.branch, branchFilter, registeredBranches)) return false;
       const q = search.toLowerCase();
       if (!q) return true;
       return (
@@ -2998,7 +2916,7 @@ export default function EmployeesPage() {
         e.employeeNumber.toLowerCase().includes(q)
       );
     });
-  }, [employees, showArchived, deptFilter, branchFilter, search]);
+  }, [employees, showArchived, deptFilter, branchFilter, search, registeredBranches]);
 
   const allActiveForHeadcount = useMemo(
     () => employees.filter((e) => !e.isArchived),
@@ -3345,12 +3263,16 @@ export default function EmployeesPage() {
             style={{
               padding: "9px 32px 9px 12px", background: "var(--card)",
               border: "1px solid var(--border)", borderRadius: 10,
-              color: branchFilter === "All" ? "var(--muted-foreground)" : "var(--foreground)",
+              color: branchFilter === ALL_BRANCH_FILTER ? "var(--muted-foreground)" : "var(--foreground)",
               fontSize: 13, fontFamily: "'DM Sans',sans-serif",
               outline: "none", cursor: "pointer", appearance: "none",
             }}
           >
-            {branchOptions.map((d) => <option key={d} value={d}>{d === "All" ? "All Branches" : d}</option>)}
+            {branchOptions.map((d) => (
+              <option key={d} value={d}>
+                {d === ALL_BRANCH_FILTER ? "All Branches" : d === UNASSIGNED_BRANCH_FILTER ? "Unassigned" : d}
+              </option>
+            ))}
           </select>
           <ChevronDown size={13} color="var(--muted-foreground)" style={{ position: "absolute", right: 10, pointerEvents: "none" }}/>
         </div>
@@ -3550,12 +3472,14 @@ export default function EmployeesPage() {
           onClose={() => setShowDrawer(false)}
           onSave={handleSaveEmployee}
           allowLRD={allowLRD}
+          registeredBranches={registeredBranches}
         />
       )}
       {showUpload && (
         <CSVUploadModal
           onClose={() => setShowUpload(false)}
           onImport={handleBulkImport}
+          registeredBranches={registeredBranches}
         />
       )}
 

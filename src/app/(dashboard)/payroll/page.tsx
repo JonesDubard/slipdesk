@@ -17,6 +17,7 @@ import {
 import { calculatePayroll } from "@/lib/slipdesk-payroll-engine";
 import type { PayRunLine } from "@/lib/mock-data";
 import BulkUpload, { type BulkRow } from "@/components/BulkUpload";
+import { resolveImportedBranch } from "@/lib/org/branch-assignment";
 import { useApp } from "@/context/AppContext";
 import PageSkeleton from "@/components/PageSkeleton";
 import { createClient } from "@/lib/supabase/client";
@@ -879,7 +880,7 @@ export default function PayrollPage() {
   useEffect(() => {
     void fetch("/api/org/units?kind=branches")
       .then((r) => r.json())
-      .then((d) => setBranches(d.units ?? []))
+      .then((d) => setBranches(d.items ?? []))
       .catch(() => setBranches([]));
   }, []);
 
@@ -1289,7 +1290,12 @@ export default function PayrollPage() {
     const payRunLines: PayRunLine[] = [];
     for (const r of bulkRows) {
       try {
-        const saved = await addEmployee({ ...r.employee, isActive: true });
+        const resolved = resolveImportedBranch(r.employee.branch, branches);
+        const saved = await addEmployee({
+          ...r.employee,
+          branch: resolved.branchName,
+          isActive: true,
+        });
         payRunLines.push(bulkRowToPayRunLine(r, exchangeRate, saved?.id));
       } catch (err) {
         console.error("Failed to save bulk employee:", r.employee.employeeNumber, err);

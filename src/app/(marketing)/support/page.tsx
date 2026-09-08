@@ -46,7 +46,7 @@ const FAQS: FAQ[] = [
   {
     icon: BookOpen,
     q: "What information do I need to get started?",
-    a: "You need your company's LRA TIN and NASSCORP registration number, and for each employee: full name, employee number, job title, department, payment currency (USD or LRD), and hourly rate. You can add employees one by one or import them all at once using our CSV template.",
+    a: "You need your company's LRA TIN and NASSCORP registration number, and for each employee: full name, employee number, job title, department, branch (matching a name on Organization), payment currency (USD or LRD), and hourly rate. You can add employees one by one or import them all at once using our CSV template — include the Branch column so filters and organization headcount stay accurate.",
   },
   {
     icon: MessageSquare,

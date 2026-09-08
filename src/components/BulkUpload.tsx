@@ -61,6 +61,7 @@ interface Props {
 // Core columns that always appear in the template
 const CORE_COLUMNS = [
   "employee_number", "first_name", "middle_name", "last_name", "gender", "job_title", "department",
+  "branch",
   "email", "phone", "county", "start_date",
   "employment_type", "currency", "rate", "standard_hours", "allowances",
   "nasscorp_number",
@@ -78,6 +79,7 @@ const CORE_COLUMNS = [
 const EXAMPLE_ROWS = [
   [
     "EMP-001","Moses","James","Kollie","male","Accountant","Finance",
+    "Sinkor",
     "moses@company.lr","+231770000001","Montserrado","2023-01-15",
     "full_time","USD","15.00","173.33","50.00",
     "NASC-001",
@@ -87,6 +89,7 @@ const EXAMPLE_ROWS = [
   ],
   [
     "EMP-002","Grace","","Tamba","female","HR Officer","Human Resources",
+    "Paynesville",
     "grace@company.lr","+231770000002","Margibi","2023-03-01",
     "full_time","LRD","2500","173.33","0",
     "NASC-002",
@@ -96,6 +99,7 @@ const EXAMPLE_ROWS = [
   ],
   [
     "EMP-003","James","","Freeman","","Driver","Operations",
+    "",
     "james@company.lr","+231770000003","Bong","2024-06-01",
     "casual","USD","8.50","0","0",
     "",
@@ -197,6 +201,7 @@ function parseRow(
     email:          raw.email?.trim()       || "",
     phone:          raw.phone?.trim()       || "",
     county:         raw.county?.trim()      || "",
+    branch:         (raw.branch || raw.branch_name || raw.branchname || "").trim(),
     startDate:      parseDateToISO(raw.start_date),
     employmentType: empType,
     currency,
@@ -360,6 +365,8 @@ export default function BulkUpload({ onImport, onClose }: Props) {
               <p className="text-xs text-blue-500 mb-2">
                 Add one column per deduction type, prefixed with{" "}
                 <code className="font-mono bg-blue-100 px-1 rounded">ded_</code>.
+                Include a <code className="font-mono bg-blue-100 px-1 rounded">branch</code> column
+                matching a name on Organization (leave blank for Unassigned).
                 Each becomes a named line on the payslip.
                 Examples:{" "}
                 <code className="font-mono bg-blue-100 px-1 rounded">ded_pay_advance</code>,{" "}

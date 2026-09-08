@@ -1,4 +1,7 @@
 import type { Employee } from "@/context/AppContext";
+import { employeeMatchesBranchName } from "@/lib/org/branch-assignment";
+
+export { employeeMatchesBranchName };
 
 export type BranchScope = { branchId: string | null; branchName: string | null };
 
@@ -15,9 +18,6 @@ export function branchScopeKey(branchId: string | null): string {
   return branchId ?? ORG_WIDE_BRANCH_PARAM;
 }
 
-export function employeeMatchesBranchName(employee: Employee, branchName: string): boolean {
-  return (employee.branch ?? "").trim().toLowerCase() === branchName.trim().toLowerCase();
-}
 
 /** When branchName is null, returns all active employees (org-wide). */
 export function filterEmployeesForBranchScope(

@@ -1,5 +1,6 @@
 import type { Employee } from "@/context/AppContext";
 import type { Cell } from "@/lib/reporting";
+import { employeeMatchesBranchName, normalizeBranchKey } from "@/lib/org/branch-assignment";
 
 /** Stored gender keys plus blank (unspecified). Do not change `employee-gender.ts`. */
 export const GENDER_HEADCOUNT_KEYS = [
@@ -67,19 +68,21 @@ export function summarizeGenderHeadcount(employees: Employee[]): GenderHeadcount
 }
 
 export function genderHeadcountByBranch(employees: Employee[]): GenderBranchHeadcount[] {
-  const byBranch = new Map<string, Employee[]>();
+  const byBranch = new Map<string, { label: string; list: Employee[] }>();
   for (const e of employees) {
-    const branch = (e.branch ?? "").trim() || "Unassigned";
-    const list = byBranch.get(branch) ?? [];
-    list.push(e);
-    byBranch.set(branch, list);
+    const key = normalizeBranchKey(e.branch) || "unassigned";
+    const label = key === "unassigned" ? "Unassigned" : (e.branch ?? "").trim();
+    const bucket = byBranch.get(key) ?? { label, list: [] };
+    if (key !== "unassigned" && !bucket.label) bucket.label = label;
+    bucket.list.push(e);
+    byBranch.set(key, bucket);
   }
-  return [...byBranch.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([branch, list]) => ({
-      branch,
-      total: list.length,
-      rows: summarizeGenderHeadcount(list),
+  return [...byBranch.values()]
+    .sort((a, b) => a.label.localeCompare(b.label))
+    .map((bucket) => ({
+      branch: bucket.label,
+      total: bucket.list.length,
+      rows: summarizeGenderHeadcount(bucket.list),
     }));
 }
 
@@ -128,7 +131,10 @@ export function employeesForGenderExport(
   if (scope === "all") return allActive;
   if (scope.startsWith("branch:")) {
     const name = scope.slice("branch:".length);
-    return allActive.filter((e) => (e.branch ?? "") === name);
+    if (name === "Unassigned") {
+      return allActive.filter((e) => !normalizeBranchKey(e.branch));
+    }
+    return allActive.filter((e) => employeeMatchesBranchName(e, name));
   }
   return viewed;
 }

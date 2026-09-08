@@ -253,7 +253,8 @@ function UnitPanel({
       )}
       {kind === "branches" && items.length > 0 && (
         <p style={{ margin: "12px 0 0", fontSize: 11, color: "var(--muted-foreground)", lineHeight: 1.5 }}>
-          Next: on <strong style={{ color: "var(--foreground)" }}>Employees</strong>, set each person&apos;s Branch field to match a name here.
+          Next: assign each employee to a branch on <strong style={{ color: "var(--foreground)" }}>Employees</strong>
+          (or in the CSV <strong style={{ color: "var(--foreground)" }}>Branch</strong> column). Names must match a branch here.
           On <strong style={{ color: "var(--foreground)" }}>Payroll</strong>, choose a branch scope when starting a run.
         </p>
       )}
@@ -264,6 +265,7 @@ function UnitPanel({
 function MultiBranchPanel() {
   const [rows, setRows] = useState<{ name: string; employees: number; salaryMass: number; isHq?: boolean }[]>([]);
   const [unassigned, setUnassigned] = useState(0);
+  const [unassignedSalaryMass, setUnassignedSalaryMass] = useState(0);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
@@ -276,6 +278,7 @@ function MultiBranchPanel() {
         if (!res.ok || cancelled) return;
         setRows(data.branches ?? []);
         setUnassigned(data.unassigned ?? 0);
+        setUnassignedSalaryMass(data.unassignedSalaryMass ?? 0);
         setTotal(data.totalActive ?? 0);
       } finally {
         if (!cancelled) setLoading(false);
@@ -288,7 +291,7 @@ function MultiBranchPanel() {
     <Card>
       <h3 style={{ margin: "0 0 6px", fontSize: 15, fontWeight: 700 }}>Multi-branch overview</h3>
       <p style={{ margin: "0 0 14px", fontSize: 12, color: "var(--muted-foreground)" }}>
-        Headcount and salary mass by registered branch · {total} active employees
+        Headcount and salary mass by registered branch (current employee rates, not a pay-run total) · {total} active employees
         {unassigned ? ` · ${unassigned} unassigned` : ""}
       </p>
       {loading ? (
@@ -318,6 +321,17 @@ function MultiBranchPanel() {
                 </td>
               </tr>
             ))}
+            {unassigned > 0 && (
+              <tr>
+                <td style={{ padding: "8px 6px", borderBottom: "1px solid var(--border)", color: "var(--muted-foreground)" }}>
+                  Unassigned
+                </td>
+                <td style={{ padding: "8px 6px", borderBottom: "1px solid var(--border)", color: "var(--muted-foreground)" }}>{unassigned}</td>
+                <td style={{ padding: "8px 6px", borderBottom: "1px solid var(--border)", fontFamily: "'DM Mono',monospace", color: "var(--muted-foreground)" }}>
+                  ${Number(unassignedSalaryMass).toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       )}
