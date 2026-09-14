@@ -6,6 +6,7 @@ import { parseCSVLine, parseDateToISO } from "@/lib/csv/parse-csv-line";
 import { parsePayrollCSV, type BulkRow } from "@/lib/csv/parse-payroll-csv";
 import { parseEmployeeCSV } from "@/lib/csv/parse-employee-csv";
 import { deleteAtIndexes, deleteByIds } from "@/lib/csv/record-ops";
+import { findEmployeeByNumber } from "@/lib/csv/match-employee";
 import { gridReducer, recalcLine } from "@/lib/payroll/grid-reducer";
 import { formatEmployeeFullName } from "@/lib/employee-name";
 import { processPayroll } from "@/lib/slipdesk-payroll-engine";
@@ -273,12 +274,53 @@ describe("delete functionality", () => {
     expect(state).toEqual([]);
   });
 
-  it("IMPORT_ROWS appends — re-importing the same CSV duplicates pay-run lines", () => {
+  it("IMPORT_ROWS appends; MERGE_ROWS replaces matching employee numbers", () => {
     const { rows } = parsePayrollCSV(FIXTURE);
     const chunk = rows.slice(0, 2).map((r, i) => toLine(r, `dup-${i}`));
     let state = gridReducer([], { type: "IMPORT_ROWS", rows: chunk });
     state = gridReducer(state, { type: "IMPORT_ROWS", rows: chunk });
     expect(state).toHaveLength(4);
+
+    const updated = rows.slice(0, 2).map((r, i) => toLine({ ...r, regularHours: 10 }, `new-${i}`));
+    state = gridReducer(state.slice(0, 2), { type: "MERGE_ROWS", rows: updated });
+    expect(state).toHaveLength(2);
+    expect(state.map((l) => l.id)).toEqual(["new-0", "new-1"]);
+    expect(state[0].regularHours).toBe(10);
+  });
+});
+
+describe("match existing employees by number", () => {
+  it("matches EMP-452 case-insensitively and ignores blank numbers", () => {
+    const roster = [
+      { id: "db-1", employeeNumber: "EMP-452", isArchived: false },
+      { id: "db-2", employeeNumber: "emp-453", isArchived: true },
+    ];
+    expect(findEmployeeByNumber(roster, "EMP-452")?.id).toBe("db-1");
+    expect(findEmployeeByNumber(roster, " emp-452 ")?.id).toBe("db-1");
+    expect(findEmployeeByNumber(roster, "EMP-453")?.id).toBe("db-2");
+    expect(findEmployeeByNumber(roster, "")).toBeUndefined();
+    expect(findEmployeeByNumber(roster, "EMP-999")).toBeUndefined();
+  });
+
+  it("reuses the first match so a second CSV row with the same number does not invent a new id", () => {
+    const roster = [{ id: "db-1", employeeNumber: "EMP-452" }];
+    const first = findEmployeeByNumber(roster, "EMP-452");
+    const second = findEmployeeByNumber(roster, "EMP-452");
+    expect(first?.id).toBe(second?.id);
+  });
+});
+
+describe("manual rate entry on a pay-run line", () => {
+  it("UPDATE_FIELD on rate recalculates gross from the new hourly amount", () => {
+    const { rows } = parsePayrollCSV(FIXTURE);
+    const esiaka = rows.find((r) => r.employee.employeeNumber === "EMP-454")!;
+    let state = gridReducer([], { type: "SET_ROWS", rows: [toLine(esiaka, "esiaka")] });
+    expect(state[0].rate).toBe(1.44);
+
+    state = gridReducer(state, { type: "UPDATE_FIELD", id: "esiaka", field: "rate", value: 2 });
+    expect(state[0].rate).toBe(2);
+    expect(state[0].calc?.regularSalary).toBeCloseTo(2 * 192, 2);
+    expect(state[0].calc?.overtimePay).toBeCloseTo(2 * 138 * 1.5, 2);
   });
 });
 

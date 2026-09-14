@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { PayRunLine } from "@/lib/mock-data";
 import BulkUpload, { type BulkRow } from "@/components/BulkUpload";
+import { findEmployeeByNumber } from "@/lib/csv/match-employee";
 import { gridReducer, recalcLine, type GridAction } from "@/lib/payroll/grid-reducer";
 import { useApp } from "@/context/AppContext";
 import PageSkeleton from "@/components/PageSkeleton";
@@ -752,7 +753,7 @@ function StatusStepper({current,onAdvance,saving=false,allowed=true,roleHint}:{c
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PayrollPage() {
-  const { employees, company, role, addEmployee, refreshEmployees, initializing } = useApp();
+  const { employees, archivedEmployees, company, role, addEmployee, updateEmployee, restoreEmployee, refreshEmployees, initializing } = useApp();
   const { toast } = useToast();
   const { guardAction } = useDemoGuard();
 
@@ -1245,23 +1246,47 @@ export default function PayrollPage() {
   }
 
   async function handleBulkImport(bulkRows: BulkRow[]) {
+    const roster = [...employees, ...archivedEmployees];
     const payRunLines: PayRunLine[] = [];
+    let created = 0;
+    let matched = 0;
+
     for (const r of bulkRows) {
+      const existing = findEmployeeByNumber(roster, r.employee.employeeNumber);
       try {
-        const saved = await addEmployee({ ...r.employee, isActive: true });
-        payRunLines.push(bulkRowToPayRunLine(r, exchangeRate, saved?.id));
+        if (existing) {
+          if (existing.isArchived) {
+            await restoreEmployee(existing.id);
+          }
+          await updateEmployee(existing.id, { ...r.employee, isActive: true });
+          payRunLines.push(bulkRowToPayRunLine(r, exchangeRate, existing.id));
+          matched++;
+        } else {
+          const saved = await addEmployee({ ...r.employee, isActive: true });
+          payRunLines.push(bulkRowToPayRunLine(r, exchangeRate, saved?.id));
+          if (saved) {
+            roster.push(saved);
+            created++;
+          }
+        }
       } catch (err) {
         console.error("Failed to save bulk employee:", r.employee.employeeNumber, err);
-        payRunLines.push(bulkRowToPayRunLine(r, exchangeRate));
+        payRunLines.push(bulkRowToPayRunLine(r, exchangeRate, existing?.id));
+        if (existing) matched++;
       }
     }
+
     await refreshEmployees();
-    dispatch({ type: "IMPORT_ROWS", rows: payRunLines });
+    dispatch({ type: "MERGE_ROWS", rows: payRunLines });
     setShowUpload(false);
+
+    const parts: string[] = [];
+    if (matched) parts.push(`${matched} matched`);
+    if (created) parts.push(`${created} created`);
     toast.success(
-      `${payRunLines.length} employee${
-        payRunLines.length !== 1 ? "s" : ""
-      } imported and saved.`
+      parts.length
+        ? `${parts.join(", ")} — ${payRunLines.length} on this pay run.`
+        : `${payRunLines.length} employee${payRunLines.length !== 1 ? "s" : ""} imported.`,
     );
   }
 

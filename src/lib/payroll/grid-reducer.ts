@@ -1,9 +1,11 @@
 import { calculatePayroll } from "@/lib/slipdesk-payroll-engine";
 import type { PayRunLine } from "@/lib/mock-data";
+import { normalizeEmployeeNumber } from "@/lib/csv/match-employee";
 
 export type GridAction =
   | { type: "UPDATE_FIELD"; id: string; field: keyof PayRunLine; value: number }
   | { type: "IMPORT_ROWS"; rows: PayRunLine[] }
+  | { type: "MERGE_ROWS"; rows: PayRunLine[] }
   | { type: "SET_ROWS"; rows: PayRunLine[] }
   | { type: "DELETE_ROW"; id: string }
   | { type: "CLEAR" };
@@ -45,6 +47,17 @@ export function gridReducer(state: PayRunLine[], action: GridAction): PayRunLine
       );
     case "IMPORT_ROWS":
       return [...state, ...action.rows.map(recalcLine)];
+    case "MERGE_ROWS": {
+      const incoming = action.rows.map(recalcLine);
+      const incomingKeys = new Set(
+        incoming.map((l) => normalizeEmployeeNumber(l.employeeNumber)).filter(Boolean),
+      );
+      const kept = state.filter((l) => {
+        const key = normalizeEmployeeNumber(l.employeeNumber);
+        return !key || !incomingKeys.has(key);
+      });
+      return [...kept, ...incoming];
+    }
     case "SET_ROWS":
       return action.rows.map(recalcLine);
     case "DELETE_ROW":

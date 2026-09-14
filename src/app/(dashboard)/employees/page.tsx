@@ -1673,6 +1673,7 @@ import { canUse, getEffectiveTier } from "@/lib/plan-features";
 import { useDemoGuard } from "@/components/demo/DemoGuard";
 import { genderLabel } from "@/lib/employee-gender";
 import { parseEmployeeCSV, type ParsedEmployeeRow } from "@/lib/csv/parse-employee-csv";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 const DEPARTMENTS = ["All", "Operations", "Finance", "Engineering", "Sales", "Human Resources"];
 const DEPT_LIST   = ["Operations", "Finance", "Engineering", "Sales", "Human Resources"];
@@ -1944,14 +1945,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function Inp({ value, onChange, placeholder, type = "text" }: {
+function Inp({ value, onChange, placeholder, type = "text", step, min }: {
   value: string | number; onChange: (v: string) => void;
-  placeholder?: string; type?: string;
+  placeholder?: string; type?: string; step?: string; min?: string | number;
 }) {
   return (
     <input
       type={type} value={value} onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder} style={inputBase}
+      placeholder={placeholder} step={step} min={min} style={inputBase}
       onFocus={(e) => { e.target.style.borderColor = "var(--primary)"; }}
       onBlur={(e)  => { e.target.style.borderColor = "var(--border)"; }}
     />
@@ -2168,7 +2169,7 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
                   </p>
                 )}
                 <Field label={`Rate / hr (${form.currency})`}>
-                  <Inp type="number" value={form.rate} onChange={(v) => set("rate", parseFloat(v) || 0)} placeholder="8.50"/>
+                  <Inp type="number" step="0.01" min={0} value={form.rate} onChange={(v) => set("rate", parseFloat(v) || 0)} placeholder="8.50"/>
                 </Field>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
@@ -2825,6 +2826,8 @@ export default function EmployeesPage() {
   const [drawerEmp,     setDrawerEmp]     = useState<Employee | undefined>(undefined);
   const [showDrawer,    setShowDrawer]    = useState(false);
   const [selected,      setSelected]      = useState<Set<string>>(new Set());
+  const [pendingDelete, setPendingDelete] = useState<{ ids: string[]; label: string } | null>(null);
+  const [deleteBusy,    setDeleteBusy]    = useState(false);
 
   const allEmployees = useMemo(
     () => [...employees, ...archivedEmployees],
@@ -2987,14 +2990,62 @@ export default function EmployeesPage() {
     await restoreEmployee(id);
     toast.success("Employee restored.");
   }
-  async function handleDelete(id: string) {
+  function requestDelete(id: string) {
     if (!guardAction("delete_employee")) return;
+    const emp = allEmployees.find((e) => e.id === id);
+    const name = emp?.fullName
+      || [emp?.firstName, emp?.lastName].filter(Boolean).join(" ")
+      || "this employee";
+    const number = emp?.employeeNumber ? ` (${emp.employeeNumber})` : "";
+    setPendingDelete({ ids: [id], label: `${name}${number}` });
+  }
+
+  function requestBulkDelete() {
+    if (!guardAction("delete_employee")) return;
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setPendingDelete({
+      ids,
+      label: ids.length === 1
+        ? "the selected employee"
+        : `${ids.length} selected employees`,
+    });
+  }
+
+  async function confirmPendingDelete() {
+    if (!pendingDelete) return;
+    setDeleteBusy(true);
+    const ids = pendingDelete.ids;
+    let successCount = 0;
     try {
-      await hardDeleteEmployee(id);
-      setSelected((prev) => { const n = new Set(prev); n.delete(id); return n; });
-      toast.success("Employee deleted.");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Delete failed.");
+      for (const id of ids) {
+        try {
+          await hardDeleteEmployee(id);
+          successCount++;
+        } catch (err) {
+          console.error("Failed to delete employee:", id, err);
+          if (ids.length === 1) {
+            toast.error(err instanceof Error ? err.message : "Delete failed.");
+          }
+        }
+      }
+      setSelected((prev) => {
+        const n = new Set(prev);
+        for (const id of ids) n.delete(id);
+        return n;
+      });
+      if (successCount > 0) {
+        toast.success(
+          successCount === 1
+            ? "Employee deleted."
+            : `${successCount} employees deleted.`,
+        );
+      } else if (ids.length > 1) {
+        toast.error("Delete failed — please try again.");
+      }
+      setPendingDelete(null);
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
@@ -3015,25 +3066,6 @@ export default function EmployeesPage() {
       toast.success(`${successCount} employee${successCount !== 1 ? "s" : ""} archived.`);
     } else {
       toast.error("Archive failed — please try again.");
-    }
-  }
-  async function handleBulkDelete() {
-    if (!guardAction("delete_employee")) return;
-    const ids = Array.from(selected);
-    setSelected(new Set());
-    let successCount = 0;
-    for (const id of ids) {
-      try {
-        await hardDeleteEmployee(id);
-        successCount++;
-      } catch (err) {
-        console.error("Failed to delete employee:", id, err);
-      }
-    }
-    if (successCount > 0) {
-      toast.success(`${successCount} employee${successCount !== 1 ? "s" : ""} deleted.`);
-    } else {
-      toast.error("Delete failed — please try again.");
     }
   }
 
@@ -3369,7 +3401,7 @@ export default function EmployeesPage() {
                         onEdit={openEdit}
                         onArchive={handleArchive}
                         onRestore={handleRestore}
-                        onDelete={handleDelete}
+                        onDelete={requestDelete}
                       />
                     </td>
                   </tr>
@@ -3391,7 +3423,7 @@ export default function EmployeesPage() {
           count={selected.size}
           isArchiveView={showArchived}
           onArchive={handleBulkArchive}
-          onDelete={handleBulkDelete}
+          onDelete={requestBulkDelete}
           onClear={() => setSelected(new Set())}
         />
       )}
@@ -3408,6 +3440,16 @@ export default function EmployeesPage() {
         <CSVUploadModal
           onClose={() => setShowUpload(false)}
           onImport={handleBulkImport}
+        />
+      )}
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Permanently delete?"
+          body={`This will permanently delete ${pendingDelete.label}. This cannot be undone — archive instead if you may need the record later.`}
+          confirmLabel={pendingDelete.ids.length > 1 ? `Delete ${pendingDelete.ids.length}` : "Delete"}
+          busy={deleteBusy}
+          onCancel={() => { if (!deleteBusy) setPendingDelete(null); }}
+          onConfirm={() => { void confirmPendingDelete(); }}
         />
       )}
 
