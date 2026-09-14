@@ -36,6 +36,7 @@ import {
   uniquePaymentMethodsFromLines,
   PAYMENT_METHOD_FILTER_LABELS,
   PAYROLL_VIEW_ALL,
+  type PayRunViewSortBy,
 } from "@/lib/payroll/grid-view-filter";
 import { can, type Permission } from "@/lib/rbac";
 import { logAudit, type AuditAction } from "@/lib/audit";
@@ -782,7 +783,7 @@ export default function PayrollPage() {
   const [branchName, setBranchName] = useState<string | null>(null);
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
   const [nameFilter, setNameFilter] = useState("");
-  const [nameSort, setNameSort] = useState<"asc" | "desc">("asc");
+  const [sortBy, setSortBy] = useState<PayRunViewSortBy>("number-asc");
   const [deptFilter, setDeptFilter] = useState(PAYROLL_VIEW_ALL);
   const [payMethodFilter, setPayMethodFilter] = useState(PAYROLL_VIEW_ALL);
 
@@ -904,9 +905,9 @@ export default function PayrollPage() {
         nameQuery: nameFilter,
         department: deptFilter,
         paymentMethod: payMethodFilter,
-        nameSort,
+        sortBy,
       }),
-    [lines, nameFilter, deptFilter, payMethodFilter, nameSort],
+    [lines, nameFilter, deptFilter, payMethodFilter, sortBy],
   );
 
   const departmentOptions = useMemo(() => uniqueDepartmentsFromLines(lines), [lines]);
@@ -1248,6 +1249,7 @@ export default function PayrollPage() {
     setBranchId(null);
     setBranchName(null);
     setNameFilter("");
+    setSortBy("number-asc");
     setDeptFilter(PAYROLL_VIEW_ALL);
     setPayMethodFilter(PAYROLL_VIEW_ALL);
     setStatus("draft");
@@ -2564,7 +2566,7 @@ export default function PayrollPage() {
                 <input
                   value={nameFilter}
                   onChange={(e) => setNameFilter(e.target.value)}
-                  placeholder="Filter by name or employee #…"
+                  placeholder="Jump to employee # or name…"
                   style={{
                     width: "100%",
                     padding: "9px 12px 9px 34px",
@@ -2627,8 +2629,9 @@ export default function PayrollPage() {
               </div>
               <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
                 <select
-                  value={nameSort}
-                  onChange={(e) => setNameSort(e.target.value as "asc" | "desc")}
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as PayRunViewSortBy)}
+                  aria-label="Sort pay-run rows"
                   style={{
                     padding: "9px 32px 9px 12px",
                     background: "var(--card)",
@@ -2641,8 +2644,10 @@ export default function PayrollPage() {
                     appearance: "none",
                   }}
                 >
-                  <option value="asc">Name A → Z</option>
-                  <option value="desc">Name Z → A</option>
+                  <option value="number-asc"># 1 → 9</option>
+                  <option value="number-desc"># 9 → 1</option>
+                  <option value="name-asc">Name A → Z</option>
+                  <option value="name-desc">Name Z → A</option>
                 </select>
                 <ChevronDown size={13} color="var(--muted-foreground)" style={{ position: "absolute", right: 10, pointerEvents: "none" }} />
               </div>

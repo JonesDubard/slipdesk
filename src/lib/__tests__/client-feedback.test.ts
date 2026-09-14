@@ -162,6 +162,7 @@ describe("statutory exports", () => {
       fullName: "Ada",
       currency: "USD",
       grossPay: 1000,
+      netPay: 860,
       incomeTax: 100,
       nasscorpEe: 40,
       nasscorpEr: 60,

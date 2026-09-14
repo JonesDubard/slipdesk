@@ -163,6 +163,7 @@ describe("QA: disbursement and statutory exports", () => {
       fullName: "Ada",
       currency: "USD",
       grossPay: 2000,
+      netPay: 1720,
       incomeTax: 200,
       nasscorpEe: 80,
       nasscorpEr: 120,
@@ -172,6 +173,7 @@ describe("QA: disbursement and statutory exports", () => {
       fullName: "Ada",
       currency: "USD",
       grossPay: 2000,
+      netPay: 1720,
       incomeTax: 200,
       nasscorpEe: 80,
       nasscorpEr: 120,
@@ -219,18 +221,28 @@ describe("QA: one-page payslip layout budget", () => {
   });
 });
 
-describe("QA: payroll grid name filter/sort (pure)", () => {
-  it("filters and sorts display lines like payroll page", () => {
+describe("QA: payroll grid view filter/sort (pure)", () => {
+  it("defaults to numeric employee-number order, not name", () => {
     const lines = [
-      { id: "1", fullName: "Zara Zen", employeeNumber: "EMP-3", department: "Finance", paymentMethod: "bank_transfer" },
+      { id: "1", fullName: "Zara Zen", employeeNumber: "EMP-10", department: "Finance", paymentMethod: "bank_transfer" },
       { id: "2", fullName: "Ada Lovelace", employeeNumber: "EMP-1", department: "Operations", paymentMethod: "mtn_momo" },
       { id: "3", fullName: "Bob Mo", employeeNumber: "EMP-2", department: "Operations", paymentMethod: "cash" },
     ];
-    const filtered = filterPayRunView(lines, { nameQuery: "ada" });
-    expect(filtered).toHaveLength(1);
-    const sorted = filterPayRunView(lines, { nameSort: "asc" });
-    expect(sorted[0].fullName).toBe("Ada Lovelace");
-    expect(sorted[sorted.length - 1].fullName).toBe("Zara Zen");
+    const byNumber = filterPayRunView(lines);
+    expect(byNumber.map((l) => l.employeeNumber)).toEqual(["EMP-1", "EMP-2", "EMP-10"]);
+    const byName = filterPayRunView(lines, { sortBy: "name-asc" });
+    expect(byName[0].fullName).toBe("Ada Lovelace");
+    expect(byName[byName.length - 1].fullName).toBe("Zara Zen");
+  });
+
+  it("jumps to an employee number and keeps optional dept/method filters", () => {
+    const lines = [
+      { id: "1", fullName: "Zara Zen", employeeNumber: "EMP-452", department: "Finance", paymentMethod: "bank_transfer" },
+      { id: "2", fullName: "Ada Lovelace", employeeNumber: "EMP-1", department: "Operations", paymentMethod: "mtn_momo" },
+      { id: "3", fullName: "Bob Mo", employeeNumber: "EMP-2", department: "Operations", paymentMethod: "cash" },
+    ];
+    const jumped = filterPayRunView(lines, { nameQuery: "452" });
+    expect(jumped.map((l) => l.employeeNumber)).toEqual(["EMP-452"]);
     const ops = filterPayRunView(lines, { department: "Operations" });
     expect(ops).toHaveLength(2);
     expect(ops.every((l) => l.department === "Operations")).toBe(true);
