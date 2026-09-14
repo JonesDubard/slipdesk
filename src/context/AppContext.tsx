@@ -548,7 +548,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       company_id:      coId,
       employee_number: finalNumber,
       first_name:      data.firstName,
-      middle_name:     data.middleName ?? "",
       last_name:       data.lastName,
       job_title:       data.jobTitle,
       department:      data.department,
@@ -566,16 +565,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       bank_name:       data.bankName,
       account_number:  data.accountNumber,
       momo_number:     data.momoNumber,
-      ...(data.gender !== undefined && data.gender !== "" && { gender: data.gender }),
       is_active:       data.isActive,
       is_archived:     false,
+    };
+    // Optional columns (migrations 0001 / 0016 / 0018 + pending hours). Retry without them
+    // if PostgREST schema cache is stale or the migration has not been applied.
+    const extended = {
+      ...(data.middleName !== undefined && { middle_name: data.middleName ?? "" }),
+      ...(data.gender !== undefined && data.gender !== "" && { gender: data.gender }),
       ...(data.pendingRegularHours  !== undefined && { pending_regular_hours:  data.pendingRegularHours  }),
       ...(data.pendingOvertimeHours !== undefined && { pending_overtime_hours: data.pendingOvertimeHours }),
       ...(data.pendingHolidayHours  !== undefined && { pending_holiday_hours:  data.pendingHolidayHours  }),
       ...(data.pendingDeductions    !== undefined && { pending_deductions:     data.pendingDeductions    }),
-    };
-    // Extended profile columns (migration 0001). Kept separate for graceful fallback.
-    const extended = {
       ...(data.branch           !== undefined && { branch:            data.branch           }),
       ...(data.position         !== undefined && { position:          data.position         }),
       ...(data.taxId            !== undefined && { tax_id:            data.taxId            }),
@@ -586,7 +587,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     let res = await db(supabase).from("employees").insert({ ...baseInsert, ...extended }).select().single();
     if (res.error && Object.keys(extended).length > 0) {
-      // Retry without extended columns if the migration hasn't been applied.
       res = await db(supabase).from("employees").insert(baseInsert).select().single();
     }
     if (res.error) throw res.error;
@@ -607,7 +607,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const prev = allEmployees.find((e) => e.id === id);
     const baseUpdate = {
       ...(data.firstName      !== undefined && { first_name:      data.firstName      }),
-      ...(data.middleName     !== undefined && { middle_name:     data.middleName     }),
       ...(data.lastName       !== undefined && { last_name:       data.lastName       }),
       ...(data.jobTitle       !== undefined && { job_title:       data.jobTitle       }),
       ...(data.department     !== undefined && { department:      data.department     }),
@@ -625,14 +624,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...(data.bankName       !== undefined && { bank_name:       data.bankName       }),
       ...(data.accountNumber  !== undefined && { account_number:  data.accountNumber  }),
       ...(data.momoNumber          !== undefined && { momo_number:           data.momoNumber          }),
-      ...(data.gender               !== undefined && { gender:                data.gender || null      }),
       ...(data.isActive            !== undefined && { is_active:             data.isActive            }),
+    };
+    const extended = {
+      ...(data.middleName     !== undefined && { middle_name:     data.middleName     }),
+      ...(data.gender               !== undefined && { gender:                data.gender || null      }),
       ...(data.pendingRegularHours  !== undefined && { pending_regular_hours:  data.pendingRegularHours  }),
       ...(data.pendingOvertimeHours !== undefined && { pending_overtime_hours: data.pendingOvertimeHours }),
       ...(data.pendingHolidayHours  !== undefined && { pending_holiday_hours:  data.pendingHolidayHours  }),
       ...(data.pendingDeductions    !== undefined && { pending_deductions:     data.pendingDeductions    }),
-    };
-    const extended = {
       ...(data.branch           !== undefined && { branch:            data.branch           }),
       ...(data.position         !== undefined && { position:          data.position         }),
       ...(data.taxId            !== undefined && { tax_id:            data.taxId            }),
@@ -646,6 +646,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (res.error && Object.keys(extended).length > 0) {
       res = await db(supabase).from("employees").update(baseUpdate).eq("id", id).select().single();
     }
+    if (res.error) throw res.error;
     const row = res.data;
     if (row) setAllEmployees((list) => list.map((e) => e.id === id ? dbToEmployee(row as DbEmployee) : e));
 

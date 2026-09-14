@@ -30,6 +30,13 @@ import {
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
 import { usePayrollDraftAutosave, createPayrollDraft, loadActivePayrollDraft, finalizePayrollRun, patchPayrollRunStatus, abandonPayrollDraft } from "@/hooks/usePayrollDraft";
 import { filterEmployeesForBranchScope } from "@/lib/payroll/branch-scope";
+import {
+  filterPayRunView,
+  uniqueDepartmentsFromLines,
+  uniquePaymentMethodsFromLines,
+  PAYMENT_METHOD_FILTER_LABELS,
+  PAYROLL_VIEW_ALL,
+} from "@/lib/payroll/grid-view-filter";
 import { can, type Permission } from "@/lib/rbac";
 import { logAudit, type AuditAction } from "@/lib/audit";
 import { createNotification, sendEmailNotification, type NotificationType, type NotificationSeverity } from "@/lib/notifications";
@@ -776,6 +783,8 @@ export default function PayrollPage() {
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
   const [nameFilter, setNameFilter] = useState("");
   const [nameSort, setNameSort] = useState<"asc" | "desc">("asc");
+  const [deptFilter, setDeptFilter] = useState(PAYROLL_VIEW_ALL);
+  const [payMethodFilter, setPayMethodFilter] = useState(PAYROLL_VIEW_ALL);
 
   const effectiveTier = getEffectiveTier(company.subscriptionTier, company.billingBypass);
   const pdfCompany: PdfCompany = {
@@ -889,21 +898,23 @@ export default function PayrollPage() {
     [employees, branchName],
   );
 
-  const displayLines = useMemo(() => {
-    let result = lines;
-    const q = nameFilter.trim().toLowerCase();
-    if (q) {
-      result = result.filter(
-        (l) =>
-          l.fullName.toLowerCase().includes(q) ||
-          l.employeeNumber.toLowerCase().includes(q),
-      );
-    }
-    return [...result].sort((a, b) => {
-      const cmp = a.fullName.localeCompare(b.fullName);
-      return nameSort === "asc" ? cmp : -cmp;
-    });
-  }, [lines, nameFilter, nameSort]);
+  const displayLines = useMemo(
+    () =>
+      filterPayRunView(lines, {
+        nameQuery: nameFilter,
+        department: deptFilter,
+        paymentMethod: payMethodFilter,
+        nameSort,
+      }),
+    [lines, nameFilter, deptFilter, payMethodFilter, nameSort],
+  );
+
+  const departmentOptions = useMemo(() => uniqueDepartmentsFromLines(lines), [lines]);
+  const paymentMethodOptions = useMemo(() => uniquePaymentMethodsFromLines(lines), [lines]);
+  const viewFilterActive =
+    Boolean(nameFilter.trim()) ||
+    deptFilter !== PAYROLL_VIEW_ALL ||
+    payMethodFilter !== PAYROLL_VIEW_ALL;
 
   if (initializing) return <PageSkeleton />;
 
@@ -1237,6 +1248,8 @@ export default function PayrollPage() {
     setBranchId(null);
     setBranchName(null);
     setNameFilter("");
+    setDeptFilter(PAYROLL_VIEW_ALL);
+    setPayMethodFilter(PAYROLL_VIEW_ALL);
     setStatus("draft");
     setRunType("monthly");
     const p = getCurrentPeriod();
@@ -2566,6 +2579,54 @@ export default function PayrollPage() {
               </div>
               <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
                 <select
+                  value={deptFilter}
+                  onChange={(e) => setDeptFilter(e.target.value)}
+                  aria-label="Filter by department"
+                  style={{
+                    padding: "9px 32px 9px 12px",
+                    background: "var(--card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 10,
+                    color: deptFilter === PAYROLL_VIEW_ALL ? "var(--muted-foreground)" : "var(--foreground)",
+                    fontSize: 13,
+                    outline: "none",
+                    cursor: "pointer",
+                    appearance: "none",
+                  }}
+                >
+                  <option value={PAYROLL_VIEW_ALL}>All Departments</option>
+                  {departmentOptions.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+                <ChevronDown size={13} color="var(--muted-foreground)" style={{ position: "absolute", right: 10, pointerEvents: "none" }} />
+              </div>
+              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <select
+                  value={payMethodFilter}
+                  onChange={(e) => setPayMethodFilter(e.target.value)}
+                  aria-label="Filter by payment method"
+                  style={{
+                    padding: "9px 32px 9px 12px",
+                    background: "var(--card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 10,
+                    color: payMethodFilter === PAYROLL_VIEW_ALL ? "var(--muted-foreground)" : "var(--foreground)",
+                    fontSize: 13,
+                    outline: "none",
+                    cursor: "pointer",
+                    appearance: "none",
+                  }}
+                >
+                  <option value={PAYROLL_VIEW_ALL}>All Payment Methods</option>
+                  {paymentMethodOptions.map((m) => (
+                    <option key={m} value={m}>{PAYMENT_METHOD_FILTER_LABELS[m] ?? m}</option>
+                  ))}
+                </select>
+                <ChevronDown size={13} color="var(--muted-foreground)" style={{ position: "absolute", right: 10, pointerEvents: "none" }} />
+              </div>
+              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <select
                   value={nameSort}
                   onChange={(e) => setNameSort(e.target.value as "asc" | "desc")}
                   style={{
@@ -2585,7 +2646,7 @@ export default function PayrollPage() {
                 </select>
                 <ChevronDown size={13} color="var(--muted-foreground)" style={{ position: "absolute", right: 10, pointerEvents: "none" }} />
               </div>
-              {(nameFilter || displayLines.length !== lines.length) && (
+              {viewFilterActive && (
                 <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
                   Showing {displayLines.length} of {lines.length}
                 </span>
@@ -2640,11 +2701,10 @@ export default function PayrollPage() {
                         cursor: "default",
                       }}
                       onMouseEnter={(e) => {
-                        (e.currentTarget as HTMLElement).style.background =
-                          "color-mix(in oklch, var(--foreground) 5%, var(--card))";
+                        e.currentTarget.style.background = "color-mix(in oklch, var(--foreground) 5%, var(--card))";
                       }}
                       onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLElement).style.background = "transparent";
+                        e.currentTarget.style.background = "transparent";
                       }}
                     >
                       {row.getVisibleCells().map((cell) => (
@@ -2656,14 +2716,26 @@ export default function PayrollPage() {
                             width: cell.column.getSize(),
                           }}
                         >
-                          {flexRender(
-                            cell.column.columnDef.cell,
-                            cell.getContext()
-                          )}
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
                         </td>
                       ))}
                     </tr>
                   ))}
+                  {viewFilterActive && displayLines.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={table.getAllColumns().length}
+                        style={{
+                          textAlign: "center",
+                          padding: "28px 16px",
+                          color: "var(--muted-foreground)",
+                          fontSize: 13,
+                        }}
+                      >
+                        No matching employees in this view — everyone is still on the pay run.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseCSVLine, parseDateToISO } from "@/lib/csv/parse-csv-line";
 import { parsePayrollCSV, type BulkRow } from "@/lib/csv/parse-payroll-csv";
-import { parseEmployeeCSV } from "@/lib/csv/parse-employee-csv";
+import { parseEmployeeCSV, normalizePaymentMethod } from "@/lib/csv/parse-employee-csv";
 import { deleteAtIndexes, deleteByIds } from "@/lib/csv/record-ops";
-import { findEmployeeByNumber } from "@/lib/csv/match-employee";
+import { classifyEmployeeImport, findEmployeeByNumber } from "@/lib/csv/match-employee";
 import { gridReducer, recalcLine } from "@/lib/payroll/grid-reducer";
 import { formatEmployeeFullName } from "@/lib/employee-name";
 import { processPayroll } from "@/lib/slipdesk-payroll-engine";
@@ -216,6 +216,40 @@ describe("employees CSV parser — same fixture", () => {
   it("returns [] for empty / header-only files (no error object)", () => {
     expect(parseEmployeeCSV("")).toEqual([]);
     expect(parseEmployeeCSV(HEADER)).toEqual([]);
+  });
+
+  it("rejects invalid payment_method as a row error", () => {
+    const csv = `${HEADER}\nEMP-1,Ada,,Lovelace,female,Dev,Eng,HQ,,,Montserrado,2024-01-01,full_time,USD,10,173,0,,paypal,,,,173,0,0,0,0,0,0,0`;
+    const parsed = parseEmployeeCSV(csv);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].errors.some((e) => /payment_method/i.test(e))).toBe(true);
+  });
+
+  it("aliases momo / mtn / lonestar to mtn_momo", () => {
+    expect(normalizePaymentMethod("MoMo").value).toBe("mtn_momo");
+    expect(normalizePaymentMethod("mtn").value).toBe("mtn_momo");
+    expect(normalizePaymentMethod("Lonestar").value).toBe("mtn_momo");
+    expect(normalizePaymentMethod("").value).toBe("bank_transfer");
+    expect(normalizePaymentMethod("paypal").error).toMatch(/Invalid payment_method/);
+  });
+});
+
+describe("employee bulk import — match vs create", () => {
+  it("classifies an existing employee number as update, not skip", () => {
+    const roster = [
+      { id: "1", employeeNumber: "EMP-452", isArchived: false },
+      { id: "2", employeeNumber: "EMP-453", isArchived: true },
+    ];
+    expect(classifyEmployeeImport(roster, "EMP-452")).toEqual({
+      action: "update",
+      existing: roster[0],
+    });
+    expect(classifyEmployeeImport(roster, "emp-453")).toEqual({
+      action: "update",
+      existing: roster[1],
+    });
+    expect(classifyEmployeeImport(roster, "EMP-999")).toEqual({ action: "create" });
+    expect(classifyEmployeeImport(roster, "")).toEqual({ action: "create" });
   });
 });
 

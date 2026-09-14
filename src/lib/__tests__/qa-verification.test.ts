@@ -31,6 +31,7 @@ import {
   PAYSLIP_ONE_PAGE_MAX_UNITS,
 } from "@/lib/payslip-layout";
 import { computePayroll } from "@/lib/reporting";
+import { filterPayRunView } from "@/lib/payroll/grid-view-filter";
 import type { Employee } from "@/context/AppContext";
 
 const baseEmployee = (overrides: Partial<Employee> = {}): Employee => ({
@@ -221,17 +222,20 @@ describe("QA: one-page payslip layout budget", () => {
 describe("QA: payroll grid name filter/sort (pure)", () => {
   it("filters and sorts display lines like payroll page", () => {
     const lines = [
-      { id: "1", fullName: "Zara Zen", employeeNumber: "EMP-3" },
-      { id: "2", fullName: "Ada Lovelace", employeeNumber: "EMP-1" },
-      { id: "3", fullName: "Bob Mo", employeeNumber: "EMP-2" },
+      { id: "1", fullName: "Zara Zen", employeeNumber: "EMP-3", department: "Finance", paymentMethod: "bank_transfer" },
+      { id: "2", fullName: "Ada Lovelace", employeeNumber: "EMP-1", department: "Operations", paymentMethod: "mtn_momo" },
+      { id: "3", fullName: "Bob Mo", employeeNumber: "EMP-2", department: "Operations", paymentMethod: "cash" },
     ];
-    const q = "ada";
-    const filtered = lines.filter(
-      (l) => l.fullName.toLowerCase().includes(q) || l.employeeNumber.toLowerCase().includes(q),
-    );
+    const filtered = filterPayRunView(lines, { nameQuery: "ada" });
     expect(filtered).toHaveLength(1);
-    const sorted = [...lines].sort((a, b) => a.fullName.localeCompare(b.fullName));
+    const sorted = filterPayRunView(lines, { nameSort: "asc" });
     expect(sorted[0].fullName).toBe("Ada Lovelace");
     expect(sorted[sorted.length - 1].fullName).toBe("Zara Zen");
+    const ops = filterPayRunView(lines, { department: "Operations" });
+    expect(ops).toHaveLength(2);
+    expect(ops.every((l) => l.department === "Operations")).toBe(true);
+    const momo = filterPayRunView(lines, { paymentMethod: "mtn_momo" });
+    expect(momo.map((l) => l.employeeNumber)).toEqual(["EMP-1"]);
+    expect(lines).toHaveLength(3);
   });
 });

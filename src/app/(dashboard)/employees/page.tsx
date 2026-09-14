@@ -1673,6 +1673,7 @@ import { canUse, getEffectiveTier } from "@/lib/plan-features";
 import { useDemoGuard } from "@/components/demo/DemoGuard";
 import { genderLabel } from "@/lib/employee-gender";
 import { parseEmployeeCSV, type ParsedEmployeeRow } from "@/lib/csv/parse-employee-csv";
+import { classifyEmployeeImport } from "@/lib/csv/match-employee";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 const DEPARTMENTS = ["All", "Operations", "Finance", "Engineering", "Sales", "Human Resources"];
@@ -2381,6 +2382,7 @@ function RowActions({ emp, isArchived, onEdit, onArchive, onRestore, onDelete }:
 
 interface ImportResult {
   imported: number;
+  updated: number;
   skipped:  { rowNum: number; name: string; reasons: string[] }[];
 }
 
@@ -2395,7 +2397,7 @@ function CSVUploadModal({ onClose, onImport }: {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleFile = useCallback((file: File) => {
-    if (!file.name.endsWith(".csv")) { toast.error("Please upload a .csv file."); return; }
+    if (!file.name.toLowerCase().endsWith(".csv")) { toast.error("Please upload a .csv file."); return; }
     const reader = new FileReader();
     reader.onload = (e) => { setParsed(parseEmployeeCSV(e.target?.result as string)); setResult(null); };
     reader.readAsText(file);
@@ -2403,17 +2405,21 @@ function CSVUploadModal({ onClose, onImport }: {
 
   const validRows = parsed?.filter((r) => r.errors.length === 0) ?? [];
   const errRows   = parsed?.filter((r) => r.errors.length > 0)   ?? [];
+  const emptyFile = parsed !== null && parsed.length === 0;
   const allFail   = parsed !== null && validRows.length === 0;
 
   async function handleImport() {
     if (!validRows.length || importing) return;
     setImporting(true);
-    const res = await onImport(validRows.map((r) => r.data));
-    setImporting(false);
-    if (errRows.length > 0) {
-      setResult(res);
-    } else {
-      onClose();
+    try {
+      const res = await onImport(validRows.map((r) => r.data));
+      if (res.skipped.length > 0) {
+        setResult(res);
+      } else {
+        onClose();
+      }
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -2510,6 +2516,17 @@ function CSVUploadModal({ onClose, onImport }: {
 
           {parsed && !result && (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {emptyFile && (
+                <div style={{
+                  background: "color-mix(in oklch, var(--destructive) 12%, transparent)",
+                  border: "1px solid color-mix(in oklch, var(--destructive) 40%, transparent)",
+                  borderRadius: 12, padding: "14px 16px",
+                }}>
+                  <p style={{ color: "var(--destructive)", fontWeight: 700, fontSize: 13, margin: 0 }}>
+                    No data rows found. The file is empty or only has a header.
+                  </p>
+                </div>
+              )}
               {validRows.length > 0 && (
                 <div style={{
                   background: "color-mix(in oklch, var(--primary) 12%, transparent)", border: "1px solid color-mix(in oklch, var(--primary) 30%, transparent)",
@@ -2626,10 +2643,14 @@ function CSVUploadModal({ onClose, onImport }: {
                 </div>
                 <div>
                   <p style={{ color: "var(--primary)", fontWeight: 800, fontSize: 24, margin: 0, lineHeight: 1 }}>
-                    {result.imported}
+                    {result.imported + result.updated}
                   </p>
                   <p style={{ color: "var(--muted-foreground)", fontSize: 12, margin: "4px 0 0" }}>
-                    employee{result.imported !== 1 ? "s" : ""} imported successfully
+                    {result.updated > 0 && result.imported > 0
+                      ? `${result.updated} updated, ${result.imported} created`
+                      : result.updated > 0
+                        ? `employee${result.updated !== 1 ? "s" : ""} updated`
+                        : `employee${result.imported !== 1 ? "s" : ""} imported successfully`}
                   </p>
                 </div>
               </div>
@@ -2873,13 +2894,14 @@ export default function EmployeesPage() {
 
   async function handleBulkImport(rows: Partial<Employee>[]): Promise<ImportResult> {
     if (!guardAction("import_employees")) {
-      return { imported: 0, skipped: [{ rowNum: 0, name: "Import", reasons: ["Demo read-only"] }] };
+      return { imported: 0, updated: 0, skipped: [{ rowNum: 0, name: "Import", reasons: ["Demo read-only"] }] };
     }
+    const roster = [...allEmployees];
     const usedNumbers = new Set(
-      allEmployees.map((e) => e.employeeNumber.trim().toLowerCase()).filter(Boolean),
+      roster.map((e) => (e.employeeNumber ?? "").trim().toLowerCase()).filter(Boolean),
     );
-    const existingNums = allEmployees
-      .map((e) => parseInt(e.employeeNumber.replace(/\D/g, ""), 10))
+    const existingNums = roster
+      .map((e) => parseInt((e.employeeNumber ?? "").replace(/\D/g, ""), 10))
       .filter(Boolean);
     let nextNum = existingNums.length ? Math.max(...existingNums) + 1 : 1;
 
@@ -2892,37 +2914,47 @@ export default function EmployeesPage() {
     };
 
     let imported = 0;
+    let updated = 0;
     const skipped: ImportResult["skipped"] = [];
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const csvNum = (row.employeeNumber ?? "").trim();
       const name = [row.firstName, row.middleName, row.lastName].filter(Boolean).join(" ");
-
-      if (csvNum && usedNumbers.has(csvNum.toLowerCase())) {
-        skipped.push({
-          rowNum: i + 2,
-          name,
-          reasons: [`Employee number "${csvNum}" already exists`],
-        });
-        continue;
-      }
-
-      const empNum = csvNum || nextAutoNumber();
-      usedNumbers.add(empNum.toLowerCase());
+      const classified = classifyEmployeeImport(roster, csvNum);
 
       try {
-        await addEmployee(
-          { ...(row as Omit<Employee, "id" | "fullName" | "isArchived">), isActive: true, employeeNumber: empNum },
-          empNum,
-        );
-        imported++;
+        if (classified.action === "update") {
+          const existing = classified.existing;
+          if (existing.isArchived) {
+            await restoreEmployee(existing.id);
+          }
+          await updateEmployee(existing.id, {
+            ...(row as Omit<Employee, "id" | "fullName" | "isArchived">),
+            isActive: true,
+            employeeNumber: existing.employeeNumber,
+          });
+          const idx = roster.findIndex((e) => e.id === existing.id);
+          if (idx >= 0) {
+            roster[idx] = { ...roster[idx], ...row, isArchived: false, isActive: true };
+          }
+          updated++;
+        } else {
+          const empNum = csvNum || nextAutoNumber();
+          usedNumbers.add(empNum.toLowerCase());
+          const saved = await addEmployee(
+            { ...(row as Omit<Employee, "id" | "fullName" | "isArchived">), isActive: true, employeeNumber: empNum },
+            empNum,
+          );
+          imported++;
+          if (saved) roster.push(saved);
+        }
       } catch (err) {
         let errorMessage = "Unknown error";
         if (err instanceof Error) {
           errorMessage = err.message;
         } else if (typeof err === "object" && err !== null) {
-          errorMessage = (err as any).message ?? JSON.stringify(err);
+          errorMessage = (err as { message?: string }).message ?? JSON.stringify(err);
         } else {
           errorMessage = String(err);
         }
@@ -2930,7 +2962,7 @@ export default function EmployeesPage() {
         console.error(`Row ${i + 2} failed:`, err);
         skipped.push({
           rowNum: i + 2,
-          name: [row.firstName, row.middleName, row.lastName].filter(Boolean).join(" "),
+          name,
           reasons: [errorMessage],
         });
       }
@@ -2938,19 +2970,22 @@ export default function EmployeesPage() {
 
     await refreshEmployees();
 
-    if (imported > 0) {
+    const saved = imported + updated;
+    const parts: string[] = [];
+    if (updated) parts.push(`${updated} updated`);
+    if (imported) parts.push(`${imported} created`);
+
+    if (saved > 0) {
       toast.success(
         skipped.length > 0
-          ? `${imported} imported, ${skipped.length} skipped — see details below.`
-          : `Successfully imported ${imported} employee${imported !== 1 ? "s" : ""}.`
+          ? `${parts.join(", ")} — ${skipped.length} skipped — see details below.`
+          : parts.join(", ") + ".",
       );
     } else {
       toast.error("No employees were imported. Check the errors below.");
     }
 
-    if (skipped.length === 0) setShowUpload(false);
-
-    return { imported, skipped };
+    return { imported, updated, skipped };
   }
 
   async function handleSaveEmployee(data: Omit<Employee, "id" | "fullName" | "isArchived">) {
