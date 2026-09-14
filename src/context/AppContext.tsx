@@ -697,11 +697,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const hardDeleteEmployee = useCallback(async (id: string) => {
     blockIfDemo(company.isDemo, "delete_employee");
     if (!id || !company.id) throw new Error("Company not loaded");
-    await db(supabase)
+    const { error, count } = await db(supabase)
       .from("employees")
-      .delete()
+      .delete({ count: "exact" })
       .eq("id", id)
       .eq("company_id", company.id);
+    if (error) throw new Error(error.message);
+    if (count === 0) throw new Error("Employee not found or already deleted");
     setAllEmployees((prev) => prev.filter((e) => e.id !== id));
     logAudit({ companyId: company.id, action: "employee.delete", entityType: "employee", entityId: id });
   }, [supabase, company.id]);
