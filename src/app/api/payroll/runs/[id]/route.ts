@@ -15,7 +15,12 @@ import {
   parseDraftPayload,
   type RunType,
 } from "@/lib/payroll/draft-persistence";
-import { mapPayRunLineRowToFinalized } from "@/lib/compliance/statutory-exports";
+import {
+  mapPayRunLineRowToFinalized,
+  type EmployeePayExtras,
+  type FinalizedPayrollLine,
+  type PayRunLineRowInput,
+} from "@/lib/compliance/statutory-exports";
 
 type RouteCtx = { params: Promise<{ id: string }> };
 
@@ -51,7 +56,7 @@ export async function GET(_req: NextRequest, ctx: RouteCtx) {
 
     const draft = parseDraftPayload(run.draft_payload);
 
-    let finalizedLines: unknown[] | null = null;
+    let finalizedLines: FinalizedPayrollLine[] | null = null;
     if (FINALIZED_PAY_RUN_STATUSES.includes(run.status as PayRunStatus)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const db = access.admin as any;
@@ -62,20 +67,21 @@ export async function GET(_req: NextRequest, ctx: RouteCtx) {
         .order("full_name");
       if (lineErr) throw new Error(lineErr.message);
 
-      const empIds = (lineRows ?? [])
-        .map((l: { employee_id?: string }) => l.employee_id)
-        .filter(Boolean);
-      let empById = new Map<string, Record<string, unknown>>();
+      const rows = (lineRows ?? []) as PayRunLineRowInput[];
+      const empIds = rows.map((l) => l.employee_id).filter((id): id is string => Boolean(id));
+      let empById = new Map<string, EmployeePayExtras>();
       if (empIds.length) {
         const { data: emps } = await db
           .from("employees")
           .select("id, payment_method, account_number, momo_number, branch, nasscorp_number")
           .in("id", empIds);
-        empById = new Map((emps ?? []).map((e: { id: string }) => [e.id, e]));
+        empById = new Map(
+          (emps ?? []).map((e: EmployeePayExtras & { id: string }) => [e.id, e]),
+        );
       }
 
-      finalizedLines = (lineRows ?? []).map((l: Record<string, unknown>) => {
-        const emp = l.employee_id ? empById.get(l.employee_id as string) : undefined;
+      finalizedLines = rows.map((l) => {
+        const emp = l.employee_id ? empById.get(l.employee_id) : undefined;
         return mapPayRunLineRowToFinalized(l, emp);
       });
     }

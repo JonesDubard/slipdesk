@@ -4,7 +4,12 @@ import {
   canViewPayroll,
   resolvePayrollAccess,
 } from "@/lib/payroll/resolve-payroll-access";
-import { mapPayRunLineRowToFinalized } from "@/lib/compliance/statutory-exports";
+import {
+  mapPayRunLineRowToFinalized,
+  type EmployeePayExtras,
+  type FinalizedPayrollLine,
+  type PayRunLineRowInput,
+} from "@/lib/compliance/statutory-exports";
 
 /**
  * GET /api/payroll/runs/consolidated?periodLabel=Sep%202026
@@ -52,33 +57,32 @@ export async function GET(req: NextRequest) {
 
   if (lineErr) return NextResponse.json({ error: lineErr.message }, { status: 400 });
 
-  const empIds = (lineRows ?? [])
-    .map((l: { employee_id?: string }) => l.employee_id)
-    .filter(Boolean);
-  let empById = new Map<string, Record<string, unknown>>();
+  const rows = (lineRows ?? []) as PayRunLineRowInput[];
+  const empIds = rows.map((l) => l.employee_id).filter((id): id is string => Boolean(id));
+  let empById = new Map<string, EmployeePayExtras>();
   if (empIds.length) {
     const { data: emps } = await db
       .from("employees")
       .select("id, payment_method, account_number, momo_number, branch, nasscorp_number")
       .in("id", empIds);
-    empById = new Map((emps ?? []).map((e: { id: string }) => [e.id, e]));
+    empById = new Map(
+      (emps ?? []).map((e: EmployeePayExtras & { id: string }) => [e.id, e]),
+    );
   }
 
   const seenEmployees = new Set<string>();
-  const finalizedLines: Array<Record<string, unknown>> = [];
+  const finalizedLines: FinalizedPayrollLine[] = [];
 
-  for (const l of lineRows ?? []) {
-    const empKey = (l.employee_id as string) || (l.employee_number as string);
+  for (const l of rows) {
+    const empKey = l.employee_id || String(l.employee_number ?? "");
     if (seenEmployees.has(empKey)) continue;
     seenEmployees.add(empKey);
-    const emp = l.employee_id ? empById.get(l.employee_id as string) : undefined;
+    const emp = l.employee_id ? empById.get(l.employee_id) : undefined;
     finalizedLines.push(mapPayRunLineRowToFinalized(l, emp));
   }
 
   const { rowsFromFinalizedPayroll } = await import("@/lib/reports/disbursement");
-  const disbursementRows = rowsFromFinalizedPayroll(
-    finalizedLines as Parameters<typeof rowsFromFinalizedPayroll>[0],
-  );
+  const disbursementRows = rowsFromFinalizedPayroll(finalizedLines);
 
   return NextResponse.json({
     periodLabel,

@@ -112,15 +112,41 @@ export interface FinalizedPayrollLine {
   branch?: string;
 }
 
-type PayRunLineRowLike = Record<string, unknown>;
-type EmployeePayExtras = Record<string, unknown> | undefined;
+/** Snake_case fields read from a pay_run_lines row (partial rows allowed). */
+export type PayRunLineRowInput = {
+  employee_id?: string | null;
+  employee_number?: string | number | null;
+  full_name?: string | null;
+  department?: string | null;
+  currency?: string | null;
+  gross_pay?: number | string | null;
+  additional_earnings?: number | string | null;
+  deductions?: number | string | null;
+  net_pay?: number | string | null;
+  income_tax?: number | string | null;
+  nasscorp_ee?: number | string | null;
+  nasscorp_er?: number | string | null;
+  taxable_pay?: number | string | null;
+  nasscorp_base?: number | string | null;
+  rate?: number | string | null;
+  regular_hours?: number | string | null;
+};
+
+/** Employee fields joined onto a finalized line for disbursement / NASSCORP export. */
+export type EmployeePayExtras = {
+  nasscorp_number?: string | null;
+  payment_method?: string | null;
+  account_number?: string | null;
+  momo_number?: string | null;
+  branch?: string | null;
+};
 
 /**
  * Map a persisted pay_run_lines row to the export/report shape.
  * Prefers taxable_pay / nasscorp_base when present; otherwise reconstructs.
  */
 export function mapPayRunLineRowToFinalized(
-  l: PayRunLineRowLike,
+  l: PayRunLineRowInput,
   emp?: EmployeePayExtras,
 ): FinalizedPayrollLine {
   const grossPay = Number(l.gross_pay ?? 0);
@@ -130,7 +156,7 @@ export function mapPayRunLineRowToFinalized(
   return {
     employeeNumber: String(l.employee_number ?? ""),
     fullName: String(l.full_name ?? ""),
-    department: (l.department as string) ?? undefined,
+    department: l.department ?? undefined,
     currency: String(l.currency ?? "USD"),
     grossPay,
     additionalEarnings,
@@ -151,11 +177,11 @@ export function mapPayRunLineRowToFinalized(
     }),
     rate,
     regularHours,
-    nasscorpNumber: (emp?.nasscorp_number as string) ?? "",
-    paymentMethod: (emp?.payment_method as string) ?? "cash",
-    accountNumber: (emp?.account_number as string) ?? "",
-    mobileNumber: (emp?.momo_number as string) ?? "",
-    branch: (emp?.branch as string) ?? "",
+    nasscorpNumber: emp?.nasscorp_number ?? "",
+    paymentMethod: emp?.payment_method ?? "cash",
+    accountNumber: emp?.account_number ?? "",
+    mobileNumber: emp?.momo_number ?? "",
+    branch: emp?.branch ?? "",
   };
 }
 
