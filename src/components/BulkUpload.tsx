@@ -16,8 +16,9 @@
 
 import { Fragment, useRef, useState } from "react";
 import { Upload, Download, AlertCircle, CheckCircle2, X, Info, ChevronDown, Trash2 } from "lucide-react";
-import { parsePayrollCSV, type BulkRow } from "@/lib/csv/parse-payroll-csv";
+import { parsePayrollSpreadsheet, type BulkRow } from "@/lib/csv/parse-payroll-csv";
 import { deleteAtIndexes } from "@/lib/csv/record-ops";
+import { isSpreadsheetFilename, SPREADSHEET_ACCEPT } from "@/lib/csv/read-spreadsheet";
 
 export type { BulkRow };
 
@@ -100,16 +101,27 @@ export default function BulkUpload({ onImport, onClose }: Props) {
   }
 
   function processFile(file: File) {
+    if (!isSpreadsheetFilename(file.name)) {
+      setFileName(file.name);
+      setPreview(null);
+      setErrors(["Please upload a .csv or Excel file."]);
+      return;
+    }
     setFileName(file.name);
     const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = (e.target?.result as string).replace(/^\uFEFF/, ""); // strip BOM
-      const { rows, errors: errs } = parsePayrollCSV(text);
+    reader.onload = () => {
+      const buf = reader.result;
+      if (!(buf instanceof ArrayBuffer)) {
+        setPreview(null);
+        setErrors(["Could not read that file."]);
+        return;
+      }
+      const { rows, errors: errs } = parsePayrollSpreadsheet(buf, file.name);
       setPreview(rows);
       setErrors(errs);
       setExpandedRow(null);
     };
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -206,8 +218,8 @@ export default function BulkUpload({ onImport, onClose }: Props) {
             <p className="text-sm font-medium text-slate-600">
               {fileName || "Drop your CSV here or click to browse"}
             </p>
-            <p className="text-xs text-slate-400 mt-1">CSV files only · supports ded_* itemized deduction columns</p>
-            <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleFile}/>
+            <p className="text-xs text-slate-400 mt-1">CSV or Excel · supports ded_* itemized deduction columns</p>
+            <input ref={fileRef} type="file" accept={SPREADSHEET_ACCEPT} className="hidden" onChange={handleFile}/>
           </div>
 
           {/* Parse errors */}

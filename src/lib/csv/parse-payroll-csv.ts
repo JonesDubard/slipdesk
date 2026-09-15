@@ -1,7 +1,10 @@
 import type { Employee, EmploymentType, Currency, PaymentMethod } from "@/context/AppContext";
 import type { DeductionItem } from "@/lib/mock-data";
 import { normalizeGender } from "@/lib/employee-gender";
-import { parseCSVLine, parseDateToISO, splitCsvLines } from "@/lib/csv/parse-csv-line";
+import { parseDateToISO, parseMoney } from "@/lib/csv/parse-csv-line";
+import { normalizePaymentMethod } from "@/lib/csv/parse-employee-csv";
+import { rowToRecord } from "@/lib/csv/normalize-headers";
+import { parseTextTable, readSpreadsheet, type SpreadsheetTable } from "@/lib/csv/read-spreadsheet";
 
 export interface BulkRow {
   employee: Omit<Employee, "id" | "fullName">;
@@ -13,12 +16,20 @@ export interface BulkRow {
 }
 
 const VALID_EMP_TYPES: EmploymentType[] = ["full_time", "part_time", "contractor", "casual"];
-const VALID_CURRENCIES: Currency[] = ["USD", "LRD"];
-const VALID_PAYMENT_METHODS: PaymentMethod[] = ["bank_transfer", "mtn_momo", "orange_money", "cash"];
+const EMP_TYPE_ALIASES: Record<string, EmploymentType> = {
+  full_time: "full_time",
+  fulltime: "full_time",
+  ft: "full_time",
+  part_time: "part_time",
+  parttime: "part_time",
+  pt: "part_time",
+  contractor: "contractor",
+  contract: "contractor",
+  casual: "casual",
+};
 
 export function parseNum(v: string, fallback = 0): number {
-  const n = parseFloat(v?.trim() || "");
-  return Number.isNaN(n) ? fallback : n;
+  return parseMoney(v, fallback);
 }
 
 function titleCase(snake: string): string {
@@ -39,17 +50,19 @@ export function parsePayrollRow(
   if (!firstName || !lastName)
     return { row: null, error: `Line ${lineNum}: first_name and last_name are required.` };
 
-  const empType = (raw.employment_type?.trim().toLowerCase() ?? "full_time") as EmploymentType;
+  const empTypeKey = (raw.employment_type?.trim().toLowerCase() || "full_time").replace(/[\s-]+/g, "_");
+  const empType = (EMP_TYPE_ALIASES[empTypeKey] ?? empTypeKey) as EmploymentType;
   if (!VALID_EMP_TYPES.includes(empType))
     return { row: null, error: `Line ${lineNum}: invalid employment_type "${raw.employment_type}".` };
 
-  const currency = (raw.currency?.trim().toUpperCase() ?? "USD") as Currency;
-  if (!VALID_CURRENCIES.includes(currency))
+  const currencyRaw = (raw.currency?.trim() || "USD").replace(/^\$/, "").toUpperCase();
+  const currency = (currencyRaw === "LRD" ? "LRD" : currencyRaw === "USD" ? "USD" : "") as Currency;
+  if (!currency)
     return { row: null, error: `Line ${lineNum}: invalid currency "${raw.currency}". Use USD or LRD.` };
 
-  const payMethod = (raw.payment_method?.trim().toLowerCase() ?? "cash") as PaymentMethod;
-  if (!VALID_PAYMENT_METHODS.includes(payMethod))
-    return { row: null, error: `Line ${lineNum}: invalid payment_method "${raw.payment_method}".` };
+  const payParsed = normalizePaymentMethod(raw.payment_method?.trim() || "cash");
+  if (payParsed.error)
+    return { row: null, error: `Line ${lineNum}: ${payParsed.error}` };
 
   const genderParsed = normalizeGender(raw.gender?.trim() ?? "");
   if (genderParsed.error)
@@ -76,7 +89,7 @@ export function parsePayrollRow(
     standardHours,
     allowances: parseNum(raw.allowances, 0),
     nasscorpNumber: raw.nasscorp_number?.trim() || "",
-    paymentMethod: payMethod,
+    paymentMethod: payParsed.value,
     bankName: raw.bank_name?.trim() || "",
     accountNumber: raw.account_number?.trim() || "",
     momoNumber: raw.momo_number?.trim() || "",
@@ -114,37 +127,33 @@ export function parsePayrollRow(
   };
 }
 
-export function parsePayrollCSV(text: string): { rows: BulkRow[]; errors: string[] } {
-  const lines = splitCsvLines(text);
-  while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
-  if (lines.length < 2 || !lines[0]?.trim())
-    return { rows: [], errors: ["CSV must have a header row and at least one data row."] };
+function parsePayrollTable(table: SpreadsheetTable): { rows: BulkRow[]; errors: string[] } {
+  if (table.error && table.rows.length === 0) {
+    return { rows: [], errors: [table.error] };
+  }
 
-  const headers = parseCSVLine(lines[0]).map((h) =>
-    h.toLowerCase().trim().replace(/^"+|"+$/g, "").replace(/\s+/g, "_"),
-  );
-
-  const hasData = lines.slice(1).some((l) => l.trim());
-  if (!hasData)
-    return { rows: [], errors: ["CSV must have a header row and at least one data row."] };
-
-  const dedColumns = headers.filter((h) => h.startsWith("ded_"));
+  const dedColumns = table.headers.filter((h) => h.startsWith("ded_"));
   const rows: BulkRow[] = [];
   const errors: string[] = [];
 
-  for (let i = 1; i < lines.length; i++) {
-    if (!lines[i].trim()) continue;
-
-    const values = parseCSVLine(lines[i]);
-    const raw: Record<string, string> = {};
-    headers.forEach((h, idx) => {
-      raw[h] = values[idx] ?? "";
-    });
-
-    const { row, error } = parsePayrollRow(raw, i + 1, dedColumns);
+  table.rows.forEach((values, idx) => {
+    if (!values.some((v) => String(v ?? "").trim())) return;
+    const raw = rowToRecord(table.headers, values.map((v) => String(v ?? "")));
+    const { row, error } = parsePayrollRow(raw, idx + 2, dedColumns);
     if (error) errors.push(error);
     else if (row) rows.push(row);
-  }
+  });
 
   return { rows, errors };
+}
+
+export function parsePayrollCSV(text: string): { rows: BulkRow[]; errors: string[] } {
+  return parsePayrollTable(parseTextTable(text));
+}
+
+export function parsePayrollSpreadsheet(
+  buffer: ArrayBuffer,
+  filename?: string,
+): { rows: BulkRow[]; errors: string[] } {
+  return parsePayrollTable(readSpreadsheet(buffer, filename));
 }

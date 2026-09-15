@@ -1672,7 +1672,8 @@ import { createClient } from "@/lib/supabase/client";
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
 import { useDemoGuard } from "@/components/demo/DemoGuard";
 import { genderLabel } from "@/lib/employee-gender";
-import { parseEmployeeCSV, type ParsedEmployeeRow } from "@/lib/csv/parse-employee-csv";
+import { parseEmployeeSpreadsheet, type ParsedEmployeeRow } from "@/lib/csv/parse-employee-csv";
+import { isSpreadsheetFilename, SPREADSHEET_ACCEPT } from "@/lib/csv/read-spreadsheet";
 import { classifyEmployeeImport } from "@/lib/csv/match-employee";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
@@ -2397,10 +2398,23 @@ function CSVUploadModal({ onClose, onImport }: {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleFile = useCallback((file: File) => {
-    if (!file.name.toLowerCase().endsWith(".csv")) { toast.error("Please upload a .csv file."); return; }
+    if (!isSpreadsheetFilename(file.name)) {
+      toast.error("Please upload a .csv or Excel file.");
+      return;
+    }
     const reader = new FileReader();
-    reader.onload = (e) => { setParsed(parseEmployeeCSV(e.target?.result as string)); setResult(null); };
-    reader.readAsText(file);
+    reader.onload = () => {
+      const buf = reader.result;
+      if (!(buf instanceof ArrayBuffer)) {
+        toast.error("Could not read that file.");
+        return;
+      }
+      const { rows, error } = parseEmployeeSpreadsheet(buf, file.name);
+      if (error && rows.length === 0) toast.error(error);
+      setParsed(rows);
+      setResult(null);
+    };
+    reader.readAsArrayBuffer(file);
   }, [toast]);
 
   const validRows = parsed?.filter((r) => r.errors.length === 0) ?? [];
@@ -2504,12 +2518,12 @@ function CSVUploadModal({ onClose, onImport }: {
                 Drop CSV or click to browse
               </p>
               <p style={{ color: "var(--muted-foreground)", fontSize: 12 }}>
-                Supports the Slipdesk employee template format
+                CSV or Excel (.xlsx) — employee_number, first/last name, rate
               </p>
               <input
-                ref={fileRef} type="file" accept=".csv"
+                ref={fileRef} type="file" accept={SPREADSHEET_ACCEPT}
                 style={{ display: "none" }}
-                onChange={(e) => handleFile(e.target.files![0])}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
               />
             </div>
           )}

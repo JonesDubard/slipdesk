@@ -1,5 +1,5 @@
-/** Quoted-field CSV line parser. Handles `"`, `""` escapes, and commas in quotes. */
-export function parseCSVLine(line: string): string[] {
+/** Quoted-field CSV line parser. Handles `"`, `""` escapes, and comma/semicolon/tab delimiters. */
+export function parseCSVLine(line: string, delimiter = ","): string[] {
   const values: string[] = [];
   let cur = "";
   let inQuote = false;
@@ -18,7 +18,7 @@ export function parseCSVLine(line: string): string[] {
       }
     } else if (ch === '"') {
       inQuote = true;
-    } else if (ch === ",") {
+    } else if (ch === delimiter) {
       values.push(cur.trim());
       cur = "";
     } else {
@@ -27,6 +27,18 @@ export function parseCSVLine(line: string): string[] {
   }
   values.push(cur.trim());
   return values;
+}
+
+/** Parse money/hours from CSV/Excel (`$1.44`, `1,234.56`, `1,44`). */
+export function parseMoney(v: string | undefined | null, fallback = 0): number {
+  let s = (v ?? "").trim();
+  if (!s) return fallback;
+  s = s.replace(/usd/gi, "").replace(/^\$/, "").trim();
+  if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) s = s.replace(/,/g, "");
+  else if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) s = s.replace(/\./g, "").replace(",", ".");
+  else if (/^\d+,\d+$/.test(s)) s = s.replace(",", ".");
+  const n = parseFloat(s);
+  return Number.isNaN(n) ? fallback : n;
 }
 
 function pad2(n: number): string {

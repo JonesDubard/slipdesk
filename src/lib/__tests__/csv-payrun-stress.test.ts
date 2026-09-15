@@ -3,8 +3,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseCSVLine, parseDateToISO } from "@/lib/csv/parse-csv-line";
-import { parsePayrollCSV, type BulkRow } from "@/lib/csv/parse-payroll-csv";
-import { parseEmployeeCSV, normalizePaymentMethod } from "@/lib/csv/parse-employee-csv";
+import { parsePayrollCSV, parsePayrollSpreadsheet, type BulkRow } from "@/lib/csv/parse-payroll-csv";
+import { parseEmployeeCSV, parseEmployeeSpreadsheet, normalizePaymentMethod } from "@/lib/csv/parse-employee-csv";
+import * as XLSX from "xlsx";
 import { deleteAtIndexes, deleteByIds } from "@/lib/csv/record-ops";
 import { classifyEmployeeImport, findEmployeeByNumber } from "@/lib/csv/match-employee";
 import { gridReducer, recalcLine } from "@/lib/payroll/grid-reducer";
@@ -229,8 +230,84 @@ describe("employees CSV parser — same fixture", () => {
     expect(normalizePaymentMethod("MoMo").value).toBe("mtn_momo");
     expect(normalizePaymentMethod("mtn").value).toBe("mtn_momo");
     expect(normalizePaymentMethod("Lonestar").value).toBe("mtn_momo");
+    expect(normalizePaymentMethod("mobile money").value).toBe("mtn_momo");
     expect(normalizePaymentMethod("").value).toBe("bank_transfer");
     expect(normalizePaymentMethod("paypal").error).toMatch(/Invalid payment_method/);
+  });
+});
+
+describe("spreadsheet / Excel bulk read", () => {
+  it("parses semicolon-delimited CSV", () => {
+    const csv = `${HEADER.replaceAll(",", ";")}\nEMP-9;Ada;;Lovelace;female;Dev;Eng;HQ;;;Montserrado;2024-01-01;full_time;USD;1.44;173;0;;cash;;;;173;0;0;0;0;0;0;0`;
+    const parsed = parseEmployeeCSV(csv);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].errors).toEqual([]);
+    expect(parsed[0].data.firstName).toBe("Ada");
+    expect(parsed[0].data.rate).toBe(1.44);
+    const pay = parsePayrollCSV(csv);
+    expect(pay.errors).toEqual([]);
+    expect(pay.rows[0].employee.employeeNumber).toBe("EMP-9");
+  });
+
+  it("skips a title row above the real headers", () => {
+    const csv = `CHRES Staff List\n${HEADER}\nEMP-9,Ada,,Lovelace,female,Dev,Eng,HQ,,,Montserrado,2024-01-01,full_time,USD,10,173,0,,cash,,,,173,0,0,0,0,0,0,0`;
+    const parsed = parseEmployeeCSV(csv);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].data.employeeNumber).toBe("EMP-9");
+  });
+
+  it("maps Excel-style headers, missing currency, and $ rates", () => {
+    const csv = "Staff ID,First Name,Last Name,Hourly Rate\nEMP-9,Ada,Lovelace,$1.44";
+    const parsed = parseEmployeeCSV(csv);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].errors).toEqual([]);
+    expect(parsed[0].data.employeeNumber).toBe("EMP-9");
+    expect(parsed[0].data.firstName).toBe("Ada");
+    expect(parsed[0].data.lastName).toBe("Lovelace");
+    expect(parsed[0].data.rate).toBe(1.44);
+    expect(parsed[0].data.currency).toBe("USD");
+  });
+
+  it("splits a single Name column", () => {
+    const csv = "employee_number,name,rate\nEMP-9,Ada Lovelace,10";
+    const parsed = parseEmployeeCSV(csv);
+    expect(parsed[0].data.firstName).toBe("Ada");
+    expect(parsed[0].data.lastName).toBe("Lovelace");
+  });
+
+  it("decodes UTF-16 LE CSV", () => {
+    const text = `${HEADER}\nEMP-9,Ada,,Lovelace,female,Dev,Eng,HQ,,,Montserrado,2024-01-01,full_time,USD,10,173,0,,cash,,,,173,0,0,0,0,0,0,0`;
+    const buf = new ArrayBuffer(2 + text.length * 2);
+    const bytes = new Uint8Array(buf);
+    bytes[0] = 0xff;
+    bytes[1] = 0xfe;
+    const chars = new Uint16Array(buf, 2);
+    for (let i = 0; i < text.length; i++) chars[i] = text.charCodeAt(i);
+    const { rows, error } = parseEmployeeSpreadsheet(buf, "staff.csv");
+    expect(error).toBeUndefined();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].data.firstName).toBe("Ada");
+  });
+
+  it("reads an .xlsx buffer", () => {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["Staff List"],
+      ["employee_number", "first_name", "last_name", "rate"],
+      ["EMP-9", "Ada", "Lovelace", 1.44],
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, "Staff");
+    const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer | Uint8Array | number[];
+    const bytes = out instanceof ArrayBuffer ? new Uint8Array(out) : Uint8Array.from(out as ArrayLike<number>);
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    const { rows, error } = parseEmployeeSpreadsheet(buffer, "staff.xlsx");
+    expect(error).toBeUndefined();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].data.employeeNumber).toBe("EMP-9");
+    expect(rows[0].data.rate).toBe(1.44);
+    const pay = parsePayrollSpreadsheet(buffer, "staff.xlsx");
+    expect(pay.errors).toEqual([]);
+    expect(pay.rows[0].employee.lastName).toBe("Lovelace");
   });
 });
 

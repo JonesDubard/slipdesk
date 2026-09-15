@@ -1,6 +1,8 @@
 import type { Employee, EmploymentType, PaymentMethod } from "@/context/AppContext";
 import { normalizeGender } from "@/lib/employee-gender";
-import { parseCSVLine, parseDateToISO, splitCsvLines } from "@/lib/csv/parse-csv-line";
+import { parseDateToISO, parseMoney } from "@/lib/csv/parse-csv-line";
+import { rowToRecord } from "@/lib/csv/normalize-headers";
+import { parseTextTable, readSpreadsheet, type SpreadsheetTable } from "@/lib/csv/read-spreadsheet";
 
 export interface ParsedEmployeeRow {
   data: Partial<Employee>;
@@ -18,6 +20,9 @@ const PAYMENT_ALIASES: Record<string, PaymentMethod> = {
   mtn: "mtn_momo",
   mtnmomo: "mtn_momo",
   lonestar: "mtn_momo",
+  lonestar_cell: "mtn_momo",
+  mobile_money: "mtn_momo",
+  mobilemoney: "mtn_momo",
   orange_money: "orange_money",
   orange: "orange_money",
   orangemoney: "orange_money",
@@ -42,91 +47,102 @@ export function normalizePaymentMethod(raw: string | undefined | null): {
   return { value: mapped };
 }
 
-export function parseEmployeeCSV(text: string): ParsedEmployeeRow[] {
-  const lines = splitCsvLines(text);
-  while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
-  if (lines.length < 2) return [];
-
-  const headers = parseCSVLine(lines[0]).map((h) =>
-    h.trim().toLowerCase().replace(/\s+/g, "").replace(/^"|"$/g, "").replace(/_/g, ""),
-  );
-
+function parseEmployeeTable(table: SpreadsheetTable): { rows: ParsedEmployeeRow[]; error?: string } {
+  if (table.error && table.rows.length === 0) return { rows: [], error: table.error };
   const results: ParsedEmployeeRow[] = [];
 
-  for (let i = 1; i < lines.length; i++) {
-    if (!lines[i].trim()) continue;
-
-    const vals = parseCSVLine(lines[i]);
-    const raw: Record<string, string> = {};
-    headers.forEach((h, idx) => {
-      raw[h] = vals[idx] ?? "";
-    });
-
+  for (const vals of table.rows) {
+    if (!vals.some((v) => String(v ?? "").trim())) continue;
+    const raw = rowToRecord(table.headers, vals.map((v) => String(v ?? "")));
     const errors: string[] = [];
-    const firstName = raw.firstname || "";
-    const middleName = raw.middlename || "";
-    const lastName = raw.lastname || "";
-    const currency = (raw.currency || "USD").toUpperCase();
-    const payParsed = normalizePaymentMethod(raw.paymentmethod);
+    const firstName = (raw.first_name || "").trim();
+    const middleName = (raw.middle_name || "").trim();
+    const lastName = (raw.last_name || "").trim();
+    const currencyRaw = (raw.currency || "").trim();
+    const currency = (currencyRaw || "USD").replace(/^\$/, "").toUpperCase();
+    const payParsed = normalizePaymentMethod(raw.payment_method);
+    const rateVal = (raw.rate || "").trim();
 
     if (!firstName) errors.push("First name required");
     if (!lastName) errors.push("Last name required");
-    if (!raw.currency) errors.push("Currency required");
-    if (!raw.rate) errors.push("Rate required");
+    if (!rateVal) errors.push("Rate required");
     if (payParsed.error) errors.push(payParsed.error);
+    if (currencyRaw && currency !== "USD" && currency !== "LRD") {
+      errors.push(`Invalid currency "${currencyRaw}". Use USD or LRD.`);
+    }
 
     const genderParsed = normalizeGender(raw.gender);
     if (genderParsed.error) errors.push(genderParsed.error);
 
-    const n = (v: string | undefined) => (v ? parseFloat(v) : null);
+    const n = (v: string | undefined) => {
+      const s = (v ?? "").trim();
+      if (!s) return null;
+      const parsed = parseMoney(s, Number.NaN);
+      return Number.isNaN(parsed) ? null : parsed;
+    };
 
-    const employeeNumber = (raw.employeenumber || raw["employee#"] || "").trim();
-
-    const empTypeRaw = (raw.employmenttype || "").trim().toLowerCase();
+    const empTypeRaw = (raw.employment_type || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
     const employmentType = (
       ["full_time", "part_time", "contractor", "casual"].includes(empTypeRaw)
         ? empTypeRaw
-        : "full_time"
+        : empTypeRaw === "fulltime" || empTypeRaw === "ft"
+          ? "full_time"
+          : empTypeRaw === "parttime" || empTypeRaw === "pt"
+            ? "part_time"
+            : empTypeRaw === "contract"
+              ? "contractor"
+              : "full_time"
     ) as EmploymentType;
 
     results.push({
       errors,
       data: {
-        employeeNumber,
+        employeeNumber: (raw.employee_number || "").trim(),
         firstName,
         middleName,
         lastName,
         gender: genderParsed.value,
-        jobTitle: raw.jobtitle || "",
+        jobTitle: raw.job_title || "",
         department: raw.department || "Operations",
         branch: raw.branch || "",
         email: raw.email || "",
         phone: raw.phone || "",
         county: raw.county || "Montserrado",
-        startDate: parseDateToISO(raw.startdate),
+        startDate: parseDateToISO(raw.start_date),
         employmentType,
         currency: currency === "LRD" ? "LRD" : "USD",
-        rate: Number.isNaN(parseFloat(raw.rate)) ? 0 : parseFloat(raw.rate),
-        standardHours: Number.isNaN(parseFloat(raw.standardhours)) ? 173.33 : parseFloat(raw.standardhours),
-        allowances: Number.isNaN(parseFloat(raw.allowances ?? "0")) ? 0 : parseFloat(raw.allowances ?? "0"),
-        nasscorpNumber: raw.nasscorpnumber || "",
+        rate: parseMoney(raw.rate, 0),
+        standardHours: parseMoney(raw.standard_hours, 173.33),
+        allowances: parseMoney(raw.allowances, 0),
+        nasscorpNumber: raw.nasscorp_number || "",
         paymentMethod: payParsed.value,
-        bankName: raw.bankname || "",
-        accountNumber: raw.accountnumber || "",
-        momoNumber: raw.momonumber || "",
+        bankName: raw.bank_name || "",
+        accountNumber: raw.account_number || "",
+        momoNumber: raw.momo_number || "",
         isActive: true,
         isArchived: false,
-        pendingRegularHours: n(raw.regularhours),
-        pendingOvertimeHours: n(raw.overtimehours),
-        pendingHolidayHours: n(raw.holidayhours),
+        pendingRegularHours: n(raw.regular_hours),
+        pendingOvertimeHours: n(raw.overtime_hours),
+        pendingHolidayHours: n(raw.holiday_hours),
         pendingDeductions:
           Object.entries(raw)
             .filter(([key]) => key.startsWith("ded"))
-            .reduce((sum, [, val]) => sum + (parseFloat(val) || 0), 0) ||
+            .reduce((sum, [, val]) => sum + (parseMoney(val, 0) || 0), 0) ||
           n(raw.deductions) ||
           null,
       },
     });
   }
-  return results;
+  return { rows: results, error: table.error };
+}
+
+export function parseEmployeeCSV(text: string): ParsedEmployeeRow[] {
+  return parseEmployeeTable(parseTextTable(text)).rows;
+}
+
+export function parseEmployeeSpreadsheet(
+  buffer: ArrayBuffer,
+  filename?: string,
+): { rows: ParsedEmployeeRow[]; error?: string } {
+  return parseEmployeeTable(readSpreadsheet(buffer, filename));
 }
