@@ -134,6 +134,12 @@ type PayRunLineRow = {
   nasscorp_ee:          number;
   nasscorp_er:          number;
   net_pay:              number;
+  deductions?:          number;
+  deduction_items?:     unknown;
+  /** PAYE base at finalization (regular + OT + holiday). Null on pre-0021 rows. */
+  taxable_pay?:         number | null;
+  /** NASSCORP base at finalization (regularSalary). Null on pre-0021 rows. */
+  nasscorp_base?:       number | null;
   created_at:           string;
 };
 

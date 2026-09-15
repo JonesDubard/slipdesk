@@ -17,9 +17,20 @@ import {
 import {
   lraExportRows,
   lraExportRowsFromFinalized,
+  mapPayRunLineRowToFinalized,
   nasscorpExportRows,
   nasscorpExportRowsFromFinalized,
 } from "@/lib/compliance/statutory-exports";
+import {
+  persistStatutoryBases,
+  reconstructNasscorpBase,
+  reconstructTaxablePay,
+} from "@/lib/payroll/statutory-bases";
+import {
+  calcPaye,
+  calculatePayroll,
+  roundCurrency,
+} from "@/lib/slipdesk-payroll-engine";
 import { normalizeGender } from "@/lib/employee-gender";
 import {
   estimatePayslipLayoutUnits,
@@ -169,6 +180,176 @@ describe("statutory exports", () => {
     };
     expect(lraExportRowsFromFinalized(employer, [line])[0][7]).toBe("100.00");
     expect(nasscorpExportRowsFromFinalized(employer, [line])[0][6]).toBe("40.00");
+  });
+
+  it("keeps Gross, PAYE, and NASSCORP 4%/6% formulas unchanged", () => {
+    const result = calculatePayroll({
+      employeeId: "e1",
+      currency: "USD",
+      rate: 10,
+      regularHours: 160,
+      overtimeHours: 8,
+      holidayHours: 4,
+      exchangeRate: 185.44,
+      additionalEarnings: 200,
+    });
+    expect(result.regularSalary).toBe(1600);
+    expect(result.overtimePay).toBe(120);
+    expect(result.holidayPay).toBe(80);
+    expect(result.additionalEarnings).toBe(200);
+    expect(result.grossPay).toBe(2000);
+    expect(result.nasscorp.base).toBe(1600);
+    expect(result.nasscorp.employeeContribution).toBe(64);
+    expect(result.nasscorp.employerContribution).toBe(96);
+    expect(result.Paye).toEqual(calcPaye(1800, "USD", 185.44));
+  });
+
+  it("writes finalized LRA Taxable Income as PAYE base (regular + OT + holiday, extras excluded)", () => {
+    const employee = baseEmployee({
+      rate: 10,
+      standardHours: 160,
+      allowances: 200,
+    });
+    const result = calculatePayroll({
+      employeeId: employee.id,
+      currency: "USD",
+      rate: 10,
+      regularHours: 160,
+      overtimeHours: 8,
+      holidayHours: 4,
+      exchangeRate: 185.44,
+      additionalEarnings: 200,
+    });
+    const employer = {
+      companyName: "ACME",
+      tin: "TIN-1",
+      nasscorpRegNo: "NSS-EMP",
+      periodLabel: "Sep 2026",
+    };
+    const liveRows = lraExportRows(employer, [{ employee, result, usd: {
+      gross: result.grossPay, net: result.netPay, incomeTax: result.Paye.taxInBase,
+      nasscorpEe: result.nasscorp.employeeContribution, nasscorpEr: result.nasscorp.employerContribution,
+    } }]);
+    const payeBase = roundCurrency(result.regularSalary + result.overtimePay + result.holidayPay);
+    const persisted = persistStatutoryBases(result);
+    const finalized = mapPayRunLineRowToFinalized({
+      employee_number: employee.employeeNumber,
+      full_name: employee.fullName,
+      currency: "USD",
+      gross_pay: result.grossPay,
+      additional_earnings: result.additionalEarnings,
+      income_tax: result.Paye.taxInBase,
+      nasscorp_ee: result.nasscorp.employeeContribution,
+      nasscorp_er: result.nasscorp.employerContribution,
+      net_pay: result.netPay,
+      taxable_pay: persisted.taxable_pay,
+      nasscorp_base: persisted.nasscorp_base,
+      rate: 10,
+      regular_hours: 160,
+    });
+    const finalizedRows = lraExportRowsFromFinalized(employer, [finalized]);
+
+    expect(result.grossPay).not.toBe(payeBase);
+    expect(payeBase).not.toBe(result.nasscorp.base);
+    expect(liveRows[0][5]).toBe(result.grossPay.toFixed(2));
+    expect(liveRows[0][6]).toBe(payeBase.toFixed(2));
+    expect(finalizedRows[0][5]).toBe(result.grossPay.toFixed(2));
+    expect(finalizedRows[0][6]).toBe(payeBase.toFixed(2));
+    expect(finalizedRows[0][6]).toBe(liveRows[0][6]);
+    expect(finalizedRows[0][6]).not.toBe(finalizedRows[0][5]);
+  });
+
+  it("writes finalized NASSCORP Contribution Base as regularSalary used for EE/ER", () => {
+    const employee = baseEmployee({
+      rate: 10,
+      standardHours: 160,
+      allowances: 200,
+    });
+    const result = calculatePayroll({
+      employeeId: employee.id,
+      currency: "USD",
+      rate: 10,
+      regularHours: 160,
+      overtimeHours: 8,
+      holidayHours: 4,
+      exchangeRate: 185.44,
+      additionalEarnings: 200,
+    });
+    const employer = {
+      companyName: "ACME",
+      tin: "TIN-1",
+      nasscorpRegNo: "NSS-EMP",
+      periodLabel: "Sep 2026",
+    };
+    const liveRows = nasscorpExportRows(employer, [{ employee, result, usd: {
+      gross: result.grossPay, net: result.netPay, incomeTax: result.Paye.taxInBase,
+      nasscorpEe: result.nasscorp.employeeContribution, nasscorpEr: result.nasscorp.employerContribution,
+    } }]);
+    const persisted = persistStatutoryBases(result);
+    const finalized = mapPayRunLineRowToFinalized({
+      employee_number: employee.employeeNumber,
+      full_name: employee.fullName,
+      currency: "USD",
+      gross_pay: result.grossPay,
+      additional_earnings: result.additionalEarnings,
+      income_tax: result.Paye.taxInBase,
+      nasscorp_ee: result.nasscorp.employeeContribution,
+      nasscorp_er: result.nasscorp.employerContribution,
+      net_pay: result.netPay,
+      taxable_pay: persisted.taxable_pay,
+      nasscorp_base: persisted.nasscorp_base,
+      rate: 10,
+      regular_hours: 160,
+    });
+    const finalizedRows = nasscorpExportRowsFromFinalized(employer, [finalized]);
+    const reportedBase = Number(finalizedRows[0][8]);
+
+    expect(result.nasscorp.base).toBe(result.regularSalary);
+    expect(reportedBase).toBe(result.nasscorp.base);
+    expect(reportedBase).not.toBe(result.grossPay);
+    expect(liveRows[0][8]).toBe(finalizedRows[0][8]);
+    expect(result.nasscorp.employeeContribution).toBe(roundCurrency(reportedBase * 0.04));
+    expect(result.nasscorp.employerContribution).toBe(roundCurrency(reportedBase * 0.06));
+    expect(finalizedRows[0][6]).toBe(result.nasscorp.employeeContribution.toFixed(2));
+    expect(finalizedRows[0][7]).toBe(result.nasscorp.employerContribution.toFixed(2));
+  });
+
+  it("reconstructs bases for pre-migration rows and prefers persisted values", () => {
+    const reconstructed = mapPayRunLineRowToFinalized({
+      employee_number: "EMP-1",
+      full_name: "Ada",
+      currency: "USD",
+      gross_pay: 2000,
+      additional_earnings: 200,
+      income_tax: 100,
+      nasscorp_ee: 64,
+      nasscorp_er: 96,
+      net_pay: 1836,
+      rate: 10,
+      regular_hours: 160,
+    });
+    expect(reconstructed.taxablePay).toBe(reconstructTaxablePay(2000, 200));
+    expect(reconstructed.nasscorpBase).toBe(reconstructNasscorpBase(10, 160));
+    expect(reconstructed.taxablePay).toBe(1800);
+    expect(reconstructed.nasscorpBase).toBe(1600);
+
+    const persisted = mapPayRunLineRowToFinalized({
+      employee_number: "EMP-1",
+      full_name: "Ada",
+      currency: "USD",
+      gross_pay: 2000,
+      additional_earnings: 200,
+      income_tax: 100,
+      nasscorp_ee: 64,
+      nasscorp_er: 96,
+      net_pay: 1836,
+      rate: 10,
+      regular_hours: 160,
+      taxable_pay: 1799.5,
+      nasscorp_base: 1599.5,
+    });
+    expect(persisted.taxablePay).toBe(1799.5);
+    expect(persisted.nasscorpBase).toBe(1599.5);
   });
 });
 

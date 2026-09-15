@@ -35,6 +35,7 @@ import {
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
 import { usePayrollDraftAutosave, createPayrollDraft, loadActivePayrollDraft, finalizePayrollRun, patchPayrollRunStatus, abandonPayrollDraft } from "@/hooks/usePayrollDraft";
 import { filterEmployeesForBranchScope } from "@/lib/payroll/branch-scope";
+import { persistStatutoryBases } from "@/lib/payroll/statutory-bases";
 import {
   filterPayRunView,
   uniqueDepartmentsFromLines,
@@ -1130,28 +1131,33 @@ export default function PayrollPage() {
           if (run && lines.length > 0) {
             const lineRows = lines
               .filter((l) => l.calc !== null)
-              .map((l) => ({
-                pay_run_id: run.id,
-                ...(companyId ? { company_id: companyId } : {}),
-                employee_id: l.employeeId,
-                employee_number: l.employeeNumber,
-                full_name: l.fullName,
-                job_title: l.jobTitle,
-                department: l.department,
-                currency: l.currency,
-                rate: l.rate,
-                regular_hours: l.regularHours,
-                overtime_hours: l.overtimeHours,
-                holiday_hours: l.holidayHours,
-                additional_earnings: l.additionalEarnings,
-                deductions: l.deductions ?? 0,
-                exchange_rate: l.exchangeRate,
-                gross_pay: l.calc!.grossPay,
-                income_tax: l.calc!.Paye.taxInBase,
-                nasscorp_ee: l.calc!.nasscorp.employeeContribution,
-                nasscorp_er: l.calc!.nasscorp.employerContribution,
-                net_pay: l.calc!.netPay,
-              }));
+              .map((l) => {
+                const bases = persistStatutoryBases(l.calc!);
+                return {
+                  pay_run_id: run.id,
+                  ...(companyId ? { company_id: companyId } : {}),
+                  employee_id: l.employeeId,
+                  employee_number: l.employeeNumber,
+                  full_name: l.fullName,
+                  job_title: l.jobTitle,
+                  department: l.department,
+                  currency: l.currency,
+                  rate: l.rate,
+                  regular_hours: l.regularHours,
+                  overtime_hours: l.overtimeHours,
+                  holiday_hours: l.holidayHours,
+                  additional_earnings: l.additionalEarnings,
+                  deductions: l.deductions ?? 0,
+                  exchange_rate: l.exchangeRate,
+                  gross_pay: l.calc!.grossPay,
+                  income_tax: l.calc!.Paye.taxInBase,
+                  nasscorp_ee: l.calc!.nasscorp.employeeContribution,
+                  nasscorp_er: l.calc!.nasscorp.employerContribution,
+                  net_pay: l.calc!.netPay,
+                  taxable_pay: bases.taxable_pay,
+                  nasscorp_base: bases.nasscorp_base,
+                };
+              });
             const { error: lineErr } = await (supabase as any)
               .from("pay_run_lines")
               .insert(lineRows);

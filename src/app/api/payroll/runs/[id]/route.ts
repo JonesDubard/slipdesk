@@ -15,6 +15,7 @@ import {
   parseDraftPayload,
   type RunType,
 } from "@/lib/payroll/draft-persistence";
+import { mapPayRunLineRowToFinalized } from "@/lib/compliance/statutory-exports";
 
 type RouteCtx = { params: Promise<{ id: string }> };
 
@@ -75,25 +76,7 @@ export async function GET(_req: NextRequest, ctx: RouteCtx) {
 
       finalizedLines = (lineRows ?? []).map((l: Record<string, unknown>) => {
         const emp = l.employee_id ? empById.get(l.employee_id as string) : undefined;
-        return {
-          employeeNumber: l.employee_number,
-          fullName: l.full_name,
-          department: l.department,
-          currency: l.currency,
-          grossPay: Number(l.gross_pay ?? 0),
-          additionalEarnings: Number(l.additional_earnings ?? 0),
-          deductions: Number(l.deductions ?? 0),
-          netPay: Number(l.net_pay ?? 0),
-          incomeTax: Number(l.income_tax ?? 0),
-          nasscorpEe: Number(l.nasscorp_ee ?? 0),
-          nasscorpEr: Number(l.nasscorp_er ?? 0),
-          nasscorpBase: Number(l.gross_pay ?? 0),
-          nasscorpNumber: (emp?.nasscorp_number as string) ?? "",
-          paymentMethod: (emp?.payment_method as string) ?? "cash",
-          accountNumber: (emp?.account_number as string) ?? "",
-          mobileNumber: (emp?.momo_number as string) ?? "",
-          branch: (emp?.branch as string) ?? "",
-        };
+        return mapPayRunLineRowToFinalized(l, emp);
       });
     }
 

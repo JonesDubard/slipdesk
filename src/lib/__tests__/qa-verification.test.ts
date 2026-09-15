@@ -22,9 +22,14 @@ import {
   rowsFromFinalizedPayroll,
 } from "@/lib/reports/disbursement";
 import {
+  lraExportRows,
   lraExportRowsFromFinalized,
+  mapPayRunLineRowToFinalized,
+  nasscorpExportRows,
   nasscorpExportRowsFromFinalized,
 } from "@/lib/compliance/statutory-exports";
+import { persistStatutoryBases } from "@/lib/payroll/statutory-bases";
+import { calculatePayroll, roundCurrency } from "@/lib/slipdesk-payroll-engine";
 import { normalizeGender } from "@/lib/employee-gender";
 import {
   estimatePayslipLayoutUnits,
@@ -178,6 +183,109 @@ describe("QA: disbursement and statutory exports", () => {
       nasscorpEe: 80,
       nasscorpEr: 120,
     }])[0][6]).toBe("80.00");
+  });
+
+  it("keeps finalized LRA Taxable Income on the PAYE base when extras + OT + holiday are present", () => {
+    const employee = baseEmployee({ rate: 12, standardHours: 173.33, allowances: 150 });
+    const result = calculatePayroll({
+      employeeId: employee.id,
+      currency: "USD",
+      rate: 12,
+      regularHours: 173.33,
+      overtimeHours: 6,
+      holidayHours: 8,
+      exchangeRate: 185.44,
+      additionalEarnings: 150,
+    });
+    const employer = { companyName: "ACME", tin: "TIN", nasscorpRegNo: "NSS", periodLabel: "Sep 2026" };
+    const payeBase = roundCurrency(result.regularSalary + result.overtimePay + result.holidayPay);
+    const persisted = persistStatutoryBases(result);
+    const live = lraExportRows(employer, [{
+      employee, result, usd: {
+        gross: result.grossPay, net: result.netPay, incomeTax: result.Paye.taxInBase,
+        nasscorpEe: result.nasscorp.employeeContribution, nasscorpEr: result.nasscorp.employerContribution,
+      },
+    }]);
+    const finalized = lraExportRowsFromFinalized(employer, [mapPayRunLineRowToFinalized({
+      employee_number: employee.employeeNumber,
+      full_name: employee.fullName,
+      currency: "USD",
+      gross_pay: result.grossPay,
+      additional_earnings: result.additionalEarnings,
+      income_tax: result.Paye.taxInBase,
+      nasscorp_ee: result.nasscorp.employeeContribution,
+      nasscorp_er: result.nasscorp.employerContribution,
+      net_pay: result.netPay,
+      taxable_pay: persisted.taxable_pay,
+      nasscorp_base: persisted.nasscorp_base,
+      rate: 12,
+      regular_hours: 173.33,
+    })]);
+
+    expect(result.grossPay).toBeGreaterThan(payeBase);
+    expect(payeBase).toBeGreaterThan(result.nasscorp.base);
+    expect(live[0][6]).toBe(payeBase.toFixed(2));
+    expect(finalized[0][6]).toBe(payeBase.toFixed(2));
+    expect(finalized[0][6]).toBe(live[0][6]);
+    expect(finalized[0][5]).toBe(result.grossPay.toFixed(2));
+  });
+
+  it("keeps finalized NASSCORP Contribution Base on regularSalary so EE/ER stay 4%/6%", () => {
+    const employee = baseEmployee({ rate: 12, standardHours: 173.33, allowances: 150 });
+    const result = calculatePayroll({
+      employeeId: employee.id,
+      currency: "USD",
+      rate: 12,
+      regularHours: 173.33,
+      overtimeHours: 6,
+      holidayHours: 8,
+      exchangeRate: 185.44,
+      additionalEarnings: 150,
+    });
+    const employer = { companyName: "ACME", tin: "TIN", nasscorpRegNo: "NSS", periodLabel: "Sep 2026" };
+    const persisted = persistStatutoryBases(result);
+    const live = nasscorpExportRows(employer, [{
+      employee, result, usd: {
+        gross: result.grossPay, net: result.netPay, incomeTax: result.Paye.taxInBase,
+        nasscorpEe: result.nasscorp.employeeContribution, nasscorpEr: result.nasscorp.employerContribution,
+      },
+    }]);
+    const fallback = nasscorpExportRowsFromFinalized(employer, [mapPayRunLineRowToFinalized({
+      employee_number: employee.employeeNumber,
+      full_name: employee.fullName,
+      currency: "USD",
+      gross_pay: result.grossPay,
+      additional_earnings: result.additionalEarnings,
+      income_tax: result.Paye.taxInBase,
+      nasscorp_ee: result.nasscorp.employeeContribution,
+      nasscorp_er: result.nasscorp.employerContribution,
+      net_pay: result.netPay,
+      rate: 12,
+      regular_hours: 173.33,
+    })]);
+    const persistedRows = nasscorpExportRowsFromFinalized(employer, [mapPayRunLineRowToFinalized({
+      employee_number: employee.employeeNumber,
+      full_name: employee.fullName,
+      currency: "USD",
+      gross_pay: result.grossPay,
+      additional_earnings: result.additionalEarnings,
+      income_tax: result.Paye.taxInBase,
+      nasscorp_ee: result.nasscorp.employeeContribution,
+      nasscorp_er: result.nasscorp.employerContribution,
+      net_pay: result.netPay,
+      taxable_pay: persisted.taxable_pay,
+      nasscorp_base: persisted.nasscorp_base,
+      rate: 12,
+      regular_hours: 173.33,
+    })]);
+    const reportedBase = Number(persistedRows[0][8]);
+
+    expect(reportedBase).toBe(result.regularSalary);
+    expect(reportedBase).not.toBe(result.grossPay);
+    expect(live[0][8]).toBe(persistedRows[0][8]);
+    expect(fallback[0][8]).toBe(persistedRows[0][8]);
+    expect(result.nasscorp.employeeContribution).toBe(roundCurrency(reportedBase * 0.04));
+    expect(result.nasscorp.employerContribution).toBe(roundCurrency(reportedBase * 0.06));
   });
 });
 
