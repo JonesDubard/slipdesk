@@ -1675,6 +1675,17 @@ import { genderLabel } from "@/lib/employee-gender";
 import { parseEmployeeSpreadsheet, type ParsedEmployeeRow } from "@/lib/csv/parse-employee-csv";
 import { isSpreadsheetFilename, SPREADSHEET_ACCEPT } from "@/lib/csv/read-spreadsheet";
 import { classifyEmployeeImport } from "@/lib/csv/match-employee";
+import {
+  applyCsvBranches,
+  applyEnsuredBranch,
+  createOrgBranchApi,
+  ensureOrgBranchesForImport,
+} from "@/lib/csv/resolve-branch";
+import {
+  UNASSIGNED_BRANCH_FILTER,
+  employeeMatchesBranchFilter,
+  syncBranchAssignment,
+} from "@/lib/org/employee-branch";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 const DEPARTMENTS = ["All", "Operations", "Finance", "Engineering", "Sales", "Human Resources"];
@@ -1722,7 +1733,7 @@ const EMPTY_FORM: Omit<Employee, "id" | "employeeNumber" | "fullName" | "isArchi
   standardHours: 173.33, isActive: true, nasscorpNumber: "",
   allowances: 0, paymentMethod: "bank_transfer",
   bankName: "", accountNumber: "", momoNumber: "",
-  branch: "", position: "", taxId: "", employmentStatus: "active", bankBranch: "",
+  branch: "", branchId: null, position: "", taxId: "", employmentStatus: "active", bankBranch: "",
   portalEnabled: false, gender: "",
 };
 
@@ -1974,11 +1985,12 @@ function Sel({ value, onChange, children }: {
 
 type DrawerTab = "basic" | "pay" | "payment";
 
-function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
+function EmployeeDrawer({ employee, onClose, onSave, allowLRD, orgBranches = [] }: {
   employee?: Employee;
   onClose: () => void;
   onSave: (data: Omit<Employee, "id" | "fullName" | "isArchived">) => Promise<void>;
   allowLRD?: boolean;
+  orgBranches?: { id: string; name: string }[];
 }) {
   const isEdit = !!employee;
   const [form, setForm] = useState<Omit<Employee, "id" | "fullName" | "isArchived">>(
@@ -1993,7 +2005,7 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
       nasscorpNumber: employee.nasscorpNumber, allowances: employee.allowances,
       paymentMethod: employee.paymentMethod, bankName: employee.bankName,
       accountNumber: employee.accountNumber, momoNumber: employee.momoNumber,
-      branch: employee.branch ?? "", position: employee.position ?? "",
+      branch: employee.branch ?? "", branchId: employee.branchId ?? null, position: employee.position ?? "",
       taxId: employee.taxId ?? "", employmentStatus: employee.employmentStatus ?? "active",
       bankBranch: employee.bankBranch ?? "",
       portalEnabled: employee.portalEnabled ?? false,
@@ -2011,7 +2023,14 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
   async function submit() {
     if (!valid) return;
     setSaving(true);
-    try { await onSave(form); onClose(); }
+    try {
+      const synced = syncBranchAssignment(
+        { branchId: form.branchId, branch: form.branch },
+        orgBranches,
+      );
+      await onSave({ ...form, branchId: synced.branchId, branch: synced.branch });
+      onClose();
+    }
     finally { setSaving(false); }
   }
 
@@ -2112,7 +2131,32 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD }: {
                 </Field>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                <Field label="Branch"><Inp value={form.branch ?? ""} onChange={(v) => set("branch", v)} placeholder="Head Office"/></Field>
+                <Field label="Branch">
+                  <Sel
+                    value={
+                      form.branchId
+                      ?? orgBranches.find((b) => b.name.trim().toLowerCase() === (form.branch ?? "").trim().toLowerCase())?.id
+                      ?? ""
+                    }
+                    onChange={(v) => {
+                      if (!v) {
+                        setForm((p) => ({ ...p, branchId: null, branch: "" }));
+                        return;
+                      }
+                      const found = orgBranches.find((b) => b.id === v);
+                      setForm((p) => ({
+                        ...p,
+                        branchId: found?.id ?? v,
+                        branch: found?.name ?? p.branch ?? "",
+                      }));
+                    }}
+                  >
+                    <option value="">Unassigned</option>
+                    {orgBranches.map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </Sel>
+                </Field>
                 <Field label="Employment Status">
                   <Sel value={form.employmentStatus ?? "active"} onChange={(v) => set("employmentStatus", v)}>
                     <option value="active">Active</option>
@@ -2395,7 +2439,27 @@ function CSVUploadModal({ onClose, onImport }: {
   const [parsed,    setParsed]    = useState<ParsedEmployeeRow[] | null>(null);
   const [importing, setImporting] = useState(false);
   const [result,    setResult]    = useState<ImportResult | null>(null);
+  const [registeredBranches, setRegisteredBranches] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/org/units?kind=branches")
+      .then((res) => res.json().catch(() => ({})))
+      .then((data: { items?: { name: string }[] }) => {
+        if (cancelled) return;
+        const names = (data.items ?? []).map((i) => i.name).filter(Boolean);
+        setRegisteredBranches(names);
+      })
+      .catch(() => {
+        /* empty registry: unknown names are still accepted and auto-created on import */
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const applyBranches = useCallback((rows: ParsedEmployeeRow[], names: string[]) => {
+    return applyCsvBranches(rows, names).rows;
+  }, []);
 
   const handleFile = useCallback((file: File) => {
     if (!isSpreadsheetFilename(file.name)) {
@@ -2409,13 +2473,19 @@ function CSVUploadModal({ onClose, onImport }: {
         toast.error("Could not read that file.");
         return;
       }
-      const { rows, error } = parseEmployeeSpreadsheet(buf, file.name);
+      const { rows, error } = parseEmployeeSpreadsheet(buf, file.name, {
+        registeredBranches,
+      });
       if (error && rows.length === 0) toast.error(error);
-      setParsed(rows);
+      setParsed(applyBranches(rows, registeredBranches));
       setResult(null);
     };
     reader.readAsArrayBuffer(file);
-  }, [toast]);
+  }, [toast, registeredBranches, applyBranches]);
+
+  useEffect(() => {
+    setParsed((prev) => (prev ? applyCsvBranches(prev, registeredBranches).rows : prev));
+  }, [registeredBranches]);
 
   const validRows = parsed?.filter((r) => r.errors.length === 0) ?? [];
   const errRows   = parsed?.filter((r) => r.errors.length > 0)   ?? [];
@@ -2863,6 +2933,19 @@ export default function EmployeesPage() {
   const [selected,      setSelected]      = useState<Set<string>>(new Set());
   const [pendingDelete, setPendingDelete] = useState<{ ids: string[]; label: string } | null>(null);
   const [deleteBusy,    setDeleteBusy]    = useState(false);
+  const [orgBranches,   setOrgBranches]   = useState<{ id: string; name: string }[]>([]);
+
+  const loadOrgBranches = useCallback(async () => {
+    try {
+      const res = await fetch("/api/org/units?kind=branches");
+      const data = await res.json().catch(() => ({}));
+      setOrgBranches((data.items ?? []) as { id: string; name: string }[]);
+    } catch {
+      setOrgBranches([]);
+    }
+  }, []);
+
+  useEffect(() => { void loadOrgBranches(); }, [loadOrgBranches]);
 
   const allEmployees = useMemo(
     () => [...employees, ...archivedEmployees],
@@ -2873,7 +2956,7 @@ export default function EmployeesPage() {
     return employees.filter((e) => {
       if (e.isArchived !== showArchived) return false;
       if (deptFilter !== "All" && e.department !== deptFilter) return false;
-      if (branchFilter !== "All" && (e.branch ?? "") !== branchFilter) return false;
+      if (branchFilter !== "All" && !employeeMatchesBranchFilter(e, branchFilter, orgBranches)) return false;
       if (genderFilter !== "All" && (e.gender ?? "") !== genderFilter) return false;
       const q = search.toLowerCase();
       if (!q) return true;
@@ -2887,11 +2970,15 @@ export default function EmployeesPage() {
         e.employeeNumber.toLowerCase().includes(q)
       );
     });
-  }, [employees, showArchived, deptFilter, branchFilter, genderFilter, search]);
+  }, [employees, showArchived, deptFilter, branchFilter, genderFilter, search, orgBranches]);
 
   const branchOptions = useMemo(
-    () => ["All", ...Array.from(new Set(employees.map((e) => e.branch).filter(Boolean))) as string[]],
-    [employees],
+    () => [
+      { value: "All", label: "All Branches" },
+      { value: UNASSIGNED_BRANCH_FILTER, label: "Unassigned" },
+      ...orgBranches.map((b) => ({ value: b.id, label: b.name })),
+    ],
+    [orgBranches],
   );
 
   const stats = useMemo(() => ({
@@ -2910,6 +2997,22 @@ export default function EmployeesPage() {
     if (!guardAction("import_employees")) {
       return { imported: 0, updated: 0, skipped: [{ rowNum: 0, name: "Import", reasons: ["Demo read-only"] }] };
     }
+
+    const ensured = await ensureOrgBranchesForImport(
+      rows.map((r) => r.branch),
+      createOrgBranchApi(),
+    );
+    if (!ensured.ok) {
+      toast.error(ensured.error);
+      return {
+        imported: 0,
+        updated: 0,
+        skipped: [{ rowNum: 0, name: "Branches", reasons: [ensured.error] }],
+      };
+    }
+
+    const resolvedRows = rows.map((row) => applyEnsuredBranch(row, ensured));
+
     const roster = [...allEmployees];
     const usedNumbers = new Set(
       roster.map((e) => (e.employeeNumber ?? "").trim().toLowerCase()).filter(Boolean),
@@ -2931,8 +3034,8 @@ export default function EmployeesPage() {
     let updated = 0;
     const skipped: ImportResult["skipped"] = [];
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
+    for (let i = 0; i < resolvedRows.length; i++) {
+      const row = resolvedRows[i];
       const csvNum = (row.employeeNumber ?? "").trim();
       const name = [row.firstName, row.middleName, row.lastName].filter(Boolean).join(" ");
       const classified = classifyEmployeeImport(roster, csvNum);
@@ -2983,6 +3086,7 @@ export default function EmployeesPage() {
     }
 
     await refreshEmployees();
+    await loadOrgBranches();
 
     const saved = imported + updated;
     const parts: string[] = [];
@@ -3293,7 +3397,7 @@ export default function EmployeesPage() {
               outline: "none", cursor: "pointer", appearance: "none",
             }}
           >
-            {branchOptions.map((d) => <option key={d} value={d}>{d === "All" ? "All Branches" : d}</option>)}
+            {branchOptions.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
           </select>
           <ChevronDown size={13} color="var(--muted-foreground)" style={{ position: "absolute", right: 10, pointerEvents: "none" }}/>
         </div>
@@ -3483,6 +3587,7 @@ export default function EmployeesPage() {
           onClose={() => setShowDrawer(false)}
           onSave={handleSaveEmployee}
           allowLRD={allowLRD}
+          orgBranches={orgBranches}
         />
       )}
       {showUpload && (

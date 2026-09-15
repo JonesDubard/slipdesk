@@ -5,6 +5,14 @@ import { describe, expect, it } from "vitest";
 import { parseCSVLine, parseDateToISO } from "@/lib/csv/parse-csv-line";
 import { parsePayrollCSV, parsePayrollSpreadsheet, type BulkRow } from "@/lib/csv/parse-payroll-csv";
 import { parseEmployeeCSV, parseEmployeeSpreadsheet, normalizePaymentMethod } from "@/lib/csv/parse-employee-csv";
+import {
+  applyCsvBranches,
+  canonicalizeBranch,
+  collectUnknownBranches,
+  ensureOrgBranchesForImport,
+  findRegisteredBranch,
+  unregisteredBranchMessage,
+} from "@/lib/csv/resolve-branch";
 import * as XLSX from "xlsx";
 import { deleteAtIndexes, deleteByIds } from "@/lib/csv/record-ops";
 import { classifyEmployeeImport, findEmployeeByNumber } from "@/lib/csv/match-employee";
@@ -212,6 +220,17 @@ describe("employees CSV parser — same fixture", () => {
     expect(parsed[0].data.startDate).toBe("2026-05-25");
     expect(parsed[0].data.pendingRegularHours).toBe(48);
     expect(parsed[2].data.pendingOvertimeHours).toBe(138);
+  });
+
+  it("does not reject Bangli when the org branch list is empty", () => {
+    const parsed = parseEmployeeCSV(FIXTURE, { registeredBranches: [] });
+    expect(parsed).toHaveLength(32);
+    expect(parsed.every((r) => r.errors.length === 0)).toBe(true);
+    expect(parsed.every((r) => !r.errors.some((e) => /is not registered/i.test(e)))).toBe(true);
+    const applied = applyCsvBranches(parsed, []);
+    expect(applied.rows.every((r) => r.errors.length === 0)).toBe(true);
+    expect(applied.unknownBranches).toEqual(["Bangli"]);
+    expect(applied.rows[0].data.branch).toBe("Bangli");
   });
 
   it("returns [] for empty / header-only files (no error object)", () => {
@@ -475,5 +494,84 @@ describe("payrun calculations on truck-driver CSV", () => {
     expect(summary.totalGross).toBeGreaterThan(0);
     expect(summary.totalNetPay).toBeLessThan(summary.totalGross);
     expect(summary.totalEmployeeNasscorp).toBeGreaterThan(0);
+  });
+});
+
+describe("CSV bulk import — unregistered branches", () => {
+  it("matches registered names case-insensitively and leaves blanks unassigned", () => {
+    expect(findRegisteredBranch("bangli", ["Bangli"])).toBe("Bangli");
+    expect(canonicalizeBranch("BANGLI", ["Bangli"])).toBe("Bangli");
+    expect(canonicalizeBranch("  ", ["Bangli"])).toBe("");
+    expect(canonicalizeBranch("Buchanan", ["Bangli"])).toBe("Buchanan");
+    expect(collectUnknownBranches(["Bangli", "bangli", "", "  "], [])).toEqual(["Bangli"]);
+    expect(collectUnknownBranches(["Bangli"], ["BANGLI"])).toEqual([]);
+  });
+
+  it("strips per-row unregistered errors so empty org list does not fail every row", () => {
+    const parsed = parseEmployeeCSV(FIXTURE, { registeredBranches: [] });
+    const poisoned = parsed.map((r) => ({
+      ...r,
+      errors: [...r.errors, unregisteredBranchMessage("Bangli")],
+    }));
+    const applied = applyCsvBranches(poisoned, []);
+    expect(applied.rows).toHaveLength(32);
+    expect(applied.rows.every((r) => r.errors.length === 0)).toBe(true);
+    expect(applied.unknownBranches).toEqual(["Bangli"]);
+  });
+
+  it("auto-creates a missing branch once instead of failing the import", async () => {
+    const created: string[] = [];
+    const result = await ensureOrgBranchesForImport(
+      parseEmployeeCSV(FIXTURE).map((r) => r.data.branch),
+      {
+        list: async () => ({ status: 200, items: [] }),
+        create: async (name) => {
+          created.push(name);
+          return { status: 200, item: { name } };
+        },
+      },
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.created).toEqual(["Bangli"]);
+      expect(result.registered).toEqual(["Bangli"]);
+      expect(result.branches).toEqual([]);
+    }
+    expect(created).toEqual(["Bangli"]);
+  });
+
+  it("returns one fatal error for demo/no-company instead of 32 row errors", async () => {
+    const result = await ensureOrgBranchesForImport(
+      ["Bangli", "Bangli", "bangli"],
+      {
+        list: async () => ({
+          status: 403,
+          code: "DEMO_READONLY",
+          error: "This is a read-only demo. Purchase a plan or book a live demo to make changes.",
+        }),
+        create: async () => {
+          throw new Error("create should not run");
+        },
+      },
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/Bangli/);
+      expect(result.error).toMatch(/read-only demo/i);
+      expect(result.error.split("Bangli").length - 1).toBe(1);
+    }
+  });
+
+  it("accepts the CSV name when branch management requires an upgrade", async () => {
+    const result = await ensureOrgBranchesForImport(["Bangli"], {
+      list: async () => ({ status: 403, error: "Upgrade required", items: [] }),
+      create: async () => ({ status: 403, error: "Upgrade required" }),
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.created).toEqual([]);
+      expect(result.registered).toEqual(["Bangli"]);
+      expect(result.branches).toEqual([]);
+    }
   });
 });

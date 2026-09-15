@@ -14,6 +14,10 @@ import { createNotification } from "@/lib/notifications";
 import { DemoReadonlyError } from "@/lib/demo/errors";
 import type { DemoFeatureName } from "@/lib/demo/constants";
 import { formatEmployeeFullName } from "@/lib/employee-name";
+import {
+  resolveEmployeeBranchWrite,
+  type NamedCompanyBranch,
+} from "@/lib/org/employee-branch";
 
 function blockIfDemo(isDemo: boolean, feature: DemoFeatureName) {
   if (!isDemo) return;
@@ -61,6 +65,8 @@ export interface Employee {
   // ── Extended profile (migration 0001) ── optional so existing call sites
   //    that build Employee objects continue to compile unchanged.
   branch?:            string;
+  /** FK to Organization branch. NULL / omitted = Unassigned. */
+  branchId?:          string | null;
   position?:          string;
   taxId?:             string;
   employmentStatus?:  string;
@@ -147,6 +153,7 @@ function dbToEmployee(row: DbEmployee): Employee {
     isActive:       row.is_active,
     isArchived:     row.is_archived,
     branch:            row.branch ?? "",
+    branchId:          row.branch_id ?? null,
     position:          row.position ?? "",
     taxId:             row.tax_id ?? "",
     employmentStatus:  row.employment_status ?? "active",
@@ -210,6 +217,30 @@ const AppContext = createContext<AppState | null>(null);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(supabase: ReturnType<typeof createClient>): any { return supabase as any; }
+
+function mapNamedBranch(row: { id: string; name: string; company_id: string }): NamedCompanyBranch {
+  return { id: row.id, companyId: row.company_id, name: row.name };
+}
+
+function companyBranchLookup(supabase: ReturnType<typeof createClient>) {
+  return {
+    async getById(id: string): Promise<NamedCompanyBranch | null> {
+      const { data } = await db(supabase)
+        .from("branches")
+        .select("id, name, company_id")
+        .eq("id", id)
+        .maybeSingle();
+      return data ? mapNamedBranch(data) : null;
+    },
+    async listByCompany(companyId: string): Promise<NamedCompanyBranch[]> {
+      const { data } = await db(supabase)
+        .from("branches")
+        .select("id, name, company_id")
+        .eq("company_id", companyId);
+      return (data ?? []).map(mapNamedBranch);
+    },
+  };
+}
 
 /** Resolve the active company for an authenticated user (owner, profile link, or team member). */
 async function resolveCompanyForUser(
@@ -585,6 +616,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...(data.portalEnabled    !== undefined && { portal_enabled:    data.portalEnabled    }),
     };
 
+    const branchWrite = await resolveEmployeeBranchWrite(
+      coId,
+      { branchId: data.branchId, branch: data.branch },
+      companyBranchLookup(supabase),
+    );
+    Object.assign(extended, branchWrite);
+
     let res = await db(supabase).from("employees").insert({ ...baseInsert, ...extended }).select().single();
     if (res.error && Object.keys(extended).length > 0) {
       res = await db(supabase).from("employees").insert(baseInsert).select().single();
@@ -641,6 +679,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...(data.dateTerminated   !== undefined && { date_terminated:   data.dateTerminated || null }),
       ...(data.portalEnabled    !== undefined && { portal_enabled:    data.portalEnabled    }),
     };
+
+    if (data.branchId !== undefined || data.branch !== undefined) {
+      const branchWrite = await resolveEmployeeBranchWrite(
+        company.id,
+        { branchId: data.branchId, branch: data.branch },
+        companyBranchLookup(supabase),
+      );
+      Object.assign(extended, branchWrite);
+    }
 
     let res = await db(supabase).from("employees").update({ ...baseUpdate, ...extended }).eq("id", id).select().single();
     if (res.error && Object.keys(extended).length > 0) {

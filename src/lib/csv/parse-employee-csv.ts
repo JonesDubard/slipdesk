@@ -3,10 +3,16 @@ import { normalizeGender } from "@/lib/employee-gender";
 import { parseDateToISO, parseMoney } from "@/lib/csv/parse-csv-line";
 import { rowToRecord } from "@/lib/csv/normalize-headers";
 import { parseTextTable, readSpreadsheet, type SpreadsheetTable } from "@/lib/csv/read-spreadsheet";
+import { canonicalizeBranch, stripUnregisteredBranchErrors } from "@/lib/csv/resolve-branch";
 
 export interface ParsedEmployeeRow {
   data: Partial<Employee>;
   errors: string[];
+}
+
+export interface ParseEmployeeCsvOptions {
+  /** Existing Organization branch names. Unknown names are kept, not rejected. */
+  registeredBranches?: string[];
 }
 
 const VALID_PAYMENT_METHODS: PaymentMethod[] = ["bank_transfer", "mtn_momo", "orange_money", "cash"];
@@ -47,8 +53,12 @@ export function normalizePaymentMethod(raw: string | undefined | null): {
   return { value: mapped };
 }
 
-function parseEmployeeTable(table: SpreadsheetTable): { rows: ParsedEmployeeRow[]; error?: string } {
+function parseEmployeeTable(
+  table: SpreadsheetTable,
+  options?: ParseEmployeeCsvOptions,
+): { rows: ParsedEmployeeRow[]; error?: string } {
   if (table.error && table.rows.length === 0) return { rows: [], error: table.error };
+  const registered = options?.registeredBranches ?? [];
   const results: ParsedEmployeeRow[] = [];
 
   for (const vals of table.rows) {
@@ -95,7 +105,7 @@ function parseEmployeeTable(table: SpreadsheetTable): { rows: ParsedEmployeeRow[
     ) as EmploymentType;
 
     results.push({
-      errors,
+      errors: stripUnregisteredBranchErrors(errors),
       data: {
         employeeNumber: (raw.employee_number || "").trim(),
         firstName,
@@ -104,7 +114,7 @@ function parseEmployeeTable(table: SpreadsheetTable): { rows: ParsedEmployeeRow[
         gender: genderParsed.value,
         jobTitle: raw.job_title || "",
         department: raw.department || "Operations",
-        branch: raw.branch || "",
+        branch: canonicalizeBranch(raw.branch, registered),
         email: raw.email || "",
         phone: raw.phone || "",
         county: raw.county || "Montserrado",
@@ -136,13 +146,14 @@ function parseEmployeeTable(table: SpreadsheetTable): { rows: ParsedEmployeeRow[
   return { rows: results, error: table.error };
 }
 
-export function parseEmployeeCSV(text: string): ParsedEmployeeRow[] {
-  return parseEmployeeTable(parseTextTable(text)).rows;
+export function parseEmployeeCSV(text: string, options?: ParseEmployeeCsvOptions): ParsedEmployeeRow[] {
+  return parseEmployeeTable(parseTextTable(text), options).rows;
 }
 
 export function parseEmployeeSpreadsheet(
   buffer: ArrayBuffer,
   filename?: string,
+  options?: ParseEmployeeCsvOptions,
 ): { rows: ParsedEmployeeRow[]; error?: string } {
-  return parseEmployeeTable(readSpreadsheet(buffer, filename));
+  return parseEmployeeTable(readSpreadsheet(buffer, filename), options);
 }

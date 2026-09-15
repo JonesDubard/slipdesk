@@ -253,7 +253,7 @@ function UnitPanel({
       )}
       {kind === "branches" && items.length > 0 && (
         <p style={{ margin: "12px 0 0", fontSize: 11, color: "var(--muted-foreground)", lineHeight: 1.5 }}>
-          Next: on <strong style={{ color: "var(--foreground)" }}>Employees</strong>, set each person&apos;s Branch field to match a name here.
+          Next: on <strong style={{ color: "var(--foreground)" }}>Employees</strong>, assign each person to a branch (Unassigned is allowed).
           On <strong style={{ color: "var(--foreground)" }}>Payroll</strong>, choose a branch scope when starting a run.
         </p>
       )}
@@ -262,7 +262,7 @@ function UnitPanel({
 }
 
 function MultiBranchPanel() {
-  const [rows, setRows] = useState<{ name: string; employees: number; salaryMass: number; isHq?: boolean }[]>([]);
+  const [rows, setRows] = useState<{ id: string; name: string; employees: number; salaryMass: number; isHq?: boolean }[]>([]);
   const [unassigned, setUnassigned] = useState(0);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -295,7 +295,7 @@ function MultiBranchPanel() {
         <p style={{ fontSize: 12, color: "var(--muted-foreground)" }}>Loading…</p>
       ) : rows.length === 0 ? (
         <p style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
-          Add branches above, then set each employee&apos;s branch field to match.
+          Assign employees to a branch. Headcount and salary mass group by branch ID (Unassigned = no branch).
         </p>
       ) : (
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -308,7 +308,7 @@ function MultiBranchPanel() {
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.name}>
+              <tr key={r.id}>
                 <td style={{ padding: "8px 6px", borderBottom: "1px solid var(--border)" }}>
                   {r.name}{r.isHq ? " (HQ)" : ""}
                 </td>

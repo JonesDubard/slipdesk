@@ -19,16 +19,22 @@ export function employeeMatchesBranchName(employee: Employee, branchName: string
   return (employee.branch ?? "").trim().toLowerCase() === branchName.trim().toLowerCase();
 }
 
-/** When branchName is null, returns all active employees (org-wide). */
+/** When branchName and branchId are both empty, returns all active employees (org-wide). */
 export function filterEmployeesForBranchScope(
   employees: Employee[],
   branchName: string | null,
-  opts: { activeOnly?: boolean } = { activeOnly: true },
+  opts: { activeOnly?: boolean; branchId?: string | null } = { activeOnly: true },
 ): Employee[] {
   let list = employees;
-  if (opts.activeOnly) list = list.filter((e) => e.isActive && !e.isArchived);
-  if (!branchName) return list;
-  return list.filter((e) => employeeMatchesBranchName(e, branchName));
+  if (opts.activeOnly !== false) list = list.filter((e) => e.isActive && !e.isArchived);
+  if (!opts.branchId && !branchName) return list;
+  return list.filter((e) => {
+    if (opts.branchId) {
+      if (e.branchId) return e.branchId === opts.branchId;
+      return branchName ? employeeMatchesBranchName(e, branchName) : false;
+    }
+    return employeeMatchesBranchName(e, branchName!);
+  });
 }
 
 export async function resolveBranchForCompany(

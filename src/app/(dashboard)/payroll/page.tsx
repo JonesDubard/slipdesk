@@ -17,6 +17,11 @@ import {
 import type { PayRunLine } from "@/lib/mock-data";
 import BulkUpload, { type BulkRow } from "@/components/BulkUpload";
 import { findEmployeeByNumber } from "@/lib/csv/match-employee";
+import {
+  applyEnsuredBranch,
+  createOrgBranchApi,
+  ensureOrgBranchesForImport,
+} from "@/lib/csv/resolve-branch";
 import { gridReducer, recalcLine, type GridAction } from "@/lib/payroll/grid-reducer";
 import { useApp } from "@/context/AppContext";
 import PageSkeleton from "@/components/PageSkeleton";
@@ -857,7 +862,7 @@ export default function PayrollPage() {
   useEffect(() => {
     void fetch("/api/org/units?kind=branches")
       .then((r) => r.json())
-      .then((d) => setBranches(d.units ?? []))
+      .then((d) => setBranches(d.items ?? []))
       .catch(() => setBranches([]));
   }, []);
 
@@ -895,8 +900,8 @@ export default function PayrollPage() {
   }, [draftLoaded, initializing]);
 
   const scopedEmployees = useMemo(
-    () => filterEmployeesForBranchScope(employees, branchName),
-    [employees, branchName],
+    () => filterEmployeesForBranchScope(employees, branchName, { branchId }),
+    [employees, branchName, branchId],
   );
 
   const displayLines = useMemo(
@@ -1261,12 +1266,26 @@ export default function PayrollPage() {
   }
 
   async function handleBulkImport(bulkRows: BulkRow[]) {
+    const ensured = await ensureOrgBranchesForImport(
+      bulkRows.map((r) => r.employee.branch),
+      createOrgBranchApi(),
+    );
+    if (!ensured.ok) {
+      toast.error(ensured.error);
+      return;
+    }
+
+    const resolvedRows = bulkRows.map((r) => ({
+      ...r,
+      employee: applyEnsuredBranch(r.employee, ensured),
+    }));
+
     const roster = [...employees, ...archivedEmployees];
     const payRunLines: PayRunLine[] = [];
     let created = 0;
     let matched = 0;
 
-    for (const r of bulkRows) {
+    for (const r of resolvedRows) {
       const existing = findEmployeeByNumber(roster, r.employee.employeeNumber);
       try {
         if (existing) {

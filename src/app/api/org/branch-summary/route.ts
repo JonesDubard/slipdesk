@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
 import { resolveCompanyIdForUser } from "@/lib/payments/server";
 import type { SubscriptionTier } from "@/context/AppContext";
+import { aggregateByBranchId } from "@/lib/org/employee-branch";
 
 /**
  * GET /api/org/branch-summary
@@ -43,40 +44,34 @@ export async function GET() {
 
   const { data: employees } = await db
     .from("employees")
-    .select("id, branch, department, is_active, is_archived, basic_salary, rate")
+    .select("id, branch_id, branch, department, is_active, is_archived, basic_salary, rate")
     .eq("company_id", companyId);
 
-  const active = (employees ?? []).filter(
-    (e: { is_active?: boolean; is_archived?: boolean }) => e.is_active !== false && !e.is_archived,
-  );
-
-  const summary = (branches ?? []).map((b: { id: string; name: string; code?: string; is_hq?: boolean }) => {
-    const members = active.filter(
-      (e: { branch?: string }) => (e.branch || "").trim().toLowerCase() === b.name.trim().toLowerCase(),
-    );
-    const salaryMass = members.reduce(
-      (s: number, e: { basic_salary?: number; rate?: number }) => s + (Number(e.basic_salary) || Number(e.rate) || 0),
-      0,
-    );
-    return {
+  const aggregated = aggregateByBranchId(
+    (branches ?? []).map((b: { id: string; name: string; code?: string; is_hq?: boolean }) => ({
       id: b.id,
       name: b.name,
       code: b.code ?? null,
       isHq: Boolean(b.is_hq),
-      employees: members.length,
-      salaryMass,
-    };
-  });
-
-  const unassigned = active.filter((e: { branch?: string }) => {
-    const name = (e.branch || "").trim().toLowerCase();
-    if (!name) return true;
-    return !(branches ?? []).some((b: { name: string }) => b.name.trim().toLowerCase() === name);
-  }).length;
+    })),
+    (employees ?? []).map((e: {
+      branch_id?: string | null;
+      is_active?: boolean;
+      is_archived?: boolean;
+      basic_salary?: number;
+      rate?: number;
+    }) => ({
+      branchId: e.branch_id ?? null,
+      isActive: e.is_active,
+      isArchived: e.is_archived,
+      basicSalary: e.basic_salary,
+      rate: e.rate,
+    })),
+  );
 
   return NextResponse.json({
-    branches: summary,
-    unassigned,
-    totalActive: active.length,
+    branches: aggregated.branches,
+    unassigned: aggregated.unassigned,
+    totalActive: aggregated.totalActive,
   });
 }

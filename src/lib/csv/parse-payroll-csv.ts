@@ -5,6 +5,11 @@ import { parseDateToISO, parseMoney } from "@/lib/csv/parse-csv-line";
 import { normalizePaymentMethod } from "@/lib/csv/parse-employee-csv";
 import { rowToRecord } from "@/lib/csv/normalize-headers";
 import { parseTextTable, readSpreadsheet, type SpreadsheetTable } from "@/lib/csv/read-spreadsheet";
+import { canonicalizeBranch, stripUnregisteredBranchErrors } from "@/lib/csv/resolve-branch";
+
+export interface ParsePayrollCsvOptions {
+  registeredBranches?: string[];
+}
 
 export interface BulkRow {
   employee: Omit<Employee, "id" | "fullName">;
@@ -43,6 +48,7 @@ export function parsePayrollRow(
   raw: Record<string, string>,
   lineNum: number,
   dedColumns: string[],
+  options?: ParsePayrollCsvOptions,
 ): { row: BulkRow | null; error: string | null } {
   const firstName = raw.first_name?.trim();
   const middleName = raw.middle_name?.trim() || raw.middlename?.trim() || "";
@@ -78,7 +84,7 @@ export function parsePayrollRow(
     gender: genderParsed.value,
     jobTitle: raw.job_title?.trim() || "",
     department: raw.department?.trim() || "",
-    branch: raw.branch?.trim() || "",
+    branch: canonicalizeBranch(raw.branch, options?.registeredBranches ?? []),
     email: raw.email?.trim() || "",
     phone: raw.phone?.trim() || "",
     county: raw.county?.trim() || "",
@@ -127,7 +133,10 @@ export function parsePayrollRow(
   };
 }
 
-function parsePayrollTable(table: SpreadsheetTable): { rows: BulkRow[]; errors: string[] } {
+function parsePayrollTable(
+  table: SpreadsheetTable,
+  options?: ParsePayrollCsvOptions,
+): { rows: BulkRow[]; errors: string[] } {
   if (table.error && table.rows.length === 0) {
     return { rows: [], errors: [table.error] };
   }
@@ -139,21 +148,25 @@ function parsePayrollTable(table: SpreadsheetTable): { rows: BulkRow[]; errors: 
   table.rows.forEach((values, idx) => {
     if (!values.some((v) => String(v ?? "").trim())) return;
     const raw = rowToRecord(table.headers, values.map((v) => String(v ?? "")));
-    const { row, error } = parsePayrollRow(raw, idx + 2, dedColumns);
+    const { row, error } = parsePayrollRow(raw, idx + 2, dedColumns, options);
     if (error) errors.push(error);
     else if (row) rows.push(row);
   });
 
-  return { rows, errors };
+  return { rows, errors: stripUnregisteredBranchErrors(errors) };
 }
 
-export function parsePayrollCSV(text: string): { rows: BulkRow[]; errors: string[] } {
-  return parsePayrollTable(parseTextTable(text));
+export function parsePayrollCSV(
+  text: string,
+  options?: ParsePayrollCsvOptions,
+): { rows: BulkRow[]; errors: string[] } {
+  return parsePayrollTable(parseTextTable(text), options);
 }
 
 export function parsePayrollSpreadsheet(
   buffer: ArrayBuffer,
   filename?: string,
+  options?: ParsePayrollCsvOptions,
 ): { rows: BulkRow[]; errors: string[] } {
-  return parsePayrollTable(readSpreadsheet(buffer, filename));
+  return parsePayrollTable(readSpreadsheet(buffer, filename), options);
 }
