@@ -6,6 +6,8 @@ import { parseEmployeeCSV } from "@/lib/csv/parse-employee-csv";
 import {
   applyEnsuredBranch,
   ensureOrgBranchesForImport,
+  previewEmployeeCsvRows,
+  unregisteredBranchMessage,
 } from "@/lib/csv/resolve-branch";
 import {
   UNASSIGNED_BRANCH_FILTER,
@@ -92,6 +94,27 @@ describe("backfill matching helper", () => {
 });
 
 describe("CSV import attaches branch_id", () => {
+  it("preview of template Sinkor/Paynesville rows has no unregistered-branch errors", () => {
+    const csv = `employee_number,first_name,middle_name,last_name,gender,job_title,department,branch,email,phone,county,start_date,employment_type,currency,rate,standard_hours,allowances,nasscorp_number,payment_method,bank_name,account_number,momo_number,regular_hours,overtime_hours,holiday_hours,ded_pay_advance,ded_food,ded_transportation,ded_loan_repayment,ded_other
+EMP-001,Moses,James,Kollie,male,Operations Manager,Operations,Sinkor,m.kollie@co.lr,+231770000001,Montserrado,2023-01-15,full_time,USD,8.50,173.33,0,NSC-001-2024,bank_transfer,Ecobank Liberia,1234567890,,173.33,0,0,100,30,20,0,0
+EMP-002,Fanta,,Kamara,female,Finance Officer,Finance,Paynesville,f.kamara@co.lr,+231770000002,Montserrado,2023-03-01,full_time,LRD,1500,173.33,50000,NSC-002-2024,mtn_momo,,,0770000002,173.33,0,8,0,0,0,250,0`;
+    const parsed = parseEmployeeCSV(csv, { registeredBranches: [] });
+    expect(parsed).toHaveLength(2);
+    expect(parsed.every((r) => r.errors.length === 0)).toBe(true);
+    expect(parsed.every((r) => !r.errors.some((e) => /is not registered/i.test(e)))).toBe(true);
+    expect(parsed[0].data.branch).toBe("Sinkor");
+    expect(parsed[1].data.branch).toBe("Paynesville");
+    const preview = previewEmployeeCsvRows(
+      parsed.map((r) => ({
+        ...r,
+        errors: [...r.errors, unregisteredBranchMessage(r.data.branch ?? "")],
+      })),
+    );
+    expect(preview.every((r) => r.errors.length === 0)).toBe(true);
+    expect(preview[0].data.branch).toBe("Sinkor");
+    expect(preview[1].data.branch).toBe("Paynesville");
+  });
+
   it("creates unknown Bangli and assigns that id; blank stays Unassigned", async () => {
     const created: string[] = [];
     const store: { id: string; name: string }[] = [];

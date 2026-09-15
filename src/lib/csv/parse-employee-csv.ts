@@ -80,6 +80,8 @@ function parseEmployeeTable(
     if (currencyRaw && currency !== "USD" && currency !== "LRD") {
       errors.push(`Invalid currency "${currencyRaw}". Use USD or LRD.`);
     }
+    // Unknown branch names (Sinkor, Paynesville, Bangli, …) are valid.
+    // Auto-create + branch_id happen on Import — never unregisteredBranchMessage here.
 
     const genderParsed = normalizeGender(raw.gender);
     if (genderParsed.error) errors.push(genderParsed.error);

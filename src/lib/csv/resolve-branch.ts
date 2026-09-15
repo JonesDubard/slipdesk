@@ -75,6 +75,16 @@ export function applyCsvBranches<T extends { data: { branch?: string }; errors: 
   };
 }
 
+/**
+ * Preview must not compare CSV names to Organization. Unknown names are valid
+ * and auto-created on Import; blank stays Unassigned.
+ */
+export function previewEmployeeCsvRows<T extends { data: { branch?: string }; errors: string[] }>(
+  rows: T[],
+): T[] {
+  return applyCsvBranches(rows, []).rows;
+}
+
 export type OrgBranchRef = { id: string; name: string };
 
 export type BranchEnsureResponse = {

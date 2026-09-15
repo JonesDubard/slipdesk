@@ -11,6 +11,7 @@ import {
   collectUnknownBranches,
   ensureOrgBranchesForImport,
   findRegisteredBranch,
+  previewEmployeeCsvRows,
   unregisteredBranchMessage,
 } from "@/lib/csv/resolve-branch";
 import * as XLSX from "xlsx";
@@ -231,6 +232,26 @@ describe("employees CSV parser — same fixture", () => {
     expect(applied.rows.every((r) => r.errors.length === 0)).toBe(true);
     expect(applied.unknownBranches).toEqual(["Bangli"]);
     expect(applied.rows[0].data.branch).toBe("Bangli");
+  });
+
+  it("accepts template Sinkor/Paynesville rows with an empty registered list", () => {
+    const csv = `${HEADER}
+EMP-001,Moses,James,Kollie,male,Operations Manager,Operations,Sinkor,m.kollie@co.lr,+231770000001,Montserrado,2023-01-15,full_time,USD,8.50,173.33,0,NSC-001-2024,bank_transfer,Ecobank Liberia,1234567890,,173.33,0,0,100,30,20,0,0
+EMP-002,Fanta,,Kamara,female,Finance Officer,Finance,Paynesville,f.kamara@co.lr,+231770000002,Montserrado,2023-03-01,full_time,LRD,1500,173.33,50000,NSC-002-2024,mtn_momo,,,0770000002,173.33,0,8,0,0,0,250,0`;
+    const parsed = parseEmployeeCSV(csv, { registeredBranches: [] });
+    expect(parsed).toHaveLength(2);
+    expect(parsed.every((r) => r.errors.length === 0)).toBe(true);
+    expect(parsed.every((r) => !r.errors.some((e) => /is not registered/i.test(e)))).toBe(true);
+    expect(parsed[0].data.branch).toBe("Sinkor");
+    expect(parsed[1].data.branch).toBe("Paynesville");
+    const preview = previewEmployeeCsvRows(parsed);
+    expect(preview.every((r) => r.errors.length === 0)).toBe(true);
+    expect(previewEmployeeCsvRows(
+      parsed.map((r) => ({
+        ...r,
+        errors: [...r.errors, unregisteredBranchMessage(r.data.branch ?? "")],
+      })),
+    ).every((r) => r.errors.length === 0)).toBe(true);
   });
 
   it("returns [] for empty / header-only files (no error object)", () => {

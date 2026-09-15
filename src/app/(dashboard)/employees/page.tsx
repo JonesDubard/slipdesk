@@ -1676,10 +1676,10 @@ import { parseEmployeeSpreadsheet, type ParsedEmployeeRow } from "@/lib/csv/pars
 import { isSpreadsheetFilename, SPREADSHEET_ACCEPT } from "@/lib/csv/read-spreadsheet";
 import { classifyEmployeeImport } from "@/lib/csv/match-employee";
 import {
-  applyCsvBranches,
   applyEnsuredBranch,
   createOrgBranchApi,
   ensureOrgBranchesForImport,
+  previewEmployeeCsvRows,
 } from "@/lib/csv/resolve-branch";
 import {
   UNASSIGNED_BRANCH_FILTER,
@@ -1749,8 +1749,8 @@ function getAvatarColor(name: string) {
 function downloadTemplate() {
   const rows = [
     CSV_HEADERS.join(","),
-    "EMP-001,Moses,James,Kollie,male,Operations Manager,Operations,,m.kollie@co.lr,+231770000001,Montserrado,2023-01-15,full_time,USD,8.50,173.33,0,NSC-001-2024,bank_transfer,Ecobank Liberia,1234567890,,173.33,0,0,100,30,20,0,0",
-    "EMP-002,Fanta,,Kamara,female,Finance Officer,Finance,,f.kamara@co.lr,+231770000002,Montserrado,2023-03-01,full_time,LRD,1500,173.33,50000,NSC-002-2024,mtn_momo,,,0770000002,173.33,0,8,0,0,0,250,0",
+    "EMP-001,Moses,James,Kollie,male,Operations Manager,Operations,Sinkor,m.kollie@co.lr,+231770000001,Montserrado,2023-01-15,full_time,USD,8.50,173.33,0,NSC-001-2024,bank_transfer,Ecobank Liberia,1234567890,,173.33,0,0,100,30,20,0,0",
+    "EMP-002,Fanta,,Kamara,female,Finance Officer,Finance,Paynesville,f.kamara@co.lr,+231770000002,Montserrado,2023-03-01,full_time,LRD,1500,173.33,50000,NSC-002-2024,mtn_momo,,,0770000002,173.33,0,8,0,0,0,250,0",
   ];
   const blob = new Blob([rows.join("\n")], { type: "text/csv" });
   const url  = URL.createObjectURL(blob);
@@ -2439,27 +2439,7 @@ function CSVUploadModal({ onClose, onImport }: {
   const [parsed,    setParsed]    = useState<ParsedEmployeeRow[] | null>(null);
   const [importing, setImporting] = useState(false);
   const [result,    setResult]    = useState<ImportResult | null>(null);
-  const [registeredBranches, setRegisteredBranches] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/org/units?kind=branches")
-      .then((res) => res.json().catch(() => ({})))
-      .then((data: { items?: { name: string }[] }) => {
-        if (cancelled) return;
-        const names = (data.items ?? []).map((i) => i.name).filter(Boolean);
-        setRegisteredBranches(names);
-      })
-      .catch(() => {
-        /* empty registry: unknown names are still accepted and auto-created on import */
-      });
-    return () => { cancelled = true; };
-  }, []);
-
-  const applyBranches = useCallback((rows: ParsedEmployeeRow[], names: string[]) => {
-    return applyCsvBranches(rows, names).rows;
-  }, []);
 
   const handleFile = useCallback((file: File) => {
     if (!isSpreadsheetFilename(file.name)) {
@@ -2473,19 +2453,13 @@ function CSVUploadModal({ onClose, onImport }: {
         toast.error("Could not read that file.");
         return;
       }
-      const { rows, error } = parseEmployeeSpreadsheet(buf, file.name, {
-        registeredBranches,
-      });
+      const { rows, error } = parseEmployeeSpreadsheet(buf, file.name);
       if (error && rows.length === 0) toast.error(error);
-      setParsed(applyBranches(rows, registeredBranches));
+      setParsed(previewEmployeeCsvRows(rows));
       setResult(null);
     };
     reader.readAsArrayBuffer(file);
-  }, [toast, registeredBranches, applyBranches]);
-
-  useEffect(() => {
-    setParsed((prev) => (prev ? applyCsvBranches(prev, registeredBranches).rows : prev));
-  }, [registeredBranches]);
+  }, [toast]);
 
   const validRows = parsed?.filter((r) => r.errors.length === 0) ?? [];
   const errRows   = parsed?.filter((r) => r.errors.length > 0)   ?? [];
