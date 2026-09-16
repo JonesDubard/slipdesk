@@ -3,7 +3,6 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isPlatformAdminRole } from "@/lib/auth/platform-admin";
 import {
   isAuthPagePath,
-  isCookieAuthApiPath,
   isEmployeePortalPath,
   isProtectedAppPath,
   shouldCreateSupabaseInProxy,
@@ -22,13 +21,10 @@ export async function proxy(request: NextRequest) {
   const isEmployeePortal = isEmployeePortalPath(pathname);
   const isProtected = isProtectedAppPath(pathname);
   const isAuthPage = isAuthPagePath(pathname);
-  const isCookieApi = isCookieAuthApiPath(pathname);
 
-  // Marketing + public API: do NOT call supabase.auth.getUser().
-  // Previously every landing-page request paid 200–2000ms for JWT revalidation,
-  // which dominated Lighthouse Performance and starved the demo enter flow.
-  // Cookie-authenticated APIs (e.g. /api/org/units) MUST still refresh here —
-  // otherwise Route Handlers see an expired access token and return 401.
+  // Marketing + cookie APIs: do NOT call supabase.auth.getUser() here.
+  // Proxy refresh on /api/org/units rotated the refresh token before the
+  // Route Handler cookie snapshot updated, which produced a 401 after a 200.
   if (!shouldCreateSupabaseInProxy(pathname)) {
     return NextResponse.next();
   }
@@ -55,14 +51,6 @@ export async function proxy(request: NextRequest) {
       },
     },
   );
-
-  // Cookie APIs: must call getUser() so @supabase/ssr refreshes expired JWTs
-  // and writes cookies onto this request. Do not redirect — the route returns 401.
-  // HTML pages keep getSession() for TTFB; they are not authorization decisions.
-  if (isCookieApi) {
-    await supabase.auth.getUser();
-    return response;
-  }
 
   // Prefer getSession() in the edge proxy: it reads cookies locally.
   // getUser() revalidates over the network (often 300–2000ms+) and was the

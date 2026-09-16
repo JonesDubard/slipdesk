@@ -605,7 +605,7 @@ describe("CSV bulk import — unregistered branches", () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toMatch(/Unauthorized/);
+      expect(result.error).toMatch(/Unauthorized|authentication failed|session/i);
       expect(result.error).not.toMatch(/is not registered/i);
     }
   });

@@ -106,13 +106,28 @@ export function isFatalBranchEnsureFailure(res: BranchEnsureResponse): boolean {
   const err = (res.error ?? "").toLowerCase();
   const code = (res.code ?? "").toUpperCase();
   if (code === "DEMO_READONLY") return true;
-  if (res.status === 401) return true;
+  if (res.status === 401 || res.status === 404) return true;
   if (/company not found/.test(err)) return true;
   if (/read-only demo|demo/.test(err) && res.status === 403) return true;
   if (res.status === 403 && /upgrade required/.test(err)) return false;
   if (res.status === 403) return true;
   if (res.status >= 500) return true;
   return false;
+}
+
+export function orgUnitsFailureMessage(status: number, bodyError?: string): string {
+  const trimmed = (bodyError ?? "").trim();
+  if (status === 401) {
+    return "Authentication failed. Your session could not be verified. Sign in again, then retry the import.";
+  }
+  if (status === 403) {
+    if (/upgrade required/i.test(trimmed)) return trimmed;
+    return trimmed || "You do not have access to this organization's branches.";
+  }
+  if (status === 404) {
+    return trimmed || "Organization branches were not found.";
+  }
+  return trimmed || `Request failed (${status})`;
 }
 
 export function fatalBranchEnsureError(unknownNames: string[], apiError?: string): string {
@@ -156,8 +171,7 @@ export function interpretOrgUnitsListResponse(
   body: { error?: string; items?: { id?: string; name?: string }[] | null } = {},
 ): OrgUnitsListInterpretation {
   if (status < 200 || status >= 300) {
-    const fallback = status === 401 ? "Unauthorized" : `Request failed (${status})`;
-    return { ok: false, status, error: (body.error ?? "").trim() || fallback };
+    return { ok: false, status, error: orgUnitsFailureMessage(status, body.error) };
   }
   return {
     ok: true,
@@ -206,7 +220,7 @@ export async function ensureOrgBranchesForImport(
   const list = await deps.list();
   if (isFatalBranchEnsureFailure(list)) {
     const unknown = collectUnknownBranches(csvBranches, []);
-    return { ok: false, error: fatalBranchEnsureError(unknown, list.error) };
+    return { ok: false, error: fatalBranchEnsureError(unknown, orgUnitsFailureMessage(list.status, list.error)) };
   }
 
   const registered = (list.items ?? []).map((i) => i.name).filter(Boolean);
@@ -226,7 +240,7 @@ export async function ensureOrgBranchesForImport(
       continue;
     }
     if (isFatalBranchEnsureFailure(res)) {
-      return { ok: false, error: fatalBranchEnsureError([name], res.error) };
+      return { ok: false, error: fatalBranchEnsureError([name], orgUnitsFailureMessage(res.status, res.error)) };
     }
     // Non-fatal (e.g. upgrade required): keep the CSV name on the employee row.
     if (!findRegisteredBranch(name, registered)) registered.push(name);
@@ -246,7 +260,7 @@ export async function ensureOrgBranchesForImport(
 }
 
 export function createOrgBranchApi(fetchFn: typeof fetch = fetch): BranchEnsureDeps {
-  const creds: RequestInit = { credentials: "same-origin", cache: "no-store" };
+  const creds: RequestInit = { credentials: "include", cache: "no-store" };
   return {
     async list() {
       const res = await fetchFn("/api/org/units?kind=branches", creds);
@@ -267,7 +281,7 @@ export function createOrgBranchApi(fetchFn: typeof fetch = fetch): BranchEnsureD
       const res = await fetchFn("/api/org/units", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
+        credentials: "include",
         cache: "no-store",
         body: JSON.stringify({ kind: "branches", name }),
       });

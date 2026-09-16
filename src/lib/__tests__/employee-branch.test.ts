@@ -1,12 +1,14 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parseEmployeeCSV } from "@/lib/csv/parse-employee-csv";
 import {
   applyEnsuredBranch,
+  createOrgBranchApi,
   ensureOrgBranchesForImport,
   interpretOrgUnitsListResponse,
+  orgUnitsFailureMessage,
   previewEmployeeCsvRows,
   unregisteredBranchMessage,
 } from "@/lib/csv/resolve-branch";
@@ -14,6 +16,7 @@ import {
   isCookieAuthApiPath,
   shouldCreateSupabaseInProxy,
 } from "@/lib/auth/proxy-session";
+import { authorizeOrgUnitsAccess, orgBranchListScope } from "@/lib/org/units-access";
 import {
   UNASSIGNED_BRANCH_FILTER,
   aggregateByBranchId,
@@ -127,8 +130,8 @@ EMP-002,Fanta,,Kamara,female,Finance Officer,Finance,Paynesville,f.kamara@co.lr,
     });
     expect(interpreted.ok).toBe(false);
     if (interpreted.ok) return;
-    expect(interpreted.error).toMatch(/unauthor/i);
-    expect("items" in interpreted && interpreted.ok).toBe(false);
+    expect(interpreted.error).toMatch(/authentication failed|session/i);
+    expect(interpreted.error).not.toMatch(/is not registered/i);
 
     const preview = previewEmployeeCsvRows([
       { data: { branch: "Sinkor" }, errors: [] },
@@ -152,7 +155,7 @@ EMP-002,Fanta,,Kamara,female,Finance Officer,Finance,Paynesville,f.kamara@co.lr,
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toMatch(/unauthor/i);
+      expect(result.error).toMatch(/authentication failed|session/i);
       expect(result.error).not.toMatch(/is not registered/i);
     }
     expect(created).toEqual([]);
@@ -355,11 +358,12 @@ describe("payroll scope filter uses branchId when present", () => {
   });
 });
 
-describe("proxy refreshes cookie-auth APIs", () => {
-  it("includes /api/org/units so getUser() can refresh the JWT", () => {
+describe("proxy does not rotate cookies on cookie-auth APIs", () => {
+  it("keeps /api/org/units as a cookie-auth API but refreshes in the route, not the proxy", () => {
     expect(isCookieAuthApiPath("/api/org/units")).toBe(true);
-    expect(shouldCreateSupabaseInProxy("/api/org/units")).toBe(true);
+    expect(shouldCreateSupabaseInProxy("/api/org/units")).toBe(false);
     expect(isCookieAuthApiPath("/api/org/branch-summary")).toBe(true);
+    expect(shouldCreateSupabaseInProxy("/api/org/branch-summary")).toBe(false);
   });
 
   it("skips marketing, bearer APIs, cron, and demo handoff", () => {
@@ -378,7 +382,11 @@ describe("interpretOrgUnitsListResponse", () => {
       error: "Unauthorized",
       items: [{ id: "other-org", name: "ShouldNotLeak" }],
     });
-    expect(interpreted).toEqual({ ok: false, status: 401, error: "Unauthorized" });
+    expect(interpreted.ok).toBe(false);
+    if (interpreted.ok) return;
+    expect(interpreted.error).toBe(orgUnitsFailureMessage(401, "Unauthorized"));
+    expect(interpreted.error).not.toMatch(/is not registered/i);
+    expect(interpreted.error).toMatch(/authentication failed|session/i);
   });
 
   it("returns company-scoped items only on 200", () => {
@@ -390,5 +398,127 @@ describe("interpretOrgUnitsListResponse", () => {
       status: 200,
       items: [{ id: "br-sinkor", name: "Sinkor" }],
     });
+  });
+
+  it("maps 403 to org access and 404 to not found, never unregistered", () => {
+    const forbidden = interpretOrgUnitsListResponse(403, { error: "Company not found" });
+    expect(forbidden.ok).toBe(false);
+    if (!forbidden.ok) {
+      expect(forbidden.error).toMatch(/do not have access|company not found/i);
+      expect(forbidden.error).not.toMatch(/is not registered/i);
+    }
+    const missing = interpretOrgUnitsListResponse(404, {});
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) {
+      expect(missing.error).toMatch(/not found/i);
+      expect(missing.error).not.toMatch(/is not registered/i);
+    }
+  });
+});
+
+describe("org units authorization", () => {
+  it("returns 401 when there is no authenticated user", () => {
+    expect(authorizeOrgUnitsAccess({ userId: null, companyId: "co-a" })).toEqual({
+      ok: false,
+      status: 401,
+      error: "Unauthorized",
+    });
+  });
+
+  it("returns 403 when the user has no company membership", () => {
+    expect(authorizeOrgUnitsAccess({ userId: "user-1", companyId: null })).toEqual({
+      ok: false,
+      status: 403,
+      error: "Company not found",
+    });
+  });
+
+  it("scopes branch lookup to the authenticated user's company only", () => {
+    const allowed = authorizeOrgUnitsAccess({ userId: "user-1", companyId: COMPANY_A });
+    expect(allowed).toEqual({ ok: true, companyId: COMPANY_A });
+    if (!allowed.ok) return;
+    expect(orgBranchListScope(allowed.companyId)).toEqual({
+      table: "branches",
+      companyId: COMPANY_A,
+    });
+    expect(orgBranchListScope(allowed.companyId).companyId).not.toBe(COMPANY_B);
+  });
+});
+
+describe("createOrgBranchApi cookie credentials", () => {
+  it("sends cookies on GET and POST so production session auth can succeed", async () => {
+    const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("kind=branches")) {
+        return new Response(JSON.stringify({ items: [{ id: "br-sinkor", name: "Sinkor" }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ item: { id: "br-bangli", name: "Bangli" } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const api = createOrgBranchApi(fetchFn as unknown as typeof fetch);
+    await api.list();
+    await api.create("Bangli");
+    expect(fetchFn).toHaveBeenCalledWith(
+      "/api/org/units?kind=branches",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(fetchFn).toHaveBeenCalledWith(
+      "/api/org/units",
+      expect.objectContaining({ method: "POST", credentials: "include" }),
+    );
+  });
+
+  it("does not treat a 401 JSON body as an empty branch registry", async () => {
+    const fetchFn = vi.fn(async () =>
+      new Response(JSON.stringify({ error: "Unauthorized", items: [{ id: "other-org", name: "ShouldNotLeak" }] }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const api = createOrgBranchApi(fetchFn as unknown as typeof fetch);
+    const listed = await api.list();
+    expect(listed.status).toBe(401);
+    expect(listed.items).toBeUndefined();
+    const result = await ensureOrgBranchesForImport(["Sinkor", "Paynesville"], api);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/authentication failed|session/i);
+      expect(result.error).not.toMatch(/is not registered/i);
+    }
+  });
+});
+
+describe("401/403 import errors are not unregistered-branch errors", () => {
+  it("fails 403 org access without saying the branch is not registered", async () => {
+    const result = await ensureOrgBranchesForImport(["Sinkor"], {
+      list: async () => ({ status: 403, error: "Company not found", items: [] }),
+      create: async () => {
+        throw new Error("create should not run after 403");
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/company not found/i);
+      expect(result.error).not.toMatch(/is not registered/i);
+    }
+  });
+
+  it("fails 404 without saying the branch is not registered", async () => {
+    const result = await ensureOrgBranchesForImport(["Paynesville"], {
+      list: async () => ({ status: 404, error: "Not found", items: [] }),
+      create: async () => {
+        throw new Error("create should not run after 404");
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/not found/i);
+      expect(result.error).not.toMatch(/is not registered/i);
+    }
   });
 });

@@ -1,10 +1,10 @@
 /**
  * Which requests the Next.js proxy must create a Supabase SSR client for.
  *
- * Cookie-authenticated `/api/*` routes used to skip this, so expired access
- * tokens were never refreshed onto the request. Route Handlers then called
- * `getUser()` (network revalidation, autoRefreshToken: false) and returned 401
- * while the HTML shell still looked signed-in via unverified `getSession()`.
+ * HTML pages refresh here. Cookie APIs must NOT: proxy `getUser()` rotates the
+ * refresh token, then the Route Handler's `cookies()` snapshot can still hold
+ * the old JWT, so `/api/org/units` returns 401 after a middleware 200.
+ * Those routes refresh via `getAuthenticatedUser(request)` instead.
  */
 
 const PROTECTED_PREFIXES = [
@@ -57,5 +57,5 @@ export function isCookieAuthApiPath(pathname: string): boolean {
 }
 
 export function shouldCreateSupabaseInProxy(pathname: string): boolean {
-  return isProtectedAppPath(pathname) || isAuthPagePath(pathname) || isCookieAuthApiPath(pathname);
+  return isProtectedAppPath(pathname) || isAuthPagePath(pathname);
 }

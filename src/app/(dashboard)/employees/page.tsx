@@ -2596,7 +2596,7 @@ function CSVUploadModal({ onClose, onImport }: {
                     Could not load organization branches
                   </p>
                   <p style={{ color: "var(--muted-foreground)", fontSize: 12, margin: "6px 0 0" }}>
-                    {branchApiError === "Unauthorized" || /unauthor/i.test(branchApiError)
+                    {branchApiError === "Unauthorized" || /unauthor|authentication failed|session could not be verified/i.test(branchApiError)
                       ? "Your session could not be verified. Sign in again, then retry the import. Missing branches are created on import — this is not a “branch not registered” error."
                       : branchApiError}
                   </p>

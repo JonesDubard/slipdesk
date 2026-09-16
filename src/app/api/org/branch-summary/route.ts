@@ -1,21 +1,28 @@
-import { getAuthenticatedUser } from "@/lib/supabase/server";
+import { getAuthenticatedUser, applyAuthCookies } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
 import { resolveCompanyIdForUser } from "@/lib/payments/server";
 import type { SubscriptionTier } from "@/context/AppContext";
 import { aggregateByBranchId } from "@/lib/org/employee-branch";
+import { authorizeOrgUnitsAccess } from "@/lib/org/units-access";
 
 /**
  * GET /api/org/branch-summary
  * Enterprise multi-branch headcount / salary mass by registered branch.
  */
-export async function GET() {
-  const { supabase, user } = await getAuthenticatedUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(request: NextRequest) {
+  const { supabase, user, authCookies } = await getAuthenticatedUser(request);
+  const withCookies = (res: NextResponse) => applyAuthCookies(res, authCookies);
 
-  const companyId = await resolveCompanyIdForUser(supabase, user.id);
-  if (!companyId) return NextResponse.json({ error: "No company" }, { status: 403 });
+  const authz = authorizeOrgUnitsAccess({
+    userId: user?.id,
+    companyId: user ? await resolveCompanyIdForUser(supabase, user.id) : null,
+  });
+  if (!authz.ok) {
+    return withCookies(NextResponse.json({ error: authz.error }, { status: authz.status }));
+  }
+  const companyId = authz.companyId;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: company } = await (supabase as any)
@@ -29,7 +36,7 @@ export async function GET() {
     Boolean(company?.billing_bypass),
   );
   if (!canUse("multiBranch", tier)) {
-    return NextResponse.json({ error: "Upgrade required", code: "PLAN_GATE" }, { status: 403 });
+    return withCookies(NextResponse.json({ error: "Upgrade required", code: "PLAN_GATE" }, { status: 403 }));
   }
 
   const admin = createAdminClient();
@@ -68,9 +75,9 @@ export async function GET() {
     })),
   );
 
-  return NextResponse.json({
+  return withCookies(NextResponse.json({
     branches: aggregated.branches,
     unassigned: aggregated.unassigned,
     totalActive: aggregated.totalActive,
-  });
+  }));
 }
