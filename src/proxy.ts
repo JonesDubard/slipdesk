@@ -1,16 +1,15 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { isPlatformAdminRole } from "@/lib/auth/platform-admin";
-
-const PROTECTED_PREFIXES = [
-  "/dashboard", "/employees", "/payroll", "/organization", "/analytics", "/compliance",
-  "/reports", "/audit", "/team", "/notifications", "/billing", "/settings", "/admin",
-  "/hr",
-];
+import {
+  isAuthPagePath,
+  isCookieAuthApiPath,
+  isEmployeePortalPath,
+  isProtectedAppPath,
+  shouldCreateSupabaseInProxy,
+} from "@/lib/auth/proxy-session";
 
 // Note: /api/v1/* uses Bearer API keys — intentionally not cookie-protected here.
-
-const AUTH_PAGES = new Set(["/login", "/signup", "/portal/login"]);
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -20,18 +19,17 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const isEmployeePortal =
-    pathname === "/portal" ||
-    (pathname.startsWith("/portal/") && pathname !== "/portal/login");
-  const isProtected =
-    PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`)) ||
-    isEmployeePortal;
-  const isAuthPage = AUTH_PAGES.has(pathname);
+  const isEmployeePortal = isEmployeePortalPath(pathname);
+  const isProtected = isProtectedAppPath(pathname);
+  const isAuthPage = isAuthPagePath(pathname);
+  const isCookieApi = isCookieAuthApiPath(pathname);
 
   // Marketing + public API: do NOT call supabase.auth.getUser().
   // Previously every landing-page request paid 200–2000ms for JWT revalidation,
   // which dominated Lighthouse Performance and starved the demo enter flow.
-  if (!isProtected && !isAuthPage) {
+  // Cookie-authenticated APIs (e.g. /api/org/units) MUST still refresh here —
+  // otherwise Route Handlers see an expired access token and return 401.
+  if (!shouldCreateSupabaseInProxy(pathname)) {
     return NextResponse.next();
   }
 
@@ -58,10 +56,18 @@ export async function proxy(request: NextRequest) {
     },
   );
 
+  // Cookie APIs: must call getUser() so @supabase/ssr refreshes expired JWTs
+  // and writes cookies onto this request. Do not redirect — the route returns 401.
+  // HTML pages keep getSession() for TTFB; they are not authorization decisions.
+  if (isCookieApi) {
+    await supabase.auth.getUser();
+    return response;
+  }
+
   // Prefer getSession() in the edge proxy: it reads cookies locally.
   // getUser() revalidates over the network (often 300–2000ms+) and was the
   // dominant TTFB cost on every protected page. Auth Z for data still happens
-  // via Supabase RLS + client-side session checks. Trade-off: a revoked JWT
+  // via Route Handler getUser() + Supabase RLS. Trade-off: a revoked JWT
   // may work until expiry for HTML shell access only.
   const { data: { session } } = await supabase.auth.getSession();
   const user = session?.user ?? null;

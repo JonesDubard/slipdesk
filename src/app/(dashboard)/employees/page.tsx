@@ -1679,6 +1679,7 @@ import {
   applyEnsuredBranch,
   createOrgBranchApi,
   ensureOrgBranchesForImport,
+  isFatalBranchEnsureFailure,
   previewEmployeeCsvRows,
 } from "@/lib/csv/resolve-branch";
 import {
@@ -2439,6 +2440,7 @@ function CSVUploadModal({ onClose, onImport }: {
   const [parsed,    setParsed]    = useState<ParsedEmployeeRow[] | null>(null);
   const [importing, setImporting] = useState(false);
   const [result,    setResult]    = useState<ImportResult | null>(null);
+  const [branchApiError, setBranchApiError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleFile = useCallback((file: File) => {
@@ -2457,6 +2459,16 @@ function CSVUploadModal({ onClose, onImport }: {
       if (error && rows.length === 0) toast.error(error);
       setParsed(previewEmployeeCsvRows(rows));
       setResult(null);
+      setBranchApiError(null);
+      void createOrgBranchApi().list().then((res) => {
+        if (isFatalBranchEnsureFailure(res)) {
+          setBranchApiError(
+            res.error?.trim() || `Could not load organization branches (${res.status}).`,
+          );
+        }
+      }).catch(() => {
+        setBranchApiError("Could not load organization branches.");
+      });
     };
     reader.readAsArrayBuffer(file);
   }, [toast]);
@@ -2574,6 +2586,22 @@ function CSVUploadModal({ onClose, onImport }: {
 
           {parsed && !result && (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {branchApiError && (
+                <div style={{
+                  background: "color-mix(in oklch, var(--destructive) 12%, transparent)",
+                  border: "1px solid color-mix(in oklch, var(--destructive) 40%, transparent)",
+                  borderRadius: 12, padding: "14px 16px",
+                }}>
+                  <p style={{ color: "var(--destructive)", fontWeight: 700, fontSize: 13, margin: 0 }}>
+                    Could not load organization branches
+                  </p>
+                  <p style={{ color: "var(--muted-foreground)", fontSize: 12, margin: "6px 0 0" }}>
+                    {branchApiError === "Unauthorized" || /unauthor/i.test(branchApiError)
+                      ? "Your session could not be verified. Sign in again, then retry the import. Missing branches are created on import — this is not a “branch not registered” error."
+                      : branchApiError}
+                  </p>
+                </div>
+              )}
               {emptyFile && (
                 <div style={{
                   background: "color-mix(in oklch, var(--destructive) 12%, transparent)",
@@ -2676,7 +2704,7 @@ function CSVUploadModal({ onClose, onImport }: {
                 </div>
               )}
 
-              <button onClick={() => { setParsed(null); setResult(null); }} style={{
+              <button onClick={() => { setParsed(null); setResult(null); setBranchApiError(null); }} style={{
                 color: "var(--secondary)", fontSize: 12, background: "none",
                 border: "none", cursor: "pointer", textAlign: "left", padding: 0,
               }}>
@@ -2791,12 +2819,12 @@ function CSVUploadModal({ onClose, onImport }: {
                 Cancel
               </button>
               <button
-                disabled={!validRows.length || importing}
+                disabled={!validRows.length || importing || !!branchApiError}
                 onClick={handleImport}
                 style={{
                   flex: 2, padding: "10px 16px", borderRadius: 10,
-                  cursor: validRows.length && !importing ? "pointer" : "not-allowed",
-                  background: validRows.length && !importing ? "var(--primary)" : "color-mix(in oklch, var(--primary) 45%, transparent)",
+                  cursor: validRows.length && !importing && !branchApiError ? "pointer" : "not-allowed",
+                  background: validRows.length && !importing && !branchApiError ? "var(--primary)" : "color-mix(in oklch, var(--primary) 45%, transparent)",
                   border: "none", color: "var(--primary-foreground)", fontSize: 13, fontWeight: 700,
                   display: "flex", alignItems: "center", justifyContent: "center",
                   gap: 6, transition: "all 0.2s",
@@ -2911,11 +2939,16 @@ export default function EmployeesPage() {
 
   const loadOrgBranches = useCallback(async () => {
     try {
-      const res = await fetch("/api/org/units?kind=branches");
-      const data = await res.json().catch(() => ({}));
-      setOrgBranches((data.items ?? []) as { id: string; name: string }[]);
+      const res = await createOrgBranchApi().list();
+      if (res.status < 200 || res.status >= 300) {
+        // A 401/error is not "this org has no branches". Keep the last good list.
+        return;
+      }
+      setOrgBranches(
+        (res.items ?? []).filter((i): i is { id: string; name: string } => Boolean(i.id && i.name)),
+      );
     } catch {
-      setOrgBranches([]);
+      // keep previous
     }
   }, []);
 

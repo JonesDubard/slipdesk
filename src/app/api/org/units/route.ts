@@ -1,40 +1,24 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthenticatedUser } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
 import type { SubscriptionTier } from "@/context/AppContext";
 import { assertNotDemoCompany } from "@/lib/demo/assert-not-demo";
+import { resolveCompanyIdForUser } from "@/lib/payments/server";
 
 type Kind = "departments" | "branches";
 
 async function resolveCompanyContext() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { supabase, user } = await getAuthenticatedUser();
   if (!user) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
 
-  const { data: owned } = await supabase
+  const companyId = await resolveCompanyIdForUser(supabase, user.id);
+  if (!companyId) return { error: NextResponse.json({ error: "Company not found" }, { status: 403 }) };
+
+  const { data: company } = await supabase
     .from("companies")
     .select("id, subscription_tier, billing_bypass")
-    .eq("owner_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(1)
+    .eq("id", companyId)
     .maybeSingle();
-
-  let company = owned;
-  if (!company) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("company_id")
-      .eq("id", user.id)
-      .maybeSingle();
-    if (profile?.company_id) {
-      const { data: byId } = await supabase
-        .from("companies")
-        .select("id, subscription_tier, billing_bypass")
-        .eq("id", profile.company_id)
-        .maybeSingle();
-      company = byId;
-    }
-  }
 
   if (!company) return { error: NextResponse.json({ error: "Company not found" }, { status: 403 }) };
 

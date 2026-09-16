@@ -595,4 +595,18 @@ describe("CSV bulk import — unregistered branches", () => {
       expect(result.branches).toEqual([]);
     }
   });
+
+  it("does not turn a 401 list into unregistered-branch row errors", async () => {
+    const result = await ensureOrgBranchesForImport(["Sinkor", "Paynesville"], {
+      list: async () => ({ status: 401, error: "Unauthorized", items: [] }),
+      create: async () => {
+        throw new Error("create should not run after 401");
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/Unauthorized/);
+      expect(result.error).not.toMatch(/is not registered/i);
+    }
+  });
 });

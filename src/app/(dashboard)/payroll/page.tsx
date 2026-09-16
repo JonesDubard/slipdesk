@@ -861,10 +861,12 @@ export default function PayrollPage() {
   }, [company.id, company.subscriptionTier, company.billingBypass]);
 
   useEffect(() => {
-    void fetch("/api/org/units?kind=branches")
-      .then((r) => r.json())
-      .then((d) => setBranches(d.items ?? []))
-      .catch(() => setBranches([]));
+    void createOrgBranchApi().list().then((res) => {
+      if (res.status < 200 || res.status >= 300) return;
+      setBranches(
+        (res.items ?? []).filter((i): i is { id: string; name: string } => Boolean(i.id && i.name)),
+      );
+    }).catch(() => { /* keep previous — a 401 is not "no branches" */ });
   }, []);
 
   const { autosaveState } = usePayrollDraftAutosave(

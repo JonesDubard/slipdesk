@@ -142,6 +142,32 @@ function itemsToBranchRefs(items?: { id?: string; name: string }[]): OrgBranchRe
   return refs;
 }
 
+/**
+ * A non-OK org-units response must never be treated as "zero registered
+ * branches". That mapping is what flagged Sinkor/Paynesville as unregistered
+ * after a production 401.
+ */
+export type OrgUnitsListInterpretation =
+  | { ok: true; status: number; items: OrgBranchRef[] }
+  | { ok: false; status: number; error: string };
+
+export function interpretOrgUnitsListResponse(
+  status: number,
+  body: { error?: string; items?: { id?: string; name?: string }[] | null } = {},
+): OrgUnitsListInterpretation {
+  if (status < 200 || status >= 300) {
+    const fallback = status === 401 ? "Unauthorized" : `Request failed (${status})`;
+    return { ok: false, status, error: (body.error ?? "").trim() || fallback };
+  }
+  return {
+    ok: true,
+    status,
+    items: itemsToBranchRefs(
+      (body.items ?? []).map((i) => ({ id: i.id, name: i.name ?? "" })),
+    ),
+  };
+}
+
 function mergeBranchRefs(into: OrgBranchRef[], extra: OrgBranchRef[]): OrgBranchRef[] {
   const out = [...into];
   for (const ref of extra) {
@@ -220,23 +246,29 @@ export async function ensureOrgBranchesForImport(
 }
 
 export function createOrgBranchApi(fetchFn: typeof fetch = fetch): BranchEnsureDeps {
+  const creds: RequestInit = { credentials: "same-origin", cache: "no-store" };
   return {
     async list() {
-      const res = await fetchFn("/api/org/units?kind=branches");
-      const data = (await res.json().catch(() => ({}))) as BranchEnsureResponse & {
-        items?: { name: string }[];
+      const res = await fetchFn("/api/org/units?kind=branches", creds);
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        code?: string;
+        items?: { id?: string; name: string }[];
       };
+      const interpreted = interpretOrgUnitsListResponse(res.status, data);
       return {
         status: res.status,
-        error: data.error,
+        error: interpreted.ok ? data.error : interpreted.error,
         code: data.code,
-        items: data.items,
+        items: interpreted.ok ? interpreted.items : undefined,
       };
     },
     async create(name: string) {
       const res = await fetchFn("/api/org/units", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
         body: JSON.stringify({ kind: "branches", name }),
       });
       const data = (await res.json().catch(() => ({}))) as BranchEnsureResponse;

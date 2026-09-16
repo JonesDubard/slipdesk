@@ -6,9 +6,14 @@ import { parseEmployeeCSV } from "@/lib/csv/parse-employee-csv";
 import {
   applyEnsuredBranch,
   ensureOrgBranchesForImport,
+  interpretOrgUnitsListResponse,
   previewEmployeeCsvRows,
   unregisteredBranchMessage,
 } from "@/lib/csv/resolve-branch";
+import {
+  isCookieAuthApiPath,
+  shouldCreateSupabaseInProxy,
+} from "@/lib/auth/proxy-session";
 import {
   UNASSIGNED_BRANCH_FILTER,
   aggregateByBranchId,
@@ -113,6 +118,62 @@ EMP-002,Fanta,,Kamara,female,Finance Officer,Finance,Paynesville,f.kamara@co.lr,
     expect(preview.every((r) => r.errors.length === 0)).toBe(true);
     expect(preview[0].data.branch).toBe("Sinkor");
     expect(preview[1].data.branch).toBe("Paynesville");
+  });
+
+  it("does not treat a 401 org-units body as an empty registry / unregistered rows", () => {
+    const interpreted = interpretOrgUnitsListResponse(401, {
+      error: "Unauthorized",
+      items: [],
+    });
+    expect(interpreted.ok).toBe(false);
+    if (interpreted.ok) return;
+    expect(interpreted.error).toMatch(/unauthor/i);
+    expect("items" in interpreted && interpreted.ok).toBe(false);
+
+    const preview = previewEmployeeCsvRows([
+      { data: { branch: "Sinkor" }, errors: [] },
+      { data: { branch: "Paynesville" }, errors: [] },
+    ]);
+    expect(preview.every((r) => r.errors.length === 0)).toBe(true);
+    expect(preview.every((r) => !r.errors.some((e) => /is not registered/i.test(e)))).toBe(true);
+  });
+
+  it("fails ensureOrgBranchesForImport on 401 without creating or saying unregistered", async () => {
+    const created: string[] = [];
+    const result = await ensureOrgBranchesForImport(
+      ["Sinkor", "Paynesville"],
+      {
+        list: async () => ({ status: 401, error: "Unauthorized", items: [] }),
+        create: async (name) => {
+          created.push(name);
+          return { status: 200, item: { id: "x", name } };
+        },
+      },
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/unauthor/i);
+      expect(result.error).not.toMatch(/is not registered/i);
+    }
+    expect(created).toEqual([]);
+  });
+
+  it("reuses an existing org branch id and does not POST it again", async () => {
+    const created: string[] = [];
+    const result = await ensureOrgBranchesForImport(["  sinkor "], {
+      list: async () => ({ status: 200, items: [{ id: "br-sinkor", name: "Sinkor" }] }),
+      create: async (name) => {
+        created.push(name);
+        return { status: 200, item: { id: "new", name } };
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(created).toEqual([]);
+    expect(result.branches).toEqual([{ id: "br-sinkor", name: "Sinkor" }]);
+    const mapped = applyEnsuredBranch({ branch: "SINKOR" }, result);
+    expect(mapped.branchId).toBe("br-sinkor");
+    expect(mapped.branch).toBe("Sinkor");
   });
 
   it("creates unknown Bangli and assigns that id; blank stays Unassigned", async () => {
@@ -291,5 +352,43 @@ describe("payroll scope filter uses branchId when present", () => {
     ];
     expect(filterEmployeesForBranchScope(emps, "Bangli", { branchId: "br-bangli" })).toHaveLength(2);
     expect(filterEmployeesForBranchScope(emps, "Buchanan", { branchId: "br-buchanan" })).toHaveLength(1);
+  });
+});
+
+describe("proxy refreshes cookie-auth APIs", () => {
+  it("includes /api/org/units so getUser() can refresh the JWT", () => {
+    expect(isCookieAuthApiPath("/api/org/units")).toBe(true);
+    expect(shouldCreateSupabaseInProxy("/api/org/units")).toBe(true);
+    expect(isCookieAuthApiPath("/api/org/branch-summary")).toBe(true);
+  });
+
+  it("skips marketing, bearer APIs, cron, and demo handoff", () => {
+    expect(shouldCreateSupabaseInProxy("/")).toBe(false);
+    expect(isCookieAuthApiPath("/api/v1/employees")).toBe(false);
+    expect(isCookieAuthApiPath("/api/demo/enter")).toBe(false);
+    expect(isCookieAuthApiPath("/api/cron/expire")).toBe(false);
+    expect(isCookieAuthApiPath("/api/faqs")).toBe(false);
+    expect(shouldCreateSupabaseInProxy("/employees")).toBe(true);
+  });
+});
+
+describe("interpretOrgUnitsListResponse", () => {
+  it("does not expose items from a 401 body", () => {
+    const interpreted = interpretOrgUnitsListResponse(401, {
+      error: "Unauthorized",
+      items: [{ id: "other-org", name: "ShouldNotLeak" }],
+    });
+    expect(interpreted).toEqual({ ok: false, status: 401, error: "Unauthorized" });
+  });
+
+  it("returns company-scoped items only on 200", () => {
+    const interpreted = interpretOrgUnitsListResponse(200, {
+      items: [{ id: "br-sinkor", name: "Sinkor" }, { name: "NoId" }],
+    });
+    expect(interpreted).toEqual({
+      ok: true,
+      status: 200,
+      items: [{ id: "br-sinkor", name: "Sinkor" }],
+    });
   });
 });

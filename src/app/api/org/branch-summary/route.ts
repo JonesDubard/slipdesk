@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { getAuthenticatedUser } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
@@ -11,8 +11,7 @@ import { aggregateByBranchId } from "@/lib/org/employee-branch";
  * Enterprise multi-branch headcount / salary mass by registered branch.
  */
 export async function GET() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { supabase, user } = await getAuthenticatedUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const companyId = await resolveCompanyIdForUser(supabase, user.id);
