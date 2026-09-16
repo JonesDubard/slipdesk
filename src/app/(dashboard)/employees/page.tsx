@@ -1673,19 +1673,22 @@ import { canUse, getEffectiveTier } from "@/lib/plan-features";
 import { useDemoGuard } from "@/components/demo/DemoGuard";
 import { genderLabel } from "@/lib/employee-gender";
 import GenderHeadcountCard from "@/components/GenderHeadcountCard";
+import { parseEmployeeSpreadsheet, type ParsedEmployeeRow } from "@/lib/csv/parse-employee-csv";
+import { isSpreadsheetFilename, SPREADSHEET_ACCEPT } from "@/lib/csv/read-spreadsheet";
+import { classifyEmployeeImport } from "@/lib/csv/match-employee";
 import {
-  buildEmployeeCsvTemplate,
-  parseEmployeeCSV,
-  EMPLOYEE_CSV_TEMPLATE_FILENAME,
-  type ParsedEmployeeCsvRow,
-} from "@/lib/employees/parse-employee-csv";
+  applyEnsuredBranch,
+  createOrgBranchApi,
+  ensureOrgBranchesForImport,
+  isFatalBranchEnsureFailure,
+  previewEmployeeCsvRows,
+} from "@/lib/csv/resolve-branch";
 import {
-  ALL_BRANCH_FILTER,
   UNASSIGNED_BRANCH_FILTER,
-  branchFilterOptions,
   employeeMatchesBranchFilter,
-  type RegisteredBranch,
-} from "@/lib/org/branch-assignment";
+  syncBranchAssignment,
+} from "@/lib/org/employee-branch";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 const DEPARTMENTS = ["All", "Operations", "Finance", "Engineering", "Sales", "Human Resources"];
 const DEPT_LIST   = ["Operations", "Finance", "Engineering", "Sales", "Human Resources"];
@@ -1717,6 +1720,13 @@ const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "cash",          label: "Cash"             },
 ];
 
+const CSV_HEADERS = [
+  "employee_number","first_name","middle_name","last_name","gender","job_title","department","branch",
+  "email","phone","county","start_date","employment_type","currency",
+  "rate","standard_hours","allowances","nasscorp_number","payment_method",
+  "bank_name","account_number","momo_number","regular_hours","overtime_hours",
+  "holiday_hours","ded_pay_advance","ded_food","ded_transportation","ded_loan_repayment","ded_other",
+];
 
 const EMPTY_FORM: Omit<Employee, "id" | "employeeNumber" | "fullName" | "isArchived"> = {
   firstName: "", middleName: "", lastName: "", jobTitle: "", department: "Operations",
@@ -1725,7 +1735,7 @@ const EMPTY_FORM: Omit<Employee, "id" | "employeeNumber" | "fullName" | "isArchi
   standardHours: 173.33, isActive: true, nasscorpNumber: "",
   allowances: 0, paymentMethod: "bank_transfer",
   bankName: "", accountNumber: "", momoNumber: "",
-  branch: "", position: "", taxId: "", employmentStatus: "active", bankBranch: "",
+  branch: "", branchId: null, position: "", taxId: "", employmentStatus: "active", bankBranch: "",
   portalEnabled: false, gender: "",
 };
 
@@ -1739,10 +1749,15 @@ function getAvatarColor(name: string) {
 }
 
 function downloadTemplate() {
-  const blob = new Blob([buildEmployeeCsvTemplate()], { type: "text/csv" });
+  const rows = [
+    CSV_HEADERS.join(","),
+    "EMP-001,Moses,James,Kollie,male,Operations Manager,Operations,Sinkor,m.kollie@co.lr,+231770000001,Montserrado,2023-01-15,full_time,USD,8.50,173.33,0,NSC-001-2024,bank_transfer,Ecobank Liberia,1234567890,,173.33,0,0,100,30,20,0,0",
+    "EMP-002,Fanta,,Kamara,female,Finance Officer,Finance,Paynesville,f.kamara@co.lr,+231770000002,Montserrado,2023-03-01,full_time,LRD,1500,173.33,50000,NSC-002-2024,mtn_momo,,,0770000002,173.33,0,8,0,0,0,250,0",
+  ];
+  const blob = new Blob([rows.join("\n")], { type: "text/csv" });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement("a");
-  a.href = url; a.download = EMPLOYEE_CSV_TEMPLATE_FILENAME; a.click();
+  a.href = url; a.download = "slipdesk-employees-template.csv"; a.click();
   URL.revokeObjectURL(url);
 }
 
@@ -1945,14 +1960,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function Inp({ value, onChange, placeholder, type = "text" }: {
+function Inp({ value, onChange, placeholder, type = "text", step, min }: {
   value: string | number; onChange: (v: string) => void;
-  placeholder?: string; type?: string;
+  placeholder?: string; type?: string; step?: string; min?: string | number;
 }) {
   return (
     <input
       type={type} value={value} onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder} style={inputBase}
+      placeholder={placeholder} step={step} min={min} style={inputBase}
       onFocus={(e) => { e.target.style.borderColor = "var(--primary)"; }}
       onBlur={(e)  => { e.target.style.borderColor = "var(--border)"; }}
     />
@@ -1972,12 +1987,12 @@ function Sel({ value, onChange, children }: {
 
 type DrawerTab = "basic" | "pay" | "payment";
 
-function EmployeeDrawer({ employee, onClose, onSave, allowLRD, registeredBranches = [] }: {
+function EmployeeDrawer({ employee, onClose, onSave, allowLRD, orgBranches = [] }: {
   employee?: Employee;
   onClose: () => void;
   onSave: (data: Omit<Employee, "id" | "fullName" | "isArchived">) => Promise<void>;
   allowLRD?: boolean;
-  registeredBranches?: RegisteredBranch[];
+  orgBranches?: { id: string; name: string }[];
 }) {
   const isEdit = !!employee;
   const [form, setForm] = useState<Omit<Employee, "id" | "fullName" | "isArchived">>(
@@ -1992,7 +2007,7 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD, registeredBranche
       nasscorpNumber: employee.nasscorpNumber, allowances: employee.allowances,
       paymentMethod: employee.paymentMethod, bankName: employee.bankName,
       accountNumber: employee.accountNumber, momoNumber: employee.momoNumber,
-      branch: employee.branch ?? "", position: employee.position ?? "",
+      branch: employee.branch ?? "", branchId: employee.branchId ?? null, position: employee.position ?? "",
       taxId: employee.taxId ?? "", employmentStatus: employee.employmentStatus ?? "active",
       bankBranch: employee.bankBranch ?? "",
       portalEnabled: employee.portalEnabled ?? false,
@@ -2010,7 +2025,14 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD, registeredBranche
   async function submit() {
     if (!valid) return;
     setSaving(true);
-    try { await onSave(form); onClose(); }
+    try {
+      const synced = syncBranchAssignment(
+        { branchId: form.branchId, branch: form.branch },
+        orgBranches,
+      );
+      await onSave({ ...form, branchId: synced.branchId, branch: synced.branch });
+      onClose();
+    }
     finally { setSaving(false); }
   }
 
@@ -2112,20 +2134,30 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD, registeredBranche
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                 <Field label="Branch">
-                  {registeredBranches.length > 0 ? (
-                    <Sel value={form.branch ?? ""} onChange={(v) => set("branch", v)}>
-                      <option value="">Unassigned</option>
-                      {registeredBranches.map((b) => (
-                        <option key={b.id} value={b.name}>{b.name}</option>
-                      ))}
-                      {form.branch &&
-                        !registeredBranches.some((b) => b.name === form.branch) && (
-                          <option value={form.branch}>{form.branch} (not registered)</option>
-                        )}
-                    </Sel>
-                  ) : (
-                    <Inp value={form.branch ?? ""} onChange={(v) => set("branch", v)} placeholder="e.g. Sinkor"/>
-                  )}
+                  <Sel
+                    value={
+                      form.branchId
+                      ?? orgBranches.find((b) => b.name.trim().toLowerCase() === (form.branch ?? "").trim().toLowerCase())?.id
+                      ?? ""
+                    }
+                    onChange={(v) => {
+                      if (!v) {
+                        setForm((p) => ({ ...p, branchId: null, branch: "" }));
+                        return;
+                      }
+                      const found = orgBranches.find((b) => b.id === v);
+                      setForm((p) => ({
+                        ...p,
+                        branchId: found?.id ?? v,
+                        branch: found?.name ?? p.branch ?? "",
+                      }));
+                    }}
+                  >
+                    <option value="">Unassigned</option>
+                    {orgBranches.map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </Sel>
                 </Field>
                 <Field label="Employment Status">
                   <Sel value={form.employmentStatus ?? "active"} onChange={(v) => set("employmentStatus", v)}>
@@ -2156,8 +2188,8 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD, registeredBranche
                 </Field>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                <Field label="NASSCORP SS Number">
-                  <Inp value={form.nasscorpNumber} onChange={(v) => set("nasscorpNumber", v)} placeholder="123456789"/>
+                <Field label="NASSCORP Number">
+                  <Inp value={form.nasscorpNumber} onChange={(v) => set("nasscorpNumber", v)} placeholder="NSC-001-2024"/>
                 </Field>
                 <Field label="Tax ID (TIN)">
                   <Inp value={form.taxId ?? ""} onChange={(v) => set("taxId", v)} placeholder="LR-TIN-XXXXXXX"/>
@@ -2185,7 +2217,7 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD, registeredBranche
                   </p>
                 )}
                 <Field label={`Rate / hr (${form.currency})`}>
-                  <Inp type="number" value={form.rate} onChange={(v) => set("rate", parseFloat(v) || 0)} placeholder="8.50"/>
+                  <Inp type="number" step="0.01" min={0} value={form.rate} onChange={(v) => set("rate", parseFloat(v) || 0)} placeholder="8.50"/>
                 </Field>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
@@ -2397,43 +2429,68 @@ function RowActions({ emp, isArchived, onEdit, onArchive, onRestore, onDelete }:
 
 interface ImportResult {
   imported: number;
+  updated: number;
   skipped:  { rowNum: number; name: string; reasons: string[] }[];
 }
 
-function CSVUploadModal({ onClose, onImport, registeredBranches = [] }: {
+function CSVUploadModal({ onClose, onImport }: {
   onClose:  () => void;
   onImport: (rows: Partial<Employee>[]) => Promise<ImportResult>;
-  registeredBranches?: RegisteredBranch[];
 }) {
   const { toast }   = useToast();
-  const [parsed,    setParsed]    = useState<ParsedEmployeeCsvRow[] | null>(null);
+  const [parsed,    setParsed]    = useState<ParsedEmployeeRow[] | null>(null);
   const [importing, setImporting] = useState(false);
   const [result,    setResult]    = useState<ImportResult | null>(null);
+  const [branchApiError, setBranchApiError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleFile = useCallback((file: File) => {
-    if (!file.name.endsWith(".csv")) { toast.error("Please upload a .csv file."); return; }
+    if (!isSpreadsheetFilename(file.name)) {
+      toast.error("Please upload a .csv or Excel file.");
+      return;
+    }
     const reader = new FileReader();
-    reader.onload = (e) => {
-      setParsed(parseEmployeeCSV(e.target?.result as string, registeredBranches));
+    reader.onload = () => {
+      const buf = reader.result;
+      if (!(buf instanceof ArrayBuffer)) {
+        toast.error("Could not read that file.");
+        return;
+      }
+      const { rows, error } = parseEmployeeSpreadsheet(buf, file.name);
+      if (error && rows.length === 0) toast.error(error);
+      setParsed(previewEmployeeCsvRows(rows));
       setResult(null);
+      setBranchApiError(null);
+      void createOrgBranchApi().list().then((res) => {
+        if (isFatalBranchEnsureFailure(res)) {
+          setBranchApiError(
+            res.error?.trim() || `Could not load organization branches (${res.status}).`,
+          );
+        }
+      }).catch(() => {
+        setBranchApiError("Could not load organization branches.");
+      });
     };
-    reader.readAsText(file);
-  }, [toast, registeredBranches]);
+    reader.readAsArrayBuffer(file);
+  }, [toast]);
 
   const validRows = parsed?.filter((r) => r.errors.length === 0) ?? [];
   const errRows   = parsed?.filter((r) => r.errors.length > 0)   ?? [];
+  const emptyFile = parsed !== null && parsed.length === 0;
   const allFail   = parsed !== null && validRows.length === 0;
 
   async function handleImport() {
     if (!validRows.length || importing) return;
     setImporting(true);
-    const res = await onImport(validRows.map((r) => r.data));
-    setImporting(false);
-    if (errRows.length > 0) {
-      setResult(res);
-    } else {
-      onClose();
+    try {
+      const res = await onImport(validRows.map((r) => r.data));
+      if (res.skipped.length > 0) {
+        setResult(res);
+      } else {
+        onClose();
+      }
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -2518,19 +2575,45 @@ function CSVUploadModal({ onClose, onImport, registeredBranches = [] }: {
                 Drop CSV or click to browse
               </p>
               <p style={{ color: "var(--muted-foreground)", fontSize: 12 }}>
-                Use the Slipdesk employee template. Include a <strong style={{ color: "var(--foreground)" }}>Branch</strong> column
-                that matches a name on Organization (leave blank for Unassigned).
+                CSV or Excel (.xlsx) — employee_number, first/last name, rate
               </p>
               <input
-                ref={fileRef} type="file" accept=".csv"
+                ref={fileRef} type="file" accept={SPREADSHEET_ACCEPT}
                 style={{ display: "none" }}
-                onChange={(e) => handleFile(e.target.files![0])}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
               />
             </div>
           )}
 
           {parsed && !result && (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {branchApiError && (
+                <div style={{
+                  background: "color-mix(in oklch, var(--destructive) 12%, transparent)",
+                  border: "1px solid color-mix(in oklch, var(--destructive) 40%, transparent)",
+                  borderRadius: 12, padding: "14px 16px",
+                }}>
+                  <p style={{ color: "var(--destructive)", fontWeight: 700, fontSize: 13, margin: 0 }}>
+                    Could not load organization branches
+                  </p>
+                  <p style={{ color: "var(--muted-foreground)", fontSize: 12, margin: "6px 0 0" }}>
+                    {branchApiError === "Unauthorized" || /unauthor|authentication failed|session could not be verified/i.test(branchApiError)
+                      ? "Your session could not be verified. Sign in again, then retry the import. Missing branches are created on import — this is not a “branch not registered” error."
+                      : branchApiError}
+                  </p>
+                </div>
+              )}
+              {emptyFile && (
+                <div style={{
+                  background: "color-mix(in oklch, var(--destructive) 12%, transparent)",
+                  border: "1px solid color-mix(in oklch, var(--destructive) 40%, transparent)",
+                  borderRadius: 12, padding: "14px 16px",
+                }}>
+                  <p style={{ color: "var(--destructive)", fontWeight: 700, fontSize: 13, margin: 0 }}>
+                    No data rows found. The file is empty or only has a header.
+                  </p>
+                </div>
+              )}
               {validRows.length > 0 && (
                 <div style={{
                   background: "color-mix(in oklch, var(--primary) 12%, transparent)", border: "1px solid color-mix(in oklch, var(--primary) 30%, transparent)",
@@ -2622,7 +2705,7 @@ function CSVUploadModal({ onClose, onImport, registeredBranches = [] }: {
                 </div>
               )}
 
-              <button onClick={() => { setParsed(null); setResult(null); }} style={{
+              <button onClick={() => { setParsed(null); setResult(null); setBranchApiError(null); }} style={{
                 color: "var(--secondary)", fontSize: 12, background: "none",
                 border: "none", cursor: "pointer", textAlign: "left", padding: 0,
               }}>
@@ -2647,10 +2730,14 @@ function CSVUploadModal({ onClose, onImport, registeredBranches = [] }: {
                 </div>
                 <div>
                   <p style={{ color: "var(--primary)", fontWeight: 800, fontSize: 24, margin: 0, lineHeight: 1 }}>
-                    {result.imported}
+                    {result.imported + result.updated}
                   </p>
                   <p style={{ color: "var(--muted-foreground)", fontSize: 12, margin: "4px 0 0" }}>
-                    employee{result.imported !== 1 ? "s" : ""} imported successfully
+                    {result.updated > 0 && result.imported > 0
+                      ? `${result.updated} updated, ${result.imported} created`
+                      : result.updated > 0
+                        ? `employee${result.updated !== 1 ? "s" : ""} updated`
+                        : `employee${result.imported !== 1 ? "s" : ""} imported successfully`}
                   </p>
                 </div>
               </div>
@@ -2733,12 +2820,12 @@ function CSVUploadModal({ onClose, onImport, registeredBranches = [] }: {
                 Cancel
               </button>
               <button
-                disabled={!validRows.length || importing}
+                disabled={!validRows.length || importing || !!branchApiError}
                 onClick={handleImport}
                 style={{
                   flex: 2, padding: "10px 16px", borderRadius: 10,
-                  cursor: validRows.length && !importing ? "pointer" : "not-allowed",
-                  background: validRows.length && !importing ? "var(--primary)" : "color-mix(in oklch, var(--primary) 45%, transparent)",
+                  cursor: validRows.length && !importing && !branchApiError ? "pointer" : "not-allowed",
+                  background: validRows.length && !importing && !branchApiError ? "var(--primary)" : "color-mix(in oklch, var(--primary) 45%, transparent)",
                   border: "none", color: "var(--primary-foreground)", fontSize: 13, fontWeight: 700,
                   display: "flex", alignItems: "center", justifyContent: "center",
                   gap: 6, transition: "all 0.2s",
@@ -2840,27 +2927,33 @@ export default function EmployeesPage() {
 
   const [search,        setSearch]        = useState("");
   const [deptFilter,    setDeptFilter]    = useState("All");
-  const [branchFilter,  setBranchFilter]  = useState(ALL_BRANCH_FILTER);
+  const [branchFilter,  setBranchFilter]  = useState("All");
   const [genderFilter,  setGenderFilter]  = useState("All");
   const [showArchived,  setShowArchived]  = useState(false);
   const [showUpload,    setShowUpload]    = useState(false);
   const [drawerEmp,     setDrawerEmp]     = useState<Employee | undefined>(undefined);
   const [showDrawer,    setShowDrawer]    = useState(false);
   const [selected,      setSelected]      = useState<Set<string>>(new Set());
-  const [registeredBranches, setRegisteredBranches] = useState<RegisteredBranch[]>([]);
+  const [pendingDelete, setPendingDelete] = useState<{ ids: string[]; label: string } | null>(null);
+  const [deleteBusy,    setDeleteBusy]    = useState(false);
+  const [orgBranches,   setOrgBranches]   = useState<{ id: string; name: string }[]>([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/org/units?kind=branches")
-      .then((r) => r.json())
-      .then((d) => {
-        if (!cancelled) setRegisteredBranches(d.items ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setRegisteredBranches([]);
-      });
-    return () => { cancelled = true; };
+  const loadOrgBranches = useCallback(async () => {
+    try {
+      const res = await createOrgBranchApi().list();
+      if (res.status < 200 || res.status >= 300) {
+        // A 401/error is not "this org has no branches". Keep the last good list.
+        return;
+      }
+      setOrgBranches(
+        (res.items ?? []).filter((i): i is { id: string; name: string } => Boolean(i.id && i.name)),
+      );
+    } catch {
+      // keep previous
+    }
   }, []);
+
+  useEffect(() => { void loadOrgBranches(); }, [loadOrgBranches]);
 
   const allEmployees = useMemo(
     () => [...employees, ...archivedEmployees],
@@ -2871,7 +2964,7 @@ export default function EmployeesPage() {
     return employees.filter((e) => {
       if (e.isArchived !== showArchived) return false;
       if (deptFilter !== "All" && e.department !== deptFilter) return false;
-      if (branchFilter !== ALL_BRANCH_FILTER && !employeeMatchesBranchFilter(e.branch, branchFilter, registeredBranches)) return false;
+      if (branchFilter !== "All" && !employeeMatchesBranchFilter(e, branchFilter, orgBranches)) return false;
       if (genderFilter !== "All" && (e.gender ?? "") !== genderFilter) return false;
       const q = search.toLowerCase();
       if (!q) return true;
@@ -2885,25 +2978,23 @@ export default function EmployeesPage() {
         e.employeeNumber.toLowerCase().includes(q)
       );
     });
-  }, [employees, showArchived, deptFilter, branchFilter, genderFilter, search, registeredBranches]);
+  }, [employees, showArchived, deptFilter, branchFilter, genderFilter, search, orgBranches]);
 
   const branchOptions = useMemo(
-    () => branchFilterOptions(registeredBranches, employees),
-    [registeredBranches, employees],
+    () => [
+      { value: "All", label: "All Branches" },
+      { value: UNASSIGNED_BRANCH_FILTER, label: "Unassigned" },
+      ...orgBranches.map((b) => ({ value: b.id, label: b.name })),
+    ],
+    [orgBranches],
   );
-
-  const stats = useMemo(() => ({
-    total:    employees.filter((e) => !e.isArchived).length,
-    active:   employees.filter((e) => !e.isArchived && e.isActive).length,
-    archived: employees.filter((e) => e.isArchived).length,
-  }), [employees]);
 
   /** Same filters as the table, except gender — so the breakdown does not collapse to one bar. */
   const headcountViewed = useMemo(() => {
     return employees.filter((e) => {
       if (e.isArchived !== showArchived) return false;
       if (deptFilter !== "All" && e.department !== deptFilter) return false;
-      if (branchFilter !== ALL_BRANCH_FILTER && !employeeMatchesBranchFilter(e.branch, branchFilter, registeredBranches)) return false;
+      if (branchFilter !== "All" && !employeeMatchesBranchFilter(e, branchFilter, orgBranches)) return false;
       const q = search.toLowerCase();
       if (!q) return true;
       return (
@@ -2916,12 +3007,19 @@ export default function EmployeesPage() {
         e.employeeNumber.toLowerCase().includes(q)
       );
     });
-  }, [employees, showArchived, deptFilter, branchFilter, search, registeredBranches]);
+  }, [employees, showArchived, deptFilter, branchFilter, search, orgBranches]);
 
   const allActiveForHeadcount = useMemo(
     () => employees.filter((e) => !e.isArchived),
     [employees],
   );
+
+
+  const stats = useMemo(() => ({
+    total:    employees.filter((e) => !e.isArchived).length,
+    active:   employees.filter((e) => !e.isArchived && e.isActive).length,
+    archived: employees.filter((e) => e.isArchived).length,
+  }), [employees]);
 
   const activeCount   = employees.filter(e => e.isActive && !e.isArchived).length;
   const tierLimits    = { basic: 80, standard: 499, premium: Infinity } as const;
@@ -2931,13 +3029,30 @@ export default function EmployeesPage() {
 
   async function handleBulkImport(rows: Partial<Employee>[]): Promise<ImportResult> {
     if (!guardAction("import_employees")) {
-      return { imported: 0, skipped: [{ rowNum: 0, name: "Import", reasons: ["Demo read-only"] }] };
+      return { imported: 0, updated: 0, skipped: [{ rowNum: 0, name: "Import", reasons: ["Demo read-only"] }] };
     }
-    const usedNumbers = new Set(
-      allEmployees.map((e) => e.employeeNumber.trim().toLowerCase()).filter(Boolean),
+
+    const ensured = await ensureOrgBranchesForImport(
+      rows.map((r) => r.branch),
+      createOrgBranchApi(),
     );
-    const existingNums = allEmployees
-      .map((e) => parseInt(e.employeeNumber.replace(/\D/g, ""), 10))
+    if (!ensured.ok) {
+      toast.error(ensured.error);
+      return {
+        imported: 0,
+        updated: 0,
+        skipped: [{ rowNum: 0, name: "Branches", reasons: [ensured.error] }],
+      };
+    }
+
+    const resolvedRows = rows.map((row) => applyEnsuredBranch(row, ensured));
+
+    const roster = [...allEmployees];
+    const usedNumbers = new Set(
+      roster.map((e) => (e.employeeNumber ?? "").trim().toLowerCase()).filter(Boolean),
+    );
+    const existingNums = roster
+      .map((e) => parseInt((e.employeeNumber ?? "").replace(/\D/g, ""), 10))
       .filter(Boolean);
     let nextNum = existingNums.length ? Math.max(...existingNums) + 1 : 1;
 
@@ -2950,37 +3065,47 @@ export default function EmployeesPage() {
     };
 
     let imported = 0;
+    let updated = 0;
     const skipped: ImportResult["skipped"] = [];
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
+    for (let i = 0; i < resolvedRows.length; i++) {
+      const row = resolvedRows[i];
       const csvNum = (row.employeeNumber ?? "").trim();
       const name = [row.firstName, row.middleName, row.lastName].filter(Boolean).join(" ");
-
-      if (csvNum && usedNumbers.has(csvNum.toLowerCase())) {
-        skipped.push({
-          rowNum: i + 2,
-          name,
-          reasons: [`Employee number "${csvNum}" already exists`],
-        });
-        continue;
-      }
-
-      const empNum = csvNum || nextAutoNumber();
-      usedNumbers.add(empNum.toLowerCase());
+      const classified = classifyEmployeeImport(roster, csvNum);
 
       try {
-        await addEmployee(
-          { ...(row as Omit<Employee, "id" | "fullName" | "isArchived">), isActive: true, employeeNumber: empNum },
-          empNum,
-        );
-        imported++;
+        if (classified.action === "update") {
+          const existing = classified.existing;
+          if (existing.isArchived) {
+            await restoreEmployee(existing.id);
+          }
+          await updateEmployee(existing.id, {
+            ...(row as Omit<Employee, "id" | "fullName" | "isArchived">),
+            isActive: true,
+            employeeNumber: existing.employeeNumber,
+          });
+          const idx = roster.findIndex((e) => e.id === existing.id);
+          if (idx >= 0) {
+            roster[idx] = { ...roster[idx], ...row, isArchived: false, isActive: true };
+          }
+          updated++;
+        } else {
+          const empNum = csvNum || nextAutoNumber();
+          usedNumbers.add(empNum.toLowerCase());
+          const saved = await addEmployee(
+            { ...(row as Omit<Employee, "id" | "fullName" | "isArchived">), isActive: true, employeeNumber: empNum },
+            empNum,
+          );
+          imported++;
+          if (saved) roster.push(saved);
+        }
       } catch (err) {
         let errorMessage = "Unknown error";
         if (err instanceof Error) {
           errorMessage = err.message;
         } else if (typeof err === "object" && err !== null) {
-          errorMessage = (err as any).message ?? JSON.stringify(err);
+          errorMessage = (err as { message?: string }).message ?? JSON.stringify(err);
         } else {
           errorMessage = String(err);
         }
@@ -2988,27 +3113,31 @@ export default function EmployeesPage() {
         console.error(`Row ${i + 2} failed:`, err);
         skipped.push({
           rowNum: i + 2,
-          name: [row.firstName, row.middleName, row.lastName].filter(Boolean).join(" "),
+          name,
           reasons: [errorMessage],
         });
       }
     }
 
     await refreshEmployees();
+    await loadOrgBranches();
 
-    if (imported > 0) {
+    const saved = imported + updated;
+    const parts: string[] = [];
+    if (updated) parts.push(`${updated} updated`);
+    if (imported) parts.push(`${imported} created`);
+
+    if (saved > 0) {
       toast.success(
         skipped.length > 0
-          ? `${imported} imported, ${skipped.length} skipped — see details below.`
-          : `Successfully imported ${imported} employee${imported !== 1 ? "s" : ""}.`
+          ? `${parts.join(", ")} — ${skipped.length} skipped — see details below.`
+          : parts.join(", ") + ".",
       );
     } else {
       toast.error("No employees were imported. Check the errors below.");
     }
 
-    if (skipped.length === 0) setShowUpload(false);
-
-    return { imported, skipped };
+    return { imported, updated, skipped };
   }
 
   async function handleSaveEmployee(data: Omit<Employee, "id" | "fullName" | "isArchived">) {
@@ -3048,11 +3177,63 @@ export default function EmployeesPage() {
     await restoreEmployee(id);
     toast.success("Employee restored.");
   }
-  async function handleDelete(id: string) {
+  function requestDelete(id: string) {
     if (!guardAction("delete_employee")) return;
-    await hardDeleteEmployee(id);
-    setSelected((prev) => { const n = new Set(prev); n.delete(id); return n; });
-    toast.success("Employee deleted.");
+    const emp = allEmployees.find((e) => e.id === id);
+    const name = emp?.fullName
+      || [emp?.firstName, emp?.lastName].filter(Boolean).join(" ")
+      || "this employee";
+    const number = emp?.employeeNumber ? ` (${emp.employeeNumber})` : "";
+    setPendingDelete({ ids: [id], label: `${name}${number}` });
+  }
+
+  function requestBulkDelete() {
+    if (!guardAction("delete_employee")) return;
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setPendingDelete({
+      ids,
+      label: ids.length === 1
+        ? "the selected employee"
+        : `${ids.length} selected employees`,
+    });
+  }
+
+  async function confirmPendingDelete() {
+    if (!pendingDelete) return;
+    setDeleteBusy(true);
+    const ids = pendingDelete.ids;
+    let successCount = 0;
+    try {
+      for (const id of ids) {
+        try {
+          await hardDeleteEmployee(id);
+          successCount++;
+        } catch (err) {
+          console.error("Failed to delete employee:", id, err);
+          if (ids.length === 1) {
+            toast.error(err instanceof Error ? err.message : "Delete failed.");
+          }
+        }
+      }
+      setSelected((prev) => {
+        const n = new Set(prev);
+        for (const id of ids) n.delete(id);
+        return n;
+      });
+      if (successCount > 0) {
+        toast.success(
+          successCount === 1
+            ? "Employee deleted."
+            : `${successCount} employees deleted.`,
+        );
+      } else if (ids.length > 1) {
+        toast.error("Delete failed — please try again.");
+      }
+      setPendingDelete(null);
+    } finally {
+      setDeleteBusy(false);
+    }
   }
 
   async function handleBulkArchive() {
@@ -3072,24 +3253,6 @@ export default function EmployeesPage() {
       toast.success(`${successCount} employee${successCount !== 1 ? "s" : ""} archived.`);
     } else {
       toast.error("Archive failed — please try again.");
-    }
-  }
-  async function handleBulkDelete() {
-    const ids = Array.from(selected);
-    setSelected(new Set());
-    let successCount = 0;
-    for (const id of ids) {
-      try {
-        await hardDeleteEmployee(id);
-        successCount++;
-      } catch (err) {
-        console.error("Failed to delete employee:", id, err);
-      }
-    }
-    if (successCount > 0) {
-      toast.success(`${successCount} employee${successCount !== 1 ? "s" : ""} deleted.`);
-    } else {
-      toast.error("Delete failed — please try again.");
     }
   }
 
@@ -3263,16 +3426,12 @@ export default function EmployeesPage() {
             style={{
               padding: "9px 32px 9px 12px", background: "var(--card)",
               border: "1px solid var(--border)", borderRadius: 10,
-              color: branchFilter === ALL_BRANCH_FILTER ? "var(--muted-foreground)" : "var(--foreground)",
+              color: branchFilter === "All" ? "var(--muted-foreground)" : "var(--foreground)",
               fontSize: 13, fontFamily: "'DM Sans',sans-serif",
               outline: "none", cursor: "pointer", appearance: "none",
             }}
           >
-            {branchOptions.map((d) => (
-              <option key={d} value={d}>
-                {d === ALL_BRANCH_FILTER ? "All Branches" : d === UNASSIGNED_BRANCH_FILTER ? "Unassigned" : d}
-              </option>
-            ))}
+            {branchOptions.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
           </select>
           <ChevronDown size={13} color="var(--muted-foreground)" style={{ position: "absolute", right: 10, pointerEvents: "none" }}/>
         </div>
@@ -3313,8 +3472,10 @@ export default function EmployeesPage() {
       <GenderHeadcountCard
         viewed={headcountViewed}
         allActive={allActiveForHeadcount}
-        branchFilter={branchFilter}
-        branchOptions={branchOptions}
+        branchFilter={branchFilter === "All" || branchFilter === UNASSIGNED_BRANCH_FILTER
+          ? branchFilter
+          : (orgBranches.find((b) => b.id === branchFilter)?.name ?? branchFilter)}
+        branchOptions={["All", ...orgBranches.map((b) => b.name)]}
         genderFilterActive={genderFilter !== "All"}
         companyName={company.name}
         onBlocked={() => guardAction("export_download")}
@@ -3439,7 +3600,7 @@ export default function EmployeesPage() {
                         onEdit={openEdit}
                         onArchive={handleArchive}
                         onRestore={handleRestore}
-                        onDelete={handleDelete}
+                        onDelete={requestDelete}
                       />
                     </td>
                   </tr>
@@ -3461,7 +3622,7 @@ export default function EmployeesPage() {
           count={selected.size}
           isArchiveView={showArchived}
           onArchive={handleBulkArchive}
-          onDelete={handleBulkDelete}
+          onDelete={requestBulkDelete}
           onClear={() => setSelected(new Set())}
         />
       )}
@@ -3472,14 +3633,23 @@ export default function EmployeesPage() {
           onClose={() => setShowDrawer(false)}
           onSave={handleSaveEmployee}
           allowLRD={allowLRD}
-          registeredBranches={registeredBranches}
+          orgBranches={orgBranches}
         />
       )}
       {showUpload && (
         <CSVUploadModal
           onClose={() => setShowUpload(false)}
           onImport={handleBulkImport}
-          registeredBranches={registeredBranches}
+        />
+      )}
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Permanently delete?"
+          body={`This will permanently delete ${pendingDelete.label}. This cannot be undone — archive instead if you may need the record later.`}
+          confirmLabel={pendingDelete.ids.length > 1 ? `Delete ${pendingDelete.ids.length}` : "Delete"}
+          busy={deleteBusy}
+          onCancel={() => { if (!deleteBusy) setPendingDelete(null); }}
+          onConfirm={() => { void confirmPendingDelete(); }}
         />
       )}
 

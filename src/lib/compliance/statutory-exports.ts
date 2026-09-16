@@ -4,6 +4,11 @@
  */
 
 import type { EmployeePayroll } from "@/lib/reporting";
+import {
+  optionalFiniteNumber,
+  resolveNasscorpBase,
+  resolveTaxablePay,
+} from "@/lib/payroll/statutory-bases";
 
 export interface StatutoryEmployerInfo {
   companyName: string;
@@ -96,7 +101,13 @@ export interface FinalizedPayrollLine {
   incomeTax: number;
   nasscorpEe: number;
   nasscorpEr: number;
+  /** PAYE base used at finalization (regular + OT + holiday). */
+  taxablePay?: number;
+  /** NASSCORP contribution base used at finalization (regularSalary). */
   nasscorpBase?: number;
+  /** Present so pre-migration rows can reconstruct nasscorp.base = rate × hours. */
+  rate?: number;
+  regularHours?: number;
   nasscorpNumber?: string;
   paymentMethod?: string;
   accountNumber?: string;
@@ -106,37 +117,124 @@ export interface FinalizedPayrollLine {
   runType?: string;
 }
 
+/** Snake_case fields read from a pay_run_lines row (partial rows allowed). */
+export type PayRunLineRowInput = {
+  employee_id?: string | null;
+  employee_number?: string | number | null;
+  full_name?: string | null;
+  department?: string | null;
+  currency?: string | null;
+  gross_pay?: number | string | null;
+  additional_earnings?: number | string | null;
+  deductions?: number | string | null;
+  net_pay?: number | string | null;
+  income_tax?: number | string | null;
+  nasscorp_ee?: number | string | null;
+  nasscorp_er?: number | string | null;
+  taxable_pay?: number | string | null;
+  nasscorp_base?: number | string | null;
+  rate?: number | string | null;
+  regular_hours?: number | string | null;
+};
+
+/** Employee fields joined onto a finalized line for disbursement / NASSCORP export. */
+export type EmployeePayExtras = {
+  nasscorp_number?: string | null;
+  payment_method?: string | null;
+  account_number?: string | null;
+  momo_number?: string | null;
+  branch?: string | null;
+};
+
+/**
+ * Map a persisted pay_run_lines row to the export/report shape.
+ * Prefers taxable_pay / nasscorp_base when present; otherwise reconstructs.
+ */
+export function mapPayRunLineRowToFinalized(
+  l: PayRunLineRowInput,
+  emp?: EmployeePayExtras,
+): FinalizedPayrollLine {
+  const grossPay = Number(l.gross_pay ?? 0);
+  const additionalEarnings = Number(l.additional_earnings ?? 0);
+  const rate = optionalFiniteNumber(l.rate);
+  const regularHours = optionalFiniteNumber(l.regular_hours);
+  return {
+    employeeNumber: String(l.employee_number ?? ""),
+    fullName: String(l.full_name ?? ""),
+    department: l.department ?? undefined,
+    currency: String(l.currency ?? "USD"),
+    grossPay,
+    additionalEarnings,
+    deductions: Number(l.deductions ?? 0),
+    netPay: Number(l.net_pay ?? 0),
+    incomeTax: Number(l.income_tax ?? 0),
+    nasscorpEe: Number(l.nasscorp_ee ?? 0),
+    nasscorpEr: Number(l.nasscorp_er ?? 0),
+    taxablePay: resolveTaxablePay({
+      taxablePay: l.taxable_pay,
+      grossPay,
+      additionalEarnings,
+    }),
+    nasscorpBase: resolveNasscorpBase({
+      nasscorpBase: l.nasscorp_base,
+      rate,
+      regularHours,
+    }),
+    rate,
+    regularHours,
+    nasscorpNumber: emp?.nasscorp_number ?? "",
+    paymentMethod: emp?.payment_method ?? "cash",
+    accountNumber: emp?.account_number ?? "",
+    mobileNumber: emp?.momo_number ?? "",
+    branch: emp?.branch ?? "",
+  };
+}
+
 export function lraExportRowsFromFinalized(
   employer: StatutoryEmployerInfo,
   lines: FinalizedPayrollLine[],
 ): string[][] {
-  return lines.map((l) => [
-    employer.companyName,
-    employer.tin ?? "",
-    employer.periodLabel,
-    l.employeeNumber,
-    l.fullName,
-    l.grossPay.toFixed(2),
-    l.grossPay.toFixed(2),
-    l.incomeTax.toFixed(2),
-    l.currency,
-  ]);
+  return lines.map((l) => {
+    const taxable = resolveTaxablePay({
+      taxablePay: l.taxablePay,
+      grossPay: l.grossPay,
+      additionalEarnings: l.additionalEarnings,
+    });
+    return [
+      employer.companyName,
+      employer.tin ?? "",
+      employer.periodLabel,
+      l.employeeNumber,
+      l.fullName,
+      l.grossPay.toFixed(2),
+      taxable.toFixed(2),
+      l.incomeTax.toFixed(2),
+      l.currency,
+    ];
+  });
 }
 
 export function nasscorpExportRowsFromFinalized(
   employer: StatutoryEmployerInfo,
   lines: FinalizedPayrollLine[],
 ): string[][] {
-  return lines.map((l) => [
-    employer.companyName,
-    employer.nasscorpRegNo ?? "",
-    employer.periodLabel,
-    l.employeeNumber,
-    l.fullName,
-    l.nasscorpNumber ?? "",
-    l.nasscorpEe.toFixed(2),
-    l.nasscorpEr.toFixed(2),
-    (l.nasscorpBase ?? l.grossPay).toFixed(2),
-    l.currency,
-  ]);
+  return lines.map((l) => {
+    const base = resolveNasscorpBase({
+      nasscorpBase: l.nasscorpBase,
+      rate: l.rate,
+      regularHours: l.regularHours,
+    });
+    return [
+      employer.companyName,
+      employer.nasscorpRegNo ?? "",
+      employer.periodLabel,
+      l.employeeNumber,
+      l.fullName,
+      l.nasscorpNumber ?? "",
+      l.nasscorpEe.toFixed(2),
+      l.nasscorpEr.toFixed(2),
+      (base ?? 0).toFixed(2),
+      l.currency,
+    ];
+  });
 }

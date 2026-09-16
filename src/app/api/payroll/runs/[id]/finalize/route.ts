@@ -76,29 +76,44 @@ export async function POST(req: NextRequest, ctx: RouteCtx) {
 
   const lineRows = lines
     .filter((l: { calc?: unknown }) => l.calc)
-    .map((l: Record<string, unknown>) => ({
-      pay_run_id: id,
-      company_id: access.companyId,
-      employee_id: l.employeeId,
-      employee_number: l.employeeNumber,
-      full_name: l.fullName,
-      job_title: l.jobTitle,
-      department: l.department,
-      currency: l.currency,
-      rate: l.rate,
-      regular_hours: l.regularHours,
-      overtime_hours: l.overtimeHours,
-      holiday_hours: l.holidayHours,
-      additional_earnings: l.additionalEarnings,
-      deductions: l.deductions ?? 0,
-      deduction_items: l.deductionItems ?? null,
-      exchange_rate: l.exchangeRate,
-      gross_pay: (l.calc as { grossPay: number }).grossPay,
-      income_tax: (l.calc as { Paye: { taxInBase: number } }).Paye.taxInBase,
-      nasscorp_ee: (l.calc as { nasscorp: { employeeContribution: number } }).nasscorp.employeeContribution,
-      nasscorp_er: (l.calc as { nasscorp: { employerContribution: number } }).nasscorp.employerContribution,
-      net_pay: (l.calc as { netPay: number }).netPay,
-    }));
+    .map((l: Record<string, unknown>) => {
+      const calc = l.calc as {
+        grossPay: number;
+        netPay: number;
+        regularSalary: number;
+        overtimePay: number;
+        holidayPay: number;
+        Paye: { taxInBase: number };
+        nasscorp: {
+          base: number;
+          employeeContribution: number;
+          employerContribution: number;
+        };
+      };
+      return {
+        pay_run_id: id,
+        company_id: access.companyId,
+        employee_id: l.employeeId,
+        employee_number: l.employeeNumber,
+        full_name: l.fullName,
+        job_title: l.jobTitle,
+        department: l.department,
+        currency: l.currency,
+        rate: l.rate,
+        regular_hours: l.regularHours,
+        overtime_hours: l.overtimeHours,
+        holiday_hours: l.holidayHours,
+        additional_earnings: l.additionalEarnings,
+        deductions: l.deductions ?? 0,
+        deduction_items: l.deductionItems ?? null,
+        exchange_rate: l.exchangeRate,
+        gross_pay: calc.grossPay,
+        income_tax: calc.Paye.taxInBase,
+        nasscorp_ee: calc.nasscorp.employeeContribution,
+        nasscorp_er: calc.nasscorp.employerContribution,
+        net_pay: calc.netPay,
+      };
+    });
 
   if (lineRows.length) {
     const { error: lineErr } = await db.from("pay_run_lines").insert(lineRows);

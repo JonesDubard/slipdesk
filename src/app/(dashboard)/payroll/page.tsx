@@ -12,12 +12,17 @@ import {
   AlertTriangle, CheckCircle2, Upload, ChevronRight,
   FileText, Lock, Play, Clock, Download, FileDown,
   Loader, Plus, Calendar, RefreshCw, DollarSign, Users,
-  TrendingUp, Zap, Shield, Mail, Search, ChevronDown, ArrowUpDown,
+  TrendingUp, Zap, Shield, Mail, Search, ChevronDown, ArrowUpDown, Trash2,
 } from "lucide-react";
-import { calculatePayroll } from "@/lib/slipdesk-payroll-engine";
 import type { PayRunLine } from "@/lib/mock-data";
 import BulkUpload, { type BulkRow } from "@/components/BulkUpload";
-import { resolveImportedBranch } from "@/lib/org/branch-assignment";
+import { findEmployeeByNumber } from "@/lib/csv/match-employee";
+import {
+  applyEnsuredBranch,
+  createOrgBranchApi,
+  ensureOrgBranchesForImport,
+} from "@/lib/csv/resolve-branch";
+import { gridReducer, recalcLine, type GridAction } from "@/lib/payroll/grid-reducer";
 import { useApp } from "@/context/AppContext";
 import PageSkeleton from "@/components/PageSkeleton";
 import { createClient } from "@/lib/supabase/client";
@@ -30,6 +35,14 @@ import {
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
 import { usePayrollDraftAutosave, createPayrollDraft, loadActivePayrollDraft, finalizePayrollRun, patchPayrollRunStatus, abandonPayrollDraft } from "@/hooks/usePayrollDraft";
 import { filterEmployeesForBranchScope } from "@/lib/payroll/branch-scope";
+import {
+  filterPayRunView,
+  uniqueDepartmentsFromLines,
+  uniquePaymentMethodsFromLines,
+  PAYMENT_METHOD_FILTER_LABELS,
+  PAYROLL_VIEW_ALL,
+  type PayRunViewSortBy,
+} from "@/lib/payroll/grid-view-filter";
 import { can, type Permission } from "@/lib/rbac";
 import { logAudit, type AuditAction } from "@/lib/audit";
 import { createNotification, sendEmailNotification, type NotificationType, type NotificationSeverity } from "@/lib/notifications";
@@ -57,12 +70,6 @@ interface SavedRun {
   totalTax:number; totalNasscorp:number; exchangeRate:number;
   lines:PayRunLine[]; createdAt:string;
 }
-
-type GridAction =
-  | {type:"UPDATE_FIELD";id:string;field:keyof PayRunLine;value:number}
-  | {type:"IMPORT_ROWS";rows:PayRunLine[]}
-  | {type:"SET_ROWS";rows:PayRunLine[]}
-  | {type:"CLEAR"};
 
 interface PdfCompany {
   name:string; tin:string; nasscorpRegNo:string;
@@ -109,33 +116,6 @@ function bulkRowToPayRunLine(r: BulkRow, exchangeRate: number, realId?: string):
     paymentMethod: emp.paymentMethod,
     bankName: emp.bankName, accountNumber: emp.accountNumber, mobileNumber: emp.momoNumber,
   };
-}
-
-// ─── recalcLine ────────────────────────────────────────────────────────────────
-
-function recalcLine(line:PayRunLine):PayRunLine{
-  try{
-    const calc=calculatePayroll({
-      employeeId:line.employeeId,currency:line.currency,rate:line.rate,
-      regularHours:line.regularHours,overtimeHours:line.overtimeHours,holidayHours:line.holidayHours,
-      exchangeRate:line.exchangeRate,additionalEarnings:line.additionalEarnings,
-    });
-    const ded=line.deductions??0;
-    if(ded>0){
-      return {...line,calc:{...calc,netPay:Math.max(0,calc.netPay-ded),totalDeductions:calc.totalDeductions+ded}};
-    }
-    return {...line,calc};
-  }catch{return {...line,calc:null};}
-}
-
-function gridReducer(state:PayRunLine[],action:GridAction):PayRunLine[]{
-  switch(action.type){
-    case "UPDATE_FIELD": return state.map(l=>l.id!==action.id?l:recalcLine({...l,[action.field]:action.value}));
-    case "IMPORT_ROWS":  return [...state,...action.rows.map(recalcLine)];
-    case "SET_ROWS":     return action.rows.map(recalcLine);
-    case "CLEAR":        return [];
-    default:             return state;
-  }
 }
 
 function fmtMoney(n:number,sym:string){return `${sym}${n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`;}
@@ -786,7 +766,7 @@ function StatusStepper({current,onAdvance,saving=false,allowed=true,roleHint}:{c
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PayrollPage() {
-  const { employees, company, role, addEmployee, refreshEmployees, initializing } = useApp();
+  const { employees, archivedEmployees, company, role, addEmployee, updateEmployee, restoreEmployee, refreshEmployees, initializing } = useApp();
   const { toast } = useToast();
   const { guardAction } = useDemoGuard();
 
@@ -808,7 +788,9 @@ export default function PayrollPage() {
   const [branchName, setBranchName] = useState<string | null>(null);
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
   const [nameFilter, setNameFilter] = useState("");
-  const [nameSort, setNameSort] = useState<"asc" | "desc">("asc");
+  const [sortBy, setSortBy] = useState<PayRunViewSortBy>("number-asc");
+  const [deptFilter, setDeptFilter] = useState(PAYROLL_VIEW_ALL);
+  const [payMethodFilter, setPayMethodFilter] = useState(PAYROLL_VIEW_ALL);
 
   const effectiveTier = getEffectiveTier(company.subscriptionTier, company.billingBypass);
   const pdfCompany: PdfCompany = {
@@ -878,10 +860,12 @@ export default function PayrollPage() {
   }, [company.id, company.subscriptionTier, company.billingBypass]);
 
   useEffect(() => {
-    void fetch("/api/org/units?kind=branches")
-      .then((r) => r.json())
-      .then((d) => setBranches(d.items ?? []))
-      .catch(() => setBranches([]));
+    void createOrgBranchApi().list().then((res) => {
+      if (res.status < 200 || res.status >= 300) return;
+      setBranches(
+        (res.items ?? []).filter((i): i is { id: string; name: string } => Boolean(i.id && i.name)),
+      );
+    }).catch(() => { /* keep previous — a 401 is not "no branches" */ });
   }, []);
 
   const { autosaveState } = usePayrollDraftAutosave(
@@ -918,25 +902,27 @@ export default function PayrollPage() {
   }, [draftLoaded, initializing]);
 
   const scopedEmployees = useMemo(
-    () => filterEmployeesForBranchScope(employees, branchName),
-    [employees, branchName],
+    () => filterEmployeesForBranchScope(employees, branchName, { branchId }),
+    [employees, branchName, branchId],
   );
 
-  const displayLines = useMemo(() => {
-    let result = lines;
-    const q = nameFilter.trim().toLowerCase();
-    if (q) {
-      result = result.filter(
-        (l) =>
-          l.fullName.toLowerCase().includes(q) ||
-          l.employeeNumber.toLowerCase().includes(q),
-      );
-    }
-    return [...result].sort((a, b) => {
-      const cmp = a.fullName.localeCompare(b.fullName);
-      return nameSort === "asc" ? cmp : -cmp;
-    });
-  }, [lines, nameFilter, nameSort]);
+  const displayLines = useMemo(
+    () =>
+      filterPayRunView(lines, {
+        nameQuery: nameFilter,
+        department: deptFilter,
+        paymentMethod: payMethodFilter,
+        sortBy,
+      }),
+    [lines, nameFilter, deptFilter, payMethodFilter, sortBy],
+  );
+
+  const departmentOptions = useMemo(() => uniqueDepartmentsFromLines(lines), [lines]);
+  const paymentMethodOptions = useMemo(() => uniquePaymentMethodsFromLines(lines), [lines]);
+  const viewFilterActive =
+    Boolean(nameFilter.trim()) ||
+    deptFilter !== PAYROLL_VIEW_ALL ||
+    payMethodFilter !== PAYROLL_VIEW_ALL;
 
   const isLocked = status === "approved" || status === "paid";
   const warningCount = lines.filter((l) => l.calc && l.calc.warnings.length > 0).length;
@@ -1154,28 +1140,30 @@ export default function PayrollPage() {
           if (run && lines.length > 0) {
             const lineRows = lines
               .filter((l) => l.calc !== null)
-              .map((l) => ({
-                pay_run_id: run.id,
-                ...(companyId ? { company_id: companyId } : {}),
-                employee_id: l.employeeId,
-                employee_number: l.employeeNumber,
-                full_name: l.fullName,
-                job_title: l.jobTitle,
-                department: l.department,
-                currency: l.currency,
-                rate: l.rate,
-                regular_hours: l.regularHours,
-                overtime_hours: l.overtimeHours,
-                holiday_hours: l.holidayHours,
-                additional_earnings: l.additionalEarnings,
-                deductions: l.deductions ?? 0,
-                exchange_rate: l.exchangeRate,
-                gross_pay: l.calc!.grossPay,
-                income_tax: l.calc!.Paye.taxInBase,
-                nasscorp_ee: l.calc!.nasscorp.employeeContribution,
-                nasscorp_er: l.calc!.nasscorp.employerContribution,
-                net_pay: l.calc!.netPay,
-              }));
+              .map((l) => {
+                return {
+                  pay_run_id: run.id,
+                  ...(companyId ? { company_id: companyId } : {}),
+                  employee_id: l.employeeId,
+                  employee_number: l.employeeNumber,
+                  full_name: l.fullName,
+                  job_title: l.jobTitle,
+                  department: l.department,
+                  currency: l.currency,
+                  rate: l.rate,
+                  regular_hours: l.regularHours,
+                  overtime_hours: l.overtimeHours,
+                  holiday_hours: l.holidayHours,
+                  additional_earnings: l.additionalEarnings,
+                  deductions: l.deductions ?? 0,
+                  exchange_rate: l.exchangeRate,
+                  gross_pay: l.calc!.grossPay,
+                  income_tax: l.calc!.Paye.taxInBase,
+                  nasscorp_ee: l.calc!.nasscorp.employeeContribution,
+                  nasscorp_er: l.calc!.nasscorp.employerContribution,
+                  net_pay: l.calc!.netPay,
+                };
+              });
             const { error: lineErr } = await (supabase as any)
               .from("pay_run_lines")
               .insert(lineRows);
@@ -1278,6 +1266,9 @@ export default function PayrollPage() {
     setBranchId(null);
     setBranchName(null);
     setNameFilter("");
+    setSortBy("number-asc");
+    setDeptFilter(PAYROLL_VIEW_ALL);
+    setPayMethodFilter(PAYROLL_VIEW_ALL);
     setStatus("draft");
     setRunType("monthly");
     const p = getCurrentPeriod();
@@ -1287,28 +1278,61 @@ export default function PayrollPage() {
   }
 
   async function handleBulkImport(bulkRows: BulkRow[]) {
+    const ensured = await ensureOrgBranchesForImport(
+      bulkRows.map((r) => r.employee.branch),
+      createOrgBranchApi(),
+    );
+    if (!ensured.ok) {
+      toast.error(ensured.error);
+      return;
+    }
+
+    const resolvedRows = bulkRows.map((r) => ({
+      ...r,
+      employee: applyEnsuredBranch(r.employee, ensured),
+    }));
+
+    const roster = [...employees, ...archivedEmployees];
     const payRunLines: PayRunLine[] = [];
-    for (const r of bulkRows) {
+    let created = 0;
+    let matched = 0;
+
+    for (const r of resolvedRows) {
+      const existing = findEmployeeByNumber(roster, r.employee.employeeNumber);
       try {
-        const resolved = resolveImportedBranch(r.employee.branch, branches);
-        const saved = await addEmployee({
-          ...r.employee,
-          branch: resolved.branchName,
-          isActive: true,
-        });
-        payRunLines.push(bulkRowToPayRunLine(r, exchangeRate, saved?.id));
+        if (existing) {
+          if (existing.isArchived) {
+            await restoreEmployee(existing.id);
+          }
+          await updateEmployee(existing.id, { ...r.employee, isActive: true });
+          payRunLines.push(bulkRowToPayRunLine(r, exchangeRate, existing.id));
+          matched++;
+        } else {
+          const saved = await addEmployee({ ...r.employee, isActive: true });
+          payRunLines.push(bulkRowToPayRunLine(r, exchangeRate, saved?.id));
+          if (saved) {
+            roster.push(saved);
+            created++;
+          }
+        }
       } catch (err) {
         console.error("Failed to save bulk employee:", r.employee.employeeNumber, err);
-        payRunLines.push(bulkRowToPayRunLine(r, exchangeRate));
+        payRunLines.push(bulkRowToPayRunLine(r, exchangeRate, existing?.id));
+        if (existing) matched++;
       }
     }
+
     await refreshEmployees();
-    dispatch({ type: "IMPORT_ROWS", rows: payRunLines });
+    dispatch({ type: "MERGE_ROWS", rows: payRunLines });
     setShowUpload(false);
+
+    const parts: string[] = [];
+    if (matched) parts.push(`${matched} matched`);
+    if (created) parts.push(`${created} created`);
     toast.success(
-      `${payRunLines.length} employee${
-        payRunLines.length !== 1 ? "s" : ""
-      } imported and saved.`
+      parts.length
+        ? `${parts.join(", ")} — ${payRunLines.length} on this pay run.`
+        : `${payRunLines.length} employee${payRunLines.length !== 1 ? "s" : ""} imported.`,
     );
   }
 
@@ -1548,8 +1572,32 @@ export default function PayrollPage() {
           );
         },
       }),
+      col.display({
+        id: "remove",
+        header: "",
+        size: 36,
+        cell: (c) =>
+          isLocked ? null : (
+            <button
+              type="button"
+              title="Remove from this pay run"
+              onClick={() => dispatch({ type: "DELETE_ROW", id: c.row.original.id })}
+              style={{
+                display: "block",
+                margin: "0 auto",
+                background: "none",
+                border: "none",
+                padding: 4,
+                cursor: "pointer",
+                color: "var(--muted-foreground)",
+              }}
+            >
+              <Trash2 size={13} />
+            </button>
+          ),
+      }),
     ],
-    [isLocked, periodLabel, payDate, pdfCompany.logoUrl]
+    [isLocked, periodLabel, payDate, pdfCompany.logoUrl, dispatch]
   );
 
   const table = useReactTable({
@@ -2556,7 +2604,7 @@ export default function PayrollPage() {
                 <input
                   value={nameFilter}
                   onChange={(e) => setNameFilter(e.target.value)}
-                  placeholder="Filter by name or employee #…"
+                  placeholder="Jump to employee # or name…"
                   style={{
                     width: "100%",
                     padding: "9px 12px 9px 34px",
@@ -2571,8 +2619,57 @@ export default function PayrollPage() {
               </div>
               <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
                 <select
-                  value={nameSort}
-                  onChange={(e) => setNameSort(e.target.value as "asc" | "desc")}
+                  value={deptFilter}
+                  onChange={(e) => setDeptFilter(e.target.value)}
+                  aria-label="Filter by department"
+                  style={{
+                    padding: "9px 32px 9px 12px",
+                    background: "var(--card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 10,
+                    color: deptFilter === PAYROLL_VIEW_ALL ? "var(--muted-foreground)" : "var(--foreground)",
+                    fontSize: 13,
+                    outline: "none",
+                    cursor: "pointer",
+                    appearance: "none",
+                  }}
+                >
+                  <option value={PAYROLL_VIEW_ALL}>All Departments</option>
+                  {departmentOptions.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+                <ChevronDown size={13} color="var(--muted-foreground)" style={{ position: "absolute", right: 10, pointerEvents: "none" }} />
+              </div>
+              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <select
+                  value={payMethodFilter}
+                  onChange={(e) => setPayMethodFilter(e.target.value)}
+                  aria-label="Filter by payment method"
+                  style={{
+                    padding: "9px 32px 9px 12px",
+                    background: "var(--card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 10,
+                    color: payMethodFilter === PAYROLL_VIEW_ALL ? "var(--muted-foreground)" : "var(--foreground)",
+                    fontSize: 13,
+                    outline: "none",
+                    cursor: "pointer",
+                    appearance: "none",
+                  }}
+                >
+                  <option value={PAYROLL_VIEW_ALL}>All Payment Methods</option>
+                  {paymentMethodOptions.map((m) => (
+                    <option key={m} value={m}>{PAYMENT_METHOD_FILTER_LABELS[m] ?? m}</option>
+                  ))}
+                </select>
+                <ChevronDown size={13} color="var(--muted-foreground)" style={{ position: "absolute", right: 10, pointerEvents: "none" }} />
+              </div>
+              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as PayRunViewSortBy)}
+                  aria-label="Sort pay-run rows"
                   style={{
                     padding: "9px 32px 9px 12px",
                     background: "var(--card)",
@@ -2585,12 +2682,14 @@ export default function PayrollPage() {
                     appearance: "none",
                   }}
                 >
-                  <option value="asc">Name A → Z</option>
-                  <option value="desc">Name Z → A</option>
+                  <option value="number-asc"># 1 → 9</option>
+                  <option value="number-desc"># 9 → 1</option>
+                  <option value="name-asc">Name A → Z</option>
+                  <option value="name-desc">Name Z → A</option>
                 </select>
                 <ChevronDown size={13} color="var(--muted-foreground)" style={{ position: "absolute", right: 10, pointerEvents: "none" }} />
               </div>
-              {(nameFilter || displayLines.length !== lines.length) && (
+              {viewFilterActive && (
                 <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
                   Showing {displayLines.length} of {lines.length}
                 </span>
@@ -2645,11 +2744,10 @@ export default function PayrollPage() {
                         cursor: "default",
                       }}
                       onMouseEnter={(e) => {
-                        (e.currentTarget as HTMLElement).style.background =
-                          "color-mix(in oklch, var(--foreground) 5%, var(--card))";
+                        e.currentTarget.style.background = "color-mix(in oklch, var(--foreground) 5%, var(--card))";
                       }}
                       onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLElement).style.background = "transparent";
+                        e.currentTarget.style.background = "transparent";
                       }}
                     >
                       {row.getVisibleCells().map((cell) => (
@@ -2661,14 +2759,26 @@ export default function PayrollPage() {
                             width: cell.column.getSize(),
                           }}
                         >
-                          {flexRender(
-                            cell.column.columnDef.cell,
-                            cell.getContext()
-                          )}
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
                         </td>
                       ))}
                     </tr>
                   ))}
+                  {viewFilterActive && displayLines.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={table.getAllColumns().length}
+                        style={{
+                          textAlign: "center",
+                          padding: "28px 16px",
+                          color: "var(--muted-foreground)",
+                          fontSize: 13,
+                        }}
+                      >
+                        No matching employees in this view — everyone is still on the pay run.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

@@ -71,6 +71,8 @@ type EmployeeRow = {
   pending_deductions:     number | null;
   // ── Extended employee profile (migration 0001) ──
   branch?:            string | null;
+  /** FK to public.branches.id (migration 0020). NULL = Unassigned. */
+  branch_id?:         string | null;
   position?:          string | null;
   tax_id?:            string | null;
   employment_status?: string | null;
@@ -132,6 +134,8 @@ type PayRunLineRow = {
   nasscorp_ee:          number;
   nasscorp_er:          number;
   net_pay:              number;
+  deductions?:          number;
+  deduction_items?:     unknown;
   created_at:           string;
 };
 

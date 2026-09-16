@@ -1,22 +1,28 @@
-import { createClient } from "@/lib/supabase/server";
+import { getAuthenticatedUser, applyAuthCookies } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
 import { resolveCompanyIdForUser } from "@/lib/payments/server";
 import type { SubscriptionTier } from "@/context/AppContext";
-import { summarizeRegisteredBranches } from "@/lib/org/branch-assignment";
+import { aggregateByBranchId } from "@/lib/org/employee-branch";
+import { authorizeOrgUnitsAccess } from "@/lib/org/units-access";
 
 /**
  * GET /api/org/branch-summary
  * Enterprise multi-branch headcount / salary mass by registered branch.
  */
-export async function GET() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(request: NextRequest) {
+  const { supabase, user, authCookies } = await getAuthenticatedUser(request);
+  const withCookies = (res: NextResponse) => applyAuthCookies(res, authCookies);
 
-  const companyId = await resolveCompanyIdForUser(supabase, user.id);
-  if (!companyId) return NextResponse.json({ error: "No company" }, { status: 403 });
+  const authz = authorizeOrgUnitsAccess({
+    userId: user?.id,
+    companyId: user ? await resolveCompanyIdForUser(supabase, user.id) : null,
+  });
+  if (!authz.ok) {
+    return withCookies(NextResponse.json({ error: authz.error }, { status: authz.status }));
+  }
+  const companyId = authz.companyId;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: company } = await (supabase as any)
@@ -30,7 +36,7 @@ export async function GET() {
     Boolean(company?.billing_bypass),
   );
   if (!canUse("multiBranch", tier)) {
-    return NextResponse.json({ error: "Upgrade required", code: "PLAN_GATE" }, { status: 403 });
+    return withCookies(NextResponse.json({ error: "Upgrade required", code: "PLAN_GATE" }, { status: 403 }));
   }
 
   const admin = createAdminClient();
@@ -44,15 +50,35 @@ export async function GET() {
 
   const { data: employees } = await db
     .from("employees")
-    .select("id, branch, department, is_active, is_archived, rate")
+    .select("id, branch_id, branch, department, is_active, is_archived, basic_salary, rate")
     .eq("company_id", companyId);
 
-  const result = summarizeRegisteredBranches(branches ?? [], employees ?? []);
+  const aggregated = aggregateByBranchId(
+    (branches ?? []).map((b: { id: string; name: string; code?: string; is_hq?: boolean }) => ({
+      id: b.id,
+      name: b.name,
+      code: b.code ?? null,
+      isHq: Boolean(b.is_hq),
+    })),
+    (employees ?? []).map((e: {
+      branch_id?: string | null;
+      is_active?: boolean;
+      is_archived?: boolean;
+      basic_salary?: number;
+      rate?: number;
+    }) => ({
+      branchId: e.branch_id ?? null,
+      isActive: e.is_active,
+      isArchived: e.is_archived,
+      basicSalary: e.basic_salary,
+      rate: e.rate,
+    })),
+  );
 
-  return NextResponse.json({
-    branches: result.branches,
-    unassigned: result.unassigned,
-    unassignedSalaryMass: result.unassignedSalaryMass,
-    totalActive: result.totalActive,
-  });
+  return withCookies(NextResponse.json({
+    branches: aggregated.branches,
+    unassigned: aggregated.unassigned,
+    unassignedSalaryMass: aggregated.unassignedSalaryMass,
+    totalActive: aggregated.totalActive,
+  }));
 }
