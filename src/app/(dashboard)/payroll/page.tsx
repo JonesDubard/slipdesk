@@ -15,6 +15,10 @@ import {
   TrendingUp, Zap, Shield, Mail, Search, ChevronDown, ArrowUpDown, Trash2,
 } from "lucide-react";
 import type { PayRunLine } from "@/lib/mock-data";
+import {
+  buildPayslipDeductionRows,
+  formatPayslipCurrencyLine,
+} from "@/lib/payslip-content";
 import BulkUpload, { type BulkRow } from "@/components/BulkUpload";
 import { findEmployeeByNumber } from "@/lib/csv/match-employee";
 import {
@@ -199,32 +203,7 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
     ...(line.holidayHours>0?[{label:"Holiday Pay",note:`${line.holidayHours} hrs × ${sym}${line.rate.toFixed(2)} × 2.0`,amount:calc.holidayPay}]:[]),
     ...(calc.additionalEarnings>0?[{label:"Allowances & Extras",note:"Recurring allowances + one-off earnings",amount:calc.additionalEarnings}]:[]),
   ];
-  const ded      = line.deductions ?? 0;
-  const dedItems = line.deductionItems ?? [];
-  const otherDedRows: { label: string; note: string; amount: number }[] =
-    dedItems.length > 0
-      ? dedItems.map(item => ({
-          label:  item.label,
-          note:   item.note ?? "",
-          amount: item.amount,
-        }))
-      : ded > 0
-        ? [{ label: "Other Deductions", note: "Pay advance / loan repayment / etc.", amount: ded }]
-        : [];
- 
-  const deductionRows = [
-    {
-      label:  "NASSCORP (Employee 4%)",
-      note:   `4% of ${sym}${calc.nasscorp.base.toFixed(2)} regular salary`,
-      amount: calc.nasscorp.employeeContribution,
-    },
-    {
-      label:  "Income Tax (LRA)",
-      note:   `Effective rate: ${(calc.Paye.effectiveRate * 100).toFixed(1)}%`,
-      amount: calc.Paye.taxInBase,
-    },
-    ...otherDedRows,
-  ];
+  const deductionRows = buildPayslipDeductionRows(line, calc);
   const generated=new Date().toLocaleDateString("en-LR",{year:"numeric",month:"long",day:"numeric"});
   const payDateFmt=new Date(payDate).toLocaleDateString("en-LR",{year:"numeric",month:"long",day:"numeric"});
   const methodLabel:Record<string,string>={cash:"Cash",bank_transfer:"Bank Transfer",orange_money:"Orange Money",mtn_momo:"Mobile Money (MTN)"};
@@ -259,7 +238,7 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
           </View>
           <View style={S.infoBox}>
             <Text style={S.infoLbl}>Pay Date</Text><Text style={S.infoVal}>{payDateFmt}</Text>
-            <Text style={[S.infoLbl,{marginTop:6}]}>Currency</Text><Text style={S.infoSub}>{currency}</Text>
+            <Text style={[S.infoLbl,{marginTop:6}]}>Currency</Text><Text style={S.infoSub}>{formatPayslipCurrencyLine(currency, line.exchangeRate)}</Text>
           </View>
         </View>
         <Text style={S.secTitle}>Earnings</Text>
@@ -271,7 +250,7 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
         <Text style={S.secTitle}>Deductions</Text>
         <View style={S.table}>
           <View style={S.tHead}><Text style={S.thDesc}>Description</Text><Text style={S.thNotes}>Basis</Text><Text style={S.thAmt}>Amount ({currency})</Text></View>
-          {deductionRows.map((row,i)=>(<View key={row.label} style={[S.tRow,i%2===1?S.tAlt:{}]}><Text style={S.tdDesc}>{row.label}</Text><Text style={S.tdNote}>{row.note}</Text><Text style={S.tdRed}>({fmtMoney(row.amount,sym)})</Text></View>))}
+          {deductionRows.map((row,i)=>(<View key={`${row.label}-${i}`} style={[S.tRow,i%2===1?S.tAlt:{}]}><Text style={S.tdDesc}>{row.label}</Text><Text style={S.tdNote}>{row.note}</Text><Text style={S.tdRed}>({fmtMoney(row.amount,sym)})</Text></View>))}
           <View style={[S.tRow,{backgroundColor:"#fff7ed"}]}><Text style={S.tdDesc}>TOTAL DEDUCTIONS</Text><Text style={S.tdNotes}>{" "}</Text><Text style={[S.tdRed,{fontFamily:"Helvetica-Bold"}]}>({fmtMoney(calc.totalDeductions,sym)})</Text></View>
         </View>
         <View style={S.erBox}>

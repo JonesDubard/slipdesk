@@ -193,8 +193,8 @@ describe("payroll CSV parser — malformed / stress", () => {
     const { rows } = parsePayrollCSV(csv);
     expect(rows[0].deductions).toBe(125);
     expect(rows[0].deductionItems).toEqual([
-      { label: "Pay Advance", amount: 100 },
-      { label: "Transportation", amount: 25 },
+      { label: "Pay Advance", type: "Pay Advance", amount: 100 },
+      { label: "Transportation", type: "Transportation", amount: 25 },
     ]);
   });
 

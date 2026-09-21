@@ -118,7 +118,8 @@ export function parsePayrollRow(
     for (const col of dedColumns) {
       const amount = parseNum((raw[col] ?? "").trim(), 0);
       if (amount > 0) {
-        deductionItems.push({ label: titleCase(col.replace(/^ded_/, "")), amount });
+        const label = titleCase(col.replace(/^ded_/, ""));
+        deductionItems.push({ label, type: label, amount });
         deductions += amount;
       }
     }

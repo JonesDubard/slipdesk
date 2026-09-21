@@ -6,6 +6,12 @@ import { useSearchParams } from "next/navigation";
 import { Loader, WifiOff } from "lucide-react";
 import type { EmployeePayslip } from "@/lib/employee-portal/payslips";
 import {
+  buildPayslipManualDeductionRows,
+  formatLraPayslipNote,
+  formatPayslipCurrencyLine,
+  payslipUsedExchangeRate,
+} from "@/lib/payslip-content";
+import {
   cacheViewedPayslipAsync,
   loadCachedPayslipsAsync,
 } from "@/lib/employee-portal/offline-cache";
@@ -175,17 +181,52 @@ function PayslipsInner() {
           <dl className="grid grid-cols-2 gap-3 text-sm">
             <div><dt className="text-slate-400 text-xs">Gross</dt><dd className="font-mono">{selected.currency} {selected.grossPay.toFixed(2)}</dd></div>
             <div><dt className="text-slate-400 text-xs">Net</dt><dd className="font-mono font-semibold">{selected.currency} {selected.netPay.toFixed(2)}</dd></div>
-            <div><dt className="text-slate-400 text-xs">PAYE</dt><dd className="font-mono">{selected.currency} {selected.incomeTax.toFixed(2)}</dd></div>
+            <div>
+              <dt className="text-slate-400 text-xs">Income Tax (LRA)</dt>
+              <dd className="font-mono">{selected.currency} {selected.incomeTax.toFixed(2)}</dd>
+              <dd className="text-[11px] text-slate-500 mt-0.5">
+                {formatLraPayslipNote({
+                  taxInBase: selected.incomeTax,
+                  currency: selected.currency,
+                  exchangeRate: selected.exchangeRate,
+                })}
+              </dd>
+            </div>
             <div><dt className="text-slate-400 text-xs">NASSCORP (EE)</dt><dd className="font-mono">{selected.currency} {selected.nasscorpEe.toFixed(2)}</dd></div>
             <div><dt className="text-slate-400 text-xs">NASSCORP (ER)</dt><dd className="font-mono">{selected.currency} {selected.nasscorpEr.toFixed(2)}</dd></div>
             <div><dt className="text-slate-400 text-xs">Hours</dt><dd className="font-mono">{selected.regularHours} reg / {selected.overtimeHours} OT</dd></div>
+            {payslipUsedExchangeRate(selected.currency) && (
+              <div>
+                <dt className="text-slate-400 text-xs">Exchange rate used</dt>
+                <dd className="font-mono">{formatPayslipCurrencyLine(selected.currency, selected.exchangeRate)}</dd>
+              </div>
+            )}
           </dl>
+          <PortalDeductionList payslip={selected} />
           <p className="text-[11px] text-slate-400">
             Cached for offline viewing.{" "}
             <Link href="/portal/nasscorp" className="text-[#002147] underline">View NASSCORP totals</Link>
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+function PortalDeductionList({ payslip }: { payslip: EmployeePayslip }) {
+  const rows = buildPayslipManualDeductionRows(payslip);
+  if (!rows.length) return null;
+  return (
+    <div>
+      <p className="text-slate-400 text-xs mb-1">Deductions</p>
+      <ul className="text-sm space-y-1">
+        {rows.map((row, i) => (
+          <li key={`${row.label}-${i}`} className="flex justify-between gap-3">
+            <span>{row.label || row.note}</span>
+            <span className="font-mono">{payslip.currency} {row.amount.toFixed(2)}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

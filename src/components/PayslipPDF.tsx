@@ -11,6 +11,10 @@ import {
 import { useState } from "react";
 import { FileText, Download, Loader } from "lucide-react";
 import type { PayRunLine } from "@/lib/mock-data";
+import {
+  buildPayslipDeductionRows,
+  formatPayslipCurrencyLine,
+} from "@/lib/payslip-content";
 
 export interface CompanyInfo {
   name: string;
@@ -473,32 +477,7 @@ function PayslipDocument({ line, company, payDate, periodLabel, payment }: Paysl
     }] : []),
   ];
 
-  const ded = line.deductions ?? 0;
-  const dedItems = line.deductionItems ?? [];
-  const otherDedRows =
-    dedItems.length > 0
-      ? dedItems.map((item) => ({
-          label: item.label,
-          note: item.note ?? "",
-          amount: item.amount,
-        }))
-      : ded > 0
-        ? [{ label: "Other Deductions", note: "Pay advance / loan repayment / etc.", amount: ded }]
-        : [];
-
-  const deductionRows = [
-    {
-      label:  "NASSCORP (Employee 4%)",
-      note:   `4% of ${sym}${calc.nasscorp.base.toFixed(2)} regular salary`,
-      amount: calc.nasscorp.employeeContribution,
-    },
-    {
-      label:  "Income Tax (LRA)",
-      note:   `Effective rate: ${(calc.Paye.effectiveRate * 100).toFixed(1)}%`,
-      amount: calc.Paye.taxInBase,
-    },
-    ...otherDedRows,
-  ];
+  const deductionRows = buildPayslipDeductionRows(line, calc);
 
   const generated = new Date().toLocaleDateString("en-LR", {
     year: "numeric", month: "long", day: "numeric",
@@ -552,7 +531,7 @@ function PayslipDocument({ line, company, payDate, periodLabel, payment }: Paysl
             <Text style={styles.infoLabel}>Pay Date</Text>
             <Text style={styles.infoValue}>{fmtDate(payDate)}</Text>
             <Text style={[styles.infoLabel, { marginTop: 6 }]}>Currency</Text>
-            <Text style={styles.infoValueLight}>{currency} (Rate: L${fx} per $1)</Text>
+            <Text style={styles.infoValueLight}>{formatPayslipCurrencyLine(currency, fx)}</Text>
           </View>
         </View>
 
@@ -587,7 +566,7 @@ function PayslipDocument({ line, company, payDate, periodLabel, payment }: Paysl
             <Text style={styles.thAmount}>Amount ({currency})</Text>
           </View>
           {deductionRows.map((row, i) => (
-            <View key={row.label} style={[styles.tableRow, i % 2 === 1 ? styles.tableRowAlt : {}]}>
+            <View key={`${row.label}-${i}`} style={[styles.tableRow, i % 2 === 1 ? styles.tableRowAlt : {}]}>
               <Text style={styles.tdDesc}>{row.label}</Text>
               <Text style={styles.tdNote}>{row.note}</Text>
               <Text style={styles.tdDeduction}>({fmt(row.amount, sym)})</Text>

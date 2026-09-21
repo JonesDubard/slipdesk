@@ -16,6 +16,10 @@ export interface DeductionItem {
   label:  string;   // e.g. "Pay Advance", "Food", "Transportation"
   note?:  string;  // optional explanation shown on payslip
   amount: number;
+  /** Stored deduction type when distinct from the display label. */
+  type?: string;
+  /** Stored description; used when label/type is missing or generic. */
+  description?: string;
 }
 
 // ─── Employee ─────────────────────────────────────────────────────────────────

@@ -2,6 +2,9 @@
  * Read-only payslip views sourced from persisted pay_run_lines (no re-calc).
  */
 
+import type { DeductionItem } from "@/lib/mock-data";
+import { parseStoredDeductionItems } from "@/lib/payslip-content";
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = any;
 
@@ -25,12 +28,50 @@ export type EmployeePayslip = {
   nasscorpEe: number;
   nasscorpEr: number;
   netPay: number;
+  deductions?: number;
+  deductionItems?: DeductionItem[];
   employeeNumber: string;
   fullName: string;
   jobTitle: string;
   department: string;
   status: string;
 };
+
+function mapEmployeePayslip(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  line: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  run: any,
+): EmployeePayslip {
+  return {
+    id: line.id,
+    payRunId: line.pay_run_id,
+    employeeId: line.employee_id,
+    periodLabel: run.period_label,
+    payPeriodStart: run.pay_period_start,
+    payPeriodEnd: run.pay_period_end,
+    payDate: run.pay_date,
+    currency: line.currency,
+    rate: Number(line.rate),
+    regularHours: Number(line.regular_hours),
+    overtimeHours: Number(line.overtime_hours),
+    holidayHours: Number(line.holiday_hours),
+    additionalEarnings: Number(line.additional_earnings),
+    exchangeRate: Number(line.exchange_rate),
+    grossPay: Number(line.gross_pay),
+    incomeTax: Number(line.income_tax),
+    nasscorpEe: Number(line.nasscorp_ee),
+    nasscorpEr: Number(line.nasscorp_er),
+    netPay: Number(line.net_pay),
+    deductions: Number(line.deductions ?? 0),
+    deductionItems: parseStoredDeductionItems(line.deduction_items),
+    employeeNumber: line.employee_number,
+    fullName: line.full_name,
+    jobTitle: line.job_title,
+    department: line.department,
+    status: run.status,
+  };
+}
 
 /**
  * List paid payslips for a single employee. Always filters by employeeId —
@@ -69,35 +110,7 @@ export async function listEmployeePayslips(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (lines as any[])
     .filter((line) => runMap.has(line.pay_run_id))
-    .map((line) => {
-      const run = runMap.get(line.pay_run_id)!;
-      return {
-        id: line.id,
-        payRunId: line.pay_run_id,
-        employeeId: line.employee_id,
-        periodLabel: run.period_label,
-        payPeriodStart: run.pay_period_start,
-        payPeriodEnd: run.pay_period_end,
-        payDate: run.pay_date,
-        currency: line.currency,
-        rate: Number(line.rate),
-        regularHours: Number(line.regular_hours),
-        overtimeHours: Number(line.overtime_hours),
-        holidayHours: Number(line.holiday_hours),
-        additionalEarnings: Number(line.additional_earnings),
-        exchangeRate: Number(line.exchange_rate),
-        grossPay: Number(line.gross_pay),
-        incomeTax: Number(line.income_tax),
-        nasscorpEe: Number(line.nasscorp_ee),
-        nasscorpEr: Number(line.nasscorp_er),
-        netPay: Number(line.net_pay),
-        employeeNumber: line.employee_number,
-        fullName: line.full_name,
-        jobTitle: line.job_title,
-        department: line.department,
-        status: run.status,
-      } satisfies EmployeePayslip;
-    });
+    .map((line) => mapEmployeePayslip(line, runMap.get(line.pay_run_id)));
 }
 
 /**
@@ -131,30 +144,5 @@ export async function getEmployeePayslip(
 
   if (!run) return null;
 
-  return {
-    id: line.id,
-    payRunId: line.pay_run_id,
-    employeeId: line.employee_id,
-    periodLabel: run.period_label,
-    payPeriodStart: run.pay_period_start,
-    payPeriodEnd: run.pay_period_end,
-    payDate: run.pay_date,
-    currency: line.currency,
-    rate: Number(line.rate),
-    regularHours: Number(line.regular_hours),
-    overtimeHours: Number(line.overtime_hours),
-    holidayHours: Number(line.holiday_hours),
-    additionalEarnings: Number(line.additional_earnings),
-    exchangeRate: Number(line.exchange_rate),
-    grossPay: Number(line.gross_pay),
-    incomeTax: Number(line.income_tax),
-    nasscorpEe: Number(line.nasscorp_ee),
-    nasscorpEr: Number(line.nasscorp_er),
-    netPay: Number(line.net_pay),
-    employeeNumber: line.employee_number,
-    fullName: line.full_name,
-    jobTitle: line.job_title,
-    department: line.department,
-    status: run.status,
-  };
+  return mapEmployeePayslip(line, run);
 }

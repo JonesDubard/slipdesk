@@ -10,8 +10,8 @@
  * The sum of all ded_* columns becomes the total `deductions` on the PayRunLine.
  * Each item is also stored in `deductionItems` for itemized display on payslips.
  *
- * A plain `deductions` column is still supported as a fallback (single "Other
- * Deductions" line) for backwards-compatible CSVs.
+ * A plain `deductions` column is still supported as a fallback lump-sum for
+ * backwards-compatible CSVs (no invented category name on the payslip).
  */
 
 import { Fragment, useRef, useState } from "react";
