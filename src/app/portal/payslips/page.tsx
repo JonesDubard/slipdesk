@@ -7,7 +7,6 @@ import { Loader, WifiOff } from "lucide-react";
 import type { EmployeePayslip } from "@/lib/employee-portal/payslips";
 import {
   buildPayslipManualDeductionRows,
-  formatLraPayslipNote,
   formatPayslipCurrencyLine,
   payslipUsedExchangeRate,
 } from "@/lib/payslip-content";
@@ -184,16 +183,9 @@ function PayslipsInner() {
             <div>
               <dt className="text-slate-400 text-xs">Income Tax (LRA)</dt>
               <dd className="font-mono">{selected.currency} {selected.incomeTax.toFixed(2)}</dd>
-              <dd className="text-[11px] text-slate-500 mt-0.5">
-                {formatLraPayslipNote({
-                  taxInBase: selected.incomeTax,
-                  currency: selected.currency,
-                  exchangeRate: selected.exchangeRate,
-                })}
-              </dd>
             </div>
-            <div><dt className="text-slate-400 text-xs">NASSCORP (EE)</dt><dd className="font-mono">{selected.currency} {selected.nasscorpEe.toFixed(2)}</dd></div>
-            <div><dt className="text-slate-400 text-xs">NASSCORP (ER)</dt><dd className="font-mono">{selected.currency} {selected.nasscorpEr.toFixed(2)}</dd></div>
+            <div><dt className="text-slate-400 text-xs">NASSCORP (Employee 4%)</dt><dd className="font-mono">{selected.currency} {selected.nasscorpEe.toFixed(2)}</dd></div>
+            <div><dt className="text-slate-400 text-xs">NASSCORP (Employer 6%)</dt><dd className="font-mono">{selected.currency} {selected.nasscorpEr.toFixed(2)}</dd></div>
             <div><dt className="text-slate-400 text-xs">Hours</dt><dd className="font-mono">{selected.regularHours} reg / {selected.overtimeHours} OT</dd></div>
             {payslipUsedExchangeRate(selected.currency) && (
               <div>

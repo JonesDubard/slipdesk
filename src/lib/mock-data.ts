@@ -66,6 +66,8 @@ export interface Employee {
   pendingHolidayHours?:  number | null;
   /** Pre-filled deduction for next pay run (null = 0) */
   pendingDeductions?:    number | null;
+  /** Itemized pending deductions (Food, Salary Advance, …) when the CSV had `ded_*` columns */
+  pendingDeductionItems?: DeductionItem[] | null;
 
   // ── Payment / Disbursement ──
   paymentMethod: PaymentMethod;

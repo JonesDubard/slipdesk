@@ -4,6 +4,7 @@ import { parseDateToISO, parseMoney } from "@/lib/csv/parse-csv-line";
 import { rowToRecord } from "@/lib/csv/normalize-headers";
 import { parseTextTable, readSpreadsheet, type SpreadsheetTable } from "@/lib/csv/read-spreadsheet";
 import { canonicalizeBranch, stripUnregisteredBranchErrors } from "@/lib/csv/resolve-branch";
+import { parseDeductionItemsFromCsvRecord } from "@/lib/csv/parse-deduction-items";
 
 export interface ParsedEmployeeRow {
   data: Partial<Employee>;
@@ -142,6 +143,7 @@ function parseEmployeeTable(
             .reduce((sum, [, val]) => sum + (parseMoney(val, 0) || 0), 0) ||
           n(raw.deductions) ||
           null,
+        pendingDeductionItems: parseDeductionItemsFromCsvRecord(raw).deductionItems,
       },
     });
   }

@@ -1,18 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { calculatePayroll } from "@/lib/slipdesk-payroll-engine";
 import { parsePayrollCSV } from "@/lib/csv/parse-payroll-csv";
+import { parseEmployeeCSV } from "@/lib/csv/parse-employee-csv";
 import {
   buildPayslipDeductionRows,
+  buildPayslipEarningsRows,
   buildPayslipManualDeductionRows,
   formatDeductionItemLabel,
   formatLraPayslipNote,
   formatPayslipCurrencyLine,
   parseStoredDeductionItems,
   payslipUsedExchangeRate,
+  type PayslipContentRow,
 } from "@/lib/payslip-content";
 
 const HEADER =
   "employee_number,first_name,middle_name,last_name,gender,job_title,department,branch,email,phone,county,start_date,employment_type,currency,rate,standard_hours,allowances,nasscorp_number,payment_method,bank_name,account_number,momo_number,regular_hours,overtime_hours,holiday_hours,ded_food,ded_salary_advance";
+
+function flatten(rows: PayslipContentRow[]): string {
+  return rows.map((r) => `${r.label}\n${r.note}`).join("\n");
+}
 
 describe("payslip deduction labels", () => {
   it("shows stored types such as Food and Salary Advance instead of a generic deduction", () => {
@@ -44,7 +51,15 @@ describe("payslip deduction labels", () => {
       "Food",
       "Salary Advance",
     ]);
+    expect(flatten(section)).not.toMatch(/recurring allowances/i);
     expect(section.some((r) => /deduction/i.test(r.label) && r.label !== "NASSCORP (Employee 4%)")).toBe(false);
+  });
+
+  it("keeps employee CSV ded_* types for payroll start (not a lump-only label)", () => {
+    const csv = `${HEADER}\nEMP-1,Ada,,Lovelace,female,Dev,Eng,HQ,,,Montserrado,2024-01-01,full_time,USD,10,173,0,,cash,,,,173,0,0,40,80`;
+    const parsed = parseEmployeeCSV(csv);
+    expect(parsed[0].data.pendingDeductionItems?.map((i) => i.label)).toEqual(["Food", "Salary Advance"]);
+    expect(parsed[0].data.pendingDeductions).toBe(120);
   });
 
   it("falls back to stored type/description when the label is a generic deduction", () => {
@@ -66,7 +81,7 @@ describe("payslip deduction labels", () => {
   it("does not invent a deduction name when the data has none", () => {
     const rows = buildPayslipManualDeductionRows({ deductions: 50, deductionItems: [] });
     expect(rows).toEqual([{ label: "", note: "", amount: 50 }]);
-    expect(rows[0].label).not.toMatch(/food|salary advance|other deductions/i);
+    expect(rows[0].label).not.toMatch(/food|salary advance|other deductions|recurring allowances/i);
     expect(
       formatDeductionItemLabel({ label: "deduction", amount: 12 }),
     ).toBe("deduction");
@@ -82,6 +97,39 @@ describe("payslip deduction labels", () => {
   });
 });
 
+describe("payslip earnings vs deductions", () => {
+  it("labels the allowances lump as Allowances, not Recurring allowances, and not as a deduction", () => {
+    const calc = calculatePayroll({
+      employeeId: "e1",
+      currency: "USD",
+      rate: 10,
+      regularHours: 173,
+      overtimeHours: 0,
+      holidayHours: 0,
+      exchangeRate: 185.44,
+      additionalEarnings: 75,
+    });
+    const earnings = buildPayslipEarningsRows(
+      { currency: "USD", rate: 10, regularHours: 173, overtimeHours: 0, holidayHours: 0 },
+      calc,
+    );
+    const allowance = earnings.find((r) => r.amount === 75);
+    expect(allowance?.label).toBe("Allowances");
+    expect(flatten(earnings)).not.toMatch(/recurring allowances/i);
+
+    const deductions = buildPayslipDeductionRows(
+      { currency: "USD", exchangeRate: 185.44, deductions: 0, deductionItems: [] },
+      calc,
+    );
+    expect(deductions.map((r) => r.label)).toEqual([
+      "NASSCORP (Employee 4%)",
+      "Income Tax (LRA)",
+    ]);
+    expect(flatten(deductions)).not.toMatch(/recurring allowances/i);
+    expect(flatten(deductions)).not.toMatch(/allowances/i);
+  });
+});
+
 describe("payslip exchange rate display", () => {
   it("shows the stored run rate when FX was used (USD / LRA conversion)", () => {
     expect(payslipUsedExchangeRate("USD")).toBe(true);
@@ -92,8 +140,9 @@ describe("payslip exchange rate display", () => {
       currency: "USD",
       exchangeRate: 185.44,
     });
-    expect(note).toContain("185.44");
-    expect(note).toContain("L$13,578.12");
+    expect(note).toBe("");
+    expect(note).not.toContain("185.44");
+    expect(note).not.toContain("L$");
   });
 
   it("does not show a live/API rate and omits FX on LRD slips where conversion was not used", () => {
@@ -105,7 +154,7 @@ describe("payslip exchange rate display", () => {
 });
 
 describe("payslip LRA text", () => {
-  it("keeps the LRA amount and removes effective-rate wording and percentages", () => {
+  it("keeps the LRA amount and leaves the basis/note blank (no LRD, FX, or tax %)", () => {
     const calc = calculatePayroll({
       employeeId: "e1",
       currency: "USD",
@@ -120,12 +169,14 @@ describe("payslip LRA text", () => {
       calc,
     );
     expect(nasscorp.label).toBe("NASSCORP (Employee 4%)");
+    expect(nasscorp.note).toMatch(/4%/);
     expect(lra.label).toBe("Income Tax (LRA)");
     expect(lra.amount).toBe(calc.Paye.taxInBase);
-    expect(lra.note).toContain(
-      `L$${calc.Paye.taxInLRD.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-    );
+    expect(lra.note).toBe("");
     expect(lra.note).not.toMatch(/effective rate/i);
     expect(lra.note).not.toMatch(/%/);
+    expect(lra.note).not.toMatch(/L\$/);
+    expect(lra.note).not.toMatch(/Check LRA/i);
+    expect(`${lra.label}\n${lra.note}`).not.toMatch(/effectiveRate/i);
   });
 });

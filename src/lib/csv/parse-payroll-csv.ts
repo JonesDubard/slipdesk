@@ -2,6 +2,7 @@ import type { Employee, EmploymentType, Currency, PaymentMethod } from "@/contex
 import type { DeductionItem } from "@/lib/mock-data";
 import { normalizeGender } from "@/lib/employee-gender";
 import { parseDateToISO, parseMoney } from "@/lib/csv/parse-csv-line";
+import { parseDeductionItemsFromCsvRecord } from "@/lib/csv/parse-deduction-items";
 import { normalizePaymentMethod } from "@/lib/csv/parse-employee-csv";
 import { rowToRecord } from "@/lib/csv/normalize-headers";
 import { parseTextTable, readSpreadsheet, type SpreadsheetTable } from "@/lib/csv/read-spreadsheet";
@@ -35,13 +36,6 @@ const EMP_TYPE_ALIASES: Record<string, EmploymentType> = {
 
 export function parseNum(v: string, fallback = 0): number {
   return parseMoney(v, fallback);
-}
-
-function titleCase(snake: string): string {
-  return snake
-    .split("_")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
 }
 
 export function parsePayrollRow(
@@ -111,22 +105,7 @@ export function parsePayrollRow(
   const overtimeHours = overtimeRaw ? parseNum(overtimeRaw, 0) : 0;
   const holidayHours = holidayRaw ? parseNum(holidayRaw, 0) : 0;
 
-  let deductions = 0;
-  const deductionItems: DeductionItem[] = [];
-
-  if (dedColumns.length > 0) {
-    for (const col of dedColumns) {
-      const amount = parseNum((raw[col] ?? "").trim(), 0);
-      if (amount > 0) {
-        const label = titleCase(col.replace(/^ded_/, ""));
-        deductionItems.push({ label, type: label, amount });
-        deductions += amount;
-      }
-    }
-  } else {
-    const deductRaw = (raw.deductions ?? "").trim();
-    deductions = deductRaw ? parseNum(deductRaw, 0) : 0;
-  }
+  const { deductions, deductionItems } = parseDeductionItemsFromCsvRecord(raw, dedColumns);
 
   return {
     row: { employee, regularHours, overtimeHours, holidayHours, deductions, deductionItems },

@@ -78,6 +78,14 @@ export interface Employee {
   pendingOvertimeHours?: number | null;
   pendingHolidayHours?:  number | null;
   pendingDeductions?:    number | null;
+  /** Itemized `ded_*` types from CSV. Not a DB column — in-memory until the pay run. */
+  pendingDeductionItems?: Array<{
+    label: string;
+    type?: string;
+    description?: string;
+    note?: string;
+    amount: number;
+  }> | null;
 }
 
 export interface CompanyProfile {
@@ -631,7 +639,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const row = res.data;
     if (!row) throw new Error("Failed to insert employee – no row returned.");
 
-    const mapped = dbToEmployee(row as DbEmployee);
+    const mapped = {
+      ...dbToEmployee(row as DbEmployee),
+      pendingDeductionItems: data.pendingDeductionItems ?? null,
+    };
     setAllEmployees((prev) => [...prev, mapped]);
 
     logAudit({ companyId: coId, action: "employee.create", entityType: "employee", entityId: mapped.id, newValue: { name: mapped.fullName, number: mapped.employeeNumber } });
@@ -695,7 +706,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     if (res.error) throw res.error;
     const row = res.data;
-    if (row) setAllEmployees((list) => list.map((e) => e.id === id ? dbToEmployee(row as DbEmployee) : e));
+    if (row) {
+      setAllEmployees((list) => list.map((e) => {
+        if (e.id !== id) return e;
+        return {
+          ...dbToEmployee(row as DbEmployee),
+          pendingDeductionItems: data.pendingDeductionItems ?? e.pendingDeductionItems,
+        };
+      }));
+    }
 
     if (company.id) {
       // Salary-history trail when the pay rate changes.
@@ -758,7 +777,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const refreshEmployees = useCallback(async () => {
     const { data: emps } = await db(supabase).from("employees").select("*").order("employee_number");
-    if (emps) setAllEmployees((emps as DbEmployee[]).map(dbToEmployee));
+    if (emps) {
+      setAllEmployees((prev) => {
+        const prevItems = new Map(
+          prev
+            .filter((e) => (e.pendingDeductionItems?.length ?? 0) > 0)
+            .map((e) => [e.id, e.pendingDeductionItems]),
+        );
+        return (emps as DbEmployee[]).map((row) => {
+          const mapped = dbToEmployee(row);
+          const items = prevItems.get(mapped.id);
+          return items ? { ...mapped, pendingDeductionItems: items } : mapped;
+        });
+      });
+    }
   }, [supabase]);
 
   const signOut = useCallback(async () => {

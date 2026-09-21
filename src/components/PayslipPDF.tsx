@@ -13,6 +13,7 @@ import { FileText, Download, Loader } from "lucide-react";
 import type { PayRunLine } from "@/lib/mock-data";
 import {
   buildPayslipDeductionRows,
+  buildPayslipEarningsRows,
   formatPayslipCurrencyLine,
 } from "@/lib/payslip-content";
 
@@ -454,28 +455,10 @@ function PayslipDocument({ line, company, payDate, periodLabel, payment }: Paysl
     return mainNote + "\n" + "L$" + lrd + " equiv.";
   };
 
-  const earningsRows = [
-    {
-      label:  "Regular Salary",
-      note:   buildNote(`${line.regularHours} hrs x ${sym}${line.rate.toFixed(2)}/hr`, calc.regularSalary),
-      amount: calc.regularSalary,
-    },
-    ...(line.overtimeHours > 0 ? [{
-      label:  "Overtime Pay",
-      note:   buildNote(`${line.overtimeHours} hrs x ${sym}${line.rate.toFixed(2)} x 1.5`, calc.overtimePay),
-      amount: calc.overtimePay,
-    }] : []),
-    ...(line.holidayHours > 0 ? [{
-      label:  "Holiday Pay",
-      note:   buildNote(`${line.holidayHours} hrs x ${sym}${line.rate.toFixed(2)} x 2.0`, calc.holidayPay),
-      amount: calc.holidayPay,
-    }] : []),
-    ...(calc.additionalEarnings > 0 ? [{
-      label:  "Additional Earnings",
-      note:   buildNote("Allowances / bonuses", calc.additionalEarnings),
-      amount: calc.additionalEarnings,
-    }] : []),
-  ];
+  const earningsRows = buildPayslipEarningsRows(line, calc).map((row) => ({
+    ...row,
+    note: buildNote(row.note, row.amount),
+  }));
 
   const deductionRows = buildPayslipDeductionRows(line, calc);
 

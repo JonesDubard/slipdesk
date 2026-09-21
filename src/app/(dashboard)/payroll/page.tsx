@@ -17,6 +17,7 @@ import {
 import type { PayRunLine } from "@/lib/mock-data";
 import {
   buildPayslipDeductionRows,
+  buildPayslipEarningsRows,
   formatPayslipCurrencyLine,
 } from "@/lib/payslip-content";
 import BulkUpload, { type BulkRow } from "@/components/BulkUpload";
@@ -197,12 +198,7 @@ async function generatePayslipBlob({line,periodLabel,payDate,company}:PdfOptions
     footer:{marginTop:8,paddingTop:6,borderTopWidth:1,borderTopColor:PDF_BORDER,flexDirection:"row",justifyContent:"space-between",alignItems:"center"},
     footerTxt:{fontSize:7,color:"#94a3b8"},footerBrand:{fontSize:7.5,fontFamily:"Helvetica-Bold",color:NAVY},
   });
-  const earningsRows=[
-    {label:"Regular Salary",note:`${line.regularHours} hrs × ${sym}${line.rate.toFixed(2)}/hr`,amount:calc.regularSalary},
-    ...(line.overtimeHours>0?[{label:"Overtime Pay",note:`${line.overtimeHours} hrs × ${sym}${line.rate.toFixed(2)} × 1.5`,amount:calc.overtimePay}]:[]),
-    ...(line.holidayHours>0?[{label:"Holiday Pay",note:`${line.holidayHours} hrs × ${sym}${line.rate.toFixed(2)} × 2.0`,amount:calc.holidayPay}]:[]),
-    ...(calc.additionalEarnings>0?[{label:"Allowances & Extras",note:"Recurring allowances + one-off earnings",amount:calc.additionalEarnings}]:[]),
-  ];
+  const earningsRows = buildPayslipEarningsRows(line, calc);
   const deductionRows = buildPayslipDeductionRows(line, calc);
   const generated=new Date().toLocaleDateString("en-LR",{year:"numeric",month:"long",day:"numeric"});
   const payDateFmt=new Date(payDate).toLocaleDateString("en-LR",{year:"numeric",month:"long",day:"numeric"});
@@ -972,7 +968,7 @@ export default function PayrollPage() {
       holidayHours: emp.pendingHolidayHours ?? 0,
       additionalEarnings: emp.allowances ?? 0,
       deductions: emp.pendingDeductions ?? 0,
-      deductionItems: [],
+      deductionItems: emp.pendingDeductionItems ?? [],
       exchangeRate,
       calc: null,
       paymentMethod: emp.paymentMethod,

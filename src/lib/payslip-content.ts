@@ -1,10 +1,10 @@
 /**
- * Payslip presentation helpers (labels, FX transparency, LRA note).
+ * Payslip presentation helpers (labels, FX transparency).
  * Does not change payroll Math Logic — tax brackets, NASSCORP rates, or net pay.
  */
 
 import type { DeductionItem, PayRunLine } from "@/lib/mock-data";
-import { roundCurrency, type PayrollResult } from "@/lib/slipdesk-payroll-engine";
+import type { PayrollResult } from "@/lib/slipdesk-payroll-engine";
 
 export type PayslipContentRow = {
   label: string;
@@ -101,36 +101,55 @@ export function formatPayslipCurrencyLine(currency: string, exchangeRate: number
   return `${currency} (Rate: ${formatStoredExchangeRate(exchangeRate)})`;
 }
 
-export function lraAmountInLrd(
-  taxInBase: number,
-  currency: string,
-  exchangeRate: number,
-  taxInLRD?: number,
-): number {
-  if (typeof taxInLRD === "number" && Number.isFinite(taxInLRD)) return taxInLRD;
-  if (currency === "USD") return roundCurrency(taxInBase * exchangeRate);
-  return roundCurrency(taxInBase);
-}
-
 /**
- * LRA note: statutory LRD amount, no effective-rate wording or percentages.
- * USD slips also include the stored exchange rate actually used for conversion.
+ * LRA basis/note is intentionally blank. Employees see the deducted amount
+ * only. FX stays on the Currency field when conversion was used.
  */
-export function formatLraPayslipNote(opts: {
+export function formatLraPayslipNote(_opts?: {
   taxInBase: number;
   taxInLRD?: number;
   currency: string;
   exchangeRate: number;
 }): string {
-  const lrd = lraAmountInLrd(opts.taxInBase, opts.currency, opts.exchangeRate, opts.taxInLRD);
-  const amount = `L$${lrd.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-  if (payslipUsedExchangeRate(opts.currency)) {
-    return `${amount} at ${formatStoredExchangeRate(opts.exchangeRate)}`;
+  return "";
+}
+
+export function buildPayslipEarningsRows(
+  line: Pick<PayRunLine, "currency" | "rate" | "regularHours" | "overtimeHours" | "holidayHours">,
+  calc: PayrollResult,
+): PayslipContentRow[] {
+  const sym = line.currency === "USD" ? "$" : "L$";
+  const rows: PayslipContentRow[] = [
+    {
+      label: "Regular Salary",
+      note: `${line.regularHours} hrs × ${sym}${line.rate.toFixed(2)}/hr`,
+      amount: calc.regularSalary,
+    },
+  ];
+  if (line.overtimeHours > 0) {
+    rows.push({
+      label: "Overtime Pay",
+      note: `${line.overtimeHours} hrs × ${sym}${line.rate.toFixed(2)} × 1.5`,
+      amount: calc.overtimePay,
+    });
   }
-  return amount;
+  if (line.holidayHours > 0) {
+    rows.push({
+      label: "Holiday Pay",
+      note: `${line.holidayHours} hrs × ${sym}${line.rate.toFixed(2)} × 2.0`,
+      amount: calc.holidayPay,
+    });
+  }
+  if (calc.additionalEarnings > 0) {
+    // Lump-sum employee.allowances — keep as an earnings/allowance line.
+    // Do not invent types (Food, Housing) and do not move this into deductions.
+    rows.push({
+      label: "Allowances",
+      note: "",
+      amount: calc.additionalEarnings,
+    });
+  }
+  return rows;
 }
 
 export function buildPayslipDeductionRows(
@@ -146,12 +165,7 @@ export function buildPayslipDeductionRows(
     },
     {
       label: "Income Tax (LRA)",
-      note: formatLraPayslipNote({
-        taxInBase: calc.Paye.taxInBase,
-        taxInLRD: calc.Paye.taxInLRD,
-        currency: line.currency,
-        exchangeRate: line.exchangeRate,
-      }),
+      note: formatLraPayslipNote(),
       amount: calc.Paye.taxInBase,
     },
     ...buildPayslipManualDeductionRows(line),
