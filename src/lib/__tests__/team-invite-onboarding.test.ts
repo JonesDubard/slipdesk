@@ -21,8 +21,18 @@ import {
   authCallbackRedirectUrl,
   loginErrorMessage,
   passwordResetRedirectUrl,
+  passwordSignInErrorMessage,
   safeInternalNextPath,
 } from "@/lib/auth/canonical-redirect";
+import {
+  AUTH_FRAGMENT_FINISH_PATH,
+  AUTH_FRAGMENT_STORAGE_KEY,
+  authCallbackFragmentHtml,
+  cookiesFromHeader,
+  hasPkceCodeVerifier,
+  parseAuthFragmentPayload,
+  planAuthCallback,
+} from "@/lib/auth/callback-plan";
 import {
   chooseCompanyForUser,
   isBlankOwnedCompany,
@@ -377,11 +387,117 @@ describe("canonical auth redirects", () => {
 
   it("ignores token-like login error query values", () => {
     expect(loginErrorMessage("invite_setup")).toContain("inviting organization");
-    expect(loginErrorMessage("auth_callback")).toContain("expired or invalid");
+    const callbackMessage = loginErrorMessage("auth_callback");
+    expect(callbackMessage).toContain("expired or invalid");
+    expect(callbackMessage).toContain("different device");
+    expect(callbackMessage).not.toContain("Invalid email or password");
     expect(loginErrorMessage("raw-invite-token")).toBeNull();
     expect(safeInternalNextPath("/dashboard")).toBe("/dashboard");
     expect(safeInternalNextPath("//evil.example/phish")).toBe("/dashboard");
     expect(safeInternalNextPath("/login?token=secret")).toBe("/dashboard");
+  });
+
+  it("keeps an unconfirmed email distinct from a bad password", () => {
+    const invalid = passwordSignInErrorMessage({ message: "Invalid login credentials", code: "invalid_credentials" });
+    expect(invalid.emailUnconfirmed).toBe(false);
+    expect(invalid.message).toContain("Invalid email or password");
+    expect(invalid.message).toContain("/signup");
+
+    const unconfirmedMessage = passwordSignInErrorMessage({ message: "Email not confirmed" });
+    expect(unconfirmedMessage.emailUnconfirmed).toBe(true);
+    expect(unconfirmedMessage.message).not.toContain("Invalid email or password");
+    expect(unconfirmedMessage.message.toLowerCase()).toContain("another device");
+
+    const unconfirmedCode = passwordSignInErrorMessage({
+      message: "Invalid login credentials",
+      code: "email_not_confirmed",
+    });
+    expect(unconfirmedCode.emailUnconfirmed).toBe(true);
+    expect(unconfirmedCode.message).not.toContain("Invalid email or password");
+    expect(loginErrorMessage("auth_callback")).not.toBe(invalid.message);
+  });
+});
+
+describe("auth callback query handling", () => {
+  const verifier = [{ name: "sb-project-auth-token-code-verifier", value: "verifier-value" }];
+
+  it("prefers token_hash over a PKCE code", () => {
+    expect(planAuthCallback({
+      code: "pkce-code",
+      tokenHash: "hash-value",
+      type: "signup",
+      hasCodeVerifier: true,
+    })).toEqual({ action: "verify_otp", tokenHash: "hash-value", type: "signup" });
+    expect(planAuthCallback({
+      tokenHash: "hash-value",
+      type: "email",
+      hasCodeVerifier: false,
+    })).toEqual({ action: "verify_otp", tokenHash: "hash-value", type: "email" });
+    expect(planAuthCallback({
+      tokenHash: "hash-value",
+      type: " Signup ",
+      hasCodeVerifier: false,
+    })).toEqual({ action: "verify_otp", tokenHash: "hash-value", type: "signup" });
+  });
+
+  it("exchanges a code only when the verifier cookie exists", () => {
+    expect(planAuthCallback({
+      code: "pkce-code",
+      hasCodeVerifier: true,
+    })).toEqual({ action: "exchange_code", code: "pkce-code" });
+    expect(planAuthCallback({
+      code: "pkce-code",
+      hasCodeVerifier: false,
+    })).toEqual({ action: "fail" });
+    expect(hasPkceCodeVerifier(verifier)).toBe(true);
+    expect(hasPkceCodeVerifier([{ name: "sb-project-auth-token-code-verifier.0", value: "chunk" }])).toBe(true);
+    expect(hasPkceCodeVerifier([{ name: "sb-project-auth-token-code-verifier", value: "  " }])).toBe(false);
+    expect(hasPkceCodeVerifier(cookiesFromHeader(
+      "sb-project-auth-token=session; sb-project-auth-token-code-verifier=verifier-value",
+    ))).toBe(true);
+    expect(hasPkceCodeVerifier(cookiesFromHeader("sb-project-auth-token=session"))).toBe(false);
+  });
+
+  it("rejects token_hash types other than signup or email", () => {
+    expect(planAuthCallback({
+      tokenHash: "hash-value",
+      type: "recovery",
+      hasCodeVerifier: false,
+    })).toEqual({ action: "fail" });
+    expect(planAuthCallback({
+      tokenHash: "hash-value",
+      type: "",
+      hasCodeVerifier: true,
+      code: "pkce-code",
+    })).toEqual({ action: "exchange_code", code: "pkce-code" });
+    expect(planAuthCallback({ hasCodeVerifier: false })).toEqual({ action: "client_fragment" });
+  });
+
+  it("reads only signup or email hash sessions and does not embed a token", () => {
+    const html = authCallbackFragmentHtml();
+    expect(html).toContain(AUTH_FRAGMENT_STORAGE_KEY);
+    expect(html).toContain(AUTH_FRAGMENT_FINISH_PATH);
+    expect(html).toContain("access_token");
+    expect(html).toContain('type !== "signup"');
+    expect(html).not.toContain("token_hash=");
+    expect(html).not.toContain("pkce-code");
+
+    expect(parseAuthFragmentPayload(JSON.stringify({
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+      type: "signup",
+    }))).toEqual({
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      type: "signup",
+    });
+    expect(parseAuthFragmentPayload(JSON.stringify({
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+      type: "recovery",
+    }))).toBeNull();
+    expect(parseAuthFragmentPayload("not-json")).toBeNull();
+    expect(parseAuthFragmentPayload(null)).toBeNull();
   });
 });
 

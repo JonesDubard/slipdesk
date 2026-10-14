@@ -14,7 +14,7 @@ import Image from "next/image";
 import { Eye, EyeOff, Loader, AlertCircle, CheckCircle2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { bootstrapAccount } from "@/lib/auth/bootstrap-client";
-import { authCallbackRedirectUrl, loginErrorMessage } from "@/lib/auth/canonical-redirect";
+import { authCallbackRedirectUrl, loginErrorMessage, passwordSignInErrorMessage } from "@/lib/auth/canonical-redirect";
 
 type Mode = "login" | "signup";
 
@@ -41,17 +41,65 @@ function LoginForm() {
   const [loading,     setLoading]     = useState(false);
   const [error,       setError]       = useState<string | null>(null);
   const [successMsg,  setSuccessMsg]  = useState<string | null>(null);
+  const [showResend,  setShowResend]  = useState(false);
 
   useEffect(() => {
-    const authError = loginErrorMessage(searchParams.get("error"));
-    if (authError) setError(authError);
+    const code = searchParams.get("error");
+    const authError = loginErrorMessage(code);
+    if (authError) {
+      setError(authError);
+      setShowResend(code === "auth_callback");
+    }
     const prefill = searchParams.get("email");
     if (prefill) setEmail(prefill);
   }, [searchParams]);
 
+  async function resendConfirmation() {
+    const address = email.trim();
+    if (!address) {
+      setError("Enter your email address, then request a new confirmation link.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setSuccessMsg(null);
+    const { error: resendErr } = await supabase.auth.resend({
+      type: "signup",
+      email: address,
+      options: {
+        emailRedirectTo: authCallbackRedirectUrl({
+          origin: window.location.origin,
+          configuredAppUrl: process.env.NEXT_PUBLIC_APP_URL,
+        }),
+      },
+    });
+    setLoading(false);
+    if (!resendErr) {
+      setShowResend(false);
+      setSuccessMsg("If this email still needs confirmation, a new link is on its way. Open it in this browser.");
+      return;
+    }
+    const lower = resendErr.message.toLowerCase();
+    if (lower.includes("rate") || lower.includes("seconds") || lower.includes("once every")) {
+      setError("Please wait a moment before requesting another confirmation email.");
+      return;
+    }
+    if (
+      lower.includes("not found") ||
+      lower.includes("already") ||
+      lower.includes("confirmed")
+    ) {
+      setShowResend(false);
+      setSuccessMsg("If this email still needs confirmation, a new link is on its way. Open it in this browser.");
+      return;
+    }
+    setError("Could not send a confirmation email. Try again in a moment.");
+  }
+
   async function handleSubmit() {
     setError(null);
     setSuccessMsg(null);
+    setShowResend(false);
 
     if (!email.trim() || !password.trim()) {
       setError("Email and password are required.");
@@ -71,10 +119,9 @@ function LoginForm() {
     if (mode === "login") {
       const { error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (err) {
-        const msg = err.message.toLowerCase().includes("invalid login")
-          ? "Invalid email or password. If you were invited to a team, create an account at /signup first with that email and a password you choose."
-          : err.message;
-        setError(msg);
+        const mapped = passwordSignInErrorMessage({ message: err.message, code: err.code });
+        setError(mapped.message);
+        setShowResend(mapped.emailUnconfirmed);
         setLoading(false);
         return;
       }
@@ -146,7 +193,7 @@ function LoginForm() {
           {/* Tabs */}
           <div className="flex border-b border-slate-100">
             {(["login","signup"] as Mode[]).map((m) => (
-              <button key={m} onClick={() => { setMode(m); setError(null); setSuccessMsg(null); }}
+              <button key={m} onClick={() => { setMode(m); setError(null); setSuccessMsg(null); setShowResend(false); }}
                 className={`flex-1 py-4 text-sm font-semibold transition-all
                   ${mode === m
                     ? "text-[#002147] border-b-2 border-[#50C878]"
@@ -215,7 +262,15 @@ function LoginForm() {
             {error && (
               <div className="flex items-start gap-2.5 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
                 <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5"/>
-                <p className="text-xs text-red-600">{error}</p>
+                <div className="space-y-2">
+                  <p className="text-xs text-red-600">{error}</p>
+                  {showResend && mode === "login" && (
+                    <button type="button" onClick={resendConfirmation} disabled={loading}
+                      className="text-xs font-semibold text-[#002147] underline disabled:opacity-50">
+                      Resend confirmation email
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
