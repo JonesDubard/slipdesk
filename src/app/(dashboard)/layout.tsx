@@ -15,7 +15,8 @@ import { ToastProvider } from "@/components/Toast";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { createClient } from '@/lib/supabase/client';
 import type { SubscriptionTier } from "@/context/AppContext";
-import { visibleNavItems as filterNavItems, type NavItemDef } from "@/lib/nav";
+import { visibleNavItems as filterNavItems, pathIsVisible, type NavItemDef } from "@/lib/nav";
+import { ROLE_LABELS } from "@/lib/rbac";
 import { companyDisplayName } from "@/lib/auth/resolve-company";
 import { fetchNotifications, markAllNotificationsRead, type AppNotification } from "@/lib/notifications";
 import { performSignOut } from "@/lib/sign-out";
@@ -215,6 +216,7 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-white text-sm font-medium truncate">{displayName}</p>
+            <p className="text-[#50C878] text-[11px] font-semibold truncate">{ROLE_LABELS[role]}</p>
             <p className="text-white/40 text-xs truncate font-mono">{userEmail}</p>
           </div>
         </div>
@@ -236,7 +238,7 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
 
 // ── Top bar avatar dropdown ───────────────────────────────────────────────────
 function TopBarAvatar() {
-  const { company, user, signOut } = useApp();
+  const { company, user, role, signOut } = useApp();
   const displayName = company.name || user?.email?.split("@")[0] || "?";
   const userEmail   = user?.email || "";
   const letters     = initials(displayName) || "?";
@@ -275,6 +277,7 @@ function TopBarAvatar() {
                         border border-slate-100 z-50 overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100">
             <p className="text-sm font-semibold text-slate-800 truncate">{displayName}</p>
+            <p className="text-xs font-semibold text-[#1f7a45] truncate">{ROLE_LABELS[role]}</p>
             <p className="text-xs text-slate-400 font-mono truncate">{userEmail}</p>
           </div>
           <div className="py-1">
@@ -425,8 +428,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const pathname = usePathname() ?? "";
   const { user, loading, company, role } = useApp();
   const router = useRouter();
+  const allowedNav = filterNavItems(company.subscriptionTier, company.billingBypass, role);
+  const screenAllowed = pathname === "" || pathIsVisible(pathname, allowedNav);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -528,7 +534,12 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
           <main className="flex-1 overflow-y-auto">
             <ToastProvider>
               <ErrorBoundary label="Dashboard">
-                {children}
+                {screenAllowed ? children : (
+                  <div className="p-8 max-w-lg">
+                    <h1 className="text-xl font-semibold text-slate-800">This screen is not available for your role</h1>
+                    <p className="mt-2 text-sm text-slate-500">Open a screen listed in the menu. Your role is {ROLE_LABELS[role]}.</p>
+                  </div>
+                )}
               </ErrorBoundary>
             </ToastProvider>
           </main>

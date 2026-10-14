@@ -5,16 +5,20 @@
  * 1. One allowed organization is used, whether the user owns it or was invited.
  * 2. Several allowed organizations use profiles.company_id only when it is one
  *    of them. That is the explicit selection. Otherwise the result is ambiguous.
- * 3. A profile id outside the allowed set never grants access. It is used only
+ * 3. A blank owned company does not compete with an active membership. A named
+ *    company the user owns still does, and then profiles.company_id must name
+ *    one of the allowed organizations.
+ * 4. A profile id outside the allowed set never grants access. It is used only
  *    when the user owns nothing and has no active membership.
  *
- * A company name, a blank name, and created_at are never used to break a tie.
+ * A company name is not used to prefer one real organization over another,
+ * and created_at is never used to break a tie.
  * Pending memberships are ignored. If more than one organization remains,
  * the result is ambiguous.
  * Owning the selected company clears the membership role so the app treats
  * the user as that company's owner.
  *
- * public.my_company_id() in migration 0021 must return the same company id,
+ * public.my_company_id() in migration 0024 must return the same company id,
  * or null when this result is not ok. Do not change 0002 in place.
  */
 
@@ -93,7 +97,11 @@ export function chooseCompanyForUser(opts: {
   /** True when the owned-company query hit its limit and more rows may exist. */
   ownershipIncomplete?: boolean;
 }): CompanyResolution {
-  const ownedIds = [...new Set(ownedList(opts.owned).map((row) => row.id))];
+  const ownedRows = ownedList(opts.owned);
+  const ownedIds = [...new Set(ownedRows.map((row) => row.id))];
+  const namedOwnedIds = [
+    ...new Set(ownedRows.filter((row) => !isBlankOwnedCompany(row)).map((row) => row.id)),
+  ];
   const active = opts.memberships.filter((row) => row.status === "active" && row.companyId);
   const membershipIds = [...new Set(active.map((row) => row.companyId))];
   const profileId = opts.profileCompanyId || null;
@@ -117,7 +125,8 @@ export function chooseCompanyForUser(opts: {
     return { ok: false, code: "ambiguous", message: AMBIGUOUS_MESSAGE };
   }
 
-  const allowedIds = [...new Set([...ownedIds, ...membershipIds])];
+  const competingOwnedIds = membershipIds.length > 0 ? namedOwnedIds : ownedIds;
+  const allowedIds = [...new Set([...competingOwnedIds, ...membershipIds])];
 
   if (allowedIds.length === 1) {
     return selected(allowedIds[0], membershipIds.includes(allowedIds[0]) ? "membership" : "owned");

@@ -42,9 +42,9 @@ export const ROLE_DESCRIPTIONS: Record<Role, string> = {
   payroll_officer: "Manager — creates and edits payroll runs and manages employees.",
   finance_manager: "Manager — reviews and approves payroll from a financial standpoint.",
   hr_manager: "Manager — manages employees and approves payroll from an HR standpoint.",
-  auditor: "Read-only access to audit logs, reports and compliance.",
-  executive: "Read-only executive dashboards and high-level analytics.",
-  employee: "Employee — view own payslip-related info; no company admin access.",
+  auditor: "Read-only access to reports, compliance, and the audit log.",
+  executive: "Read-only reports and executive analytics.",
+  employee: "Beta — the employee portal is not ready to assign from Team & Roles.",
 };
 
 export const ROLE_FAMILY: Record<Role, RoleFamily> = {
@@ -117,11 +117,6 @@ const ALL_PERMISSIONS: Permission[] = [
   "leave:review", "attendance:manage",
 ];
 
-const READ_ONLY: Permission[] = [
-  "employee:view", "payroll:view", "compliance:view",
-  "report:view", "analytics:view", "notifications:view",
-];
-
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   super_admin: [...ALL_PERMISSIONS],
   company_owner: [...ALL_PERMISSIONS],
@@ -149,13 +144,15 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "attendance:manage",
   ],
   auditor: [
-    ...READ_ONLY,
-    "report:export", "audit:view",
+    "compliance:view",
+    "report:view",
+    "report:export",
+    "audit:view",
   ],
   executive: [
-    "employee:view", "payroll:view", "compliance:view",
-    "report:view", "analytics:view", "analytics:executive",
-    "notifications:view",
+    "report:view",
+    "analytics:view",
+    "analytics:executive",
   ],
   employee: [
     "notifications:view",

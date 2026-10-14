@@ -751,22 +751,27 @@ describe("company resolution and creation", () => {
     expect(choice).toMatchObject({ ok: false, code: "ambiguous" });
   });
 
-  it("does not let a blank owned company or a membership win without an explicit selection", () => {
+  it("uses the inviting organization when a blank signup company is the only other company", () => {
     expect(chooseCompanyForUser({
       owned: { id: "blank-owned", name: "" },
       profileCompanyId: null,
       memberships: [{ companyId: ORG, role: "hr_manager", status: "active" }],
-    })).toMatchObject({ ok: false, code: "ambiguous" });
+    })).toMatchObject({
+      ok: true,
+      companyId: ORG,
+      source: "membership",
+      memberRole: "hr_manager",
+    });
 
     expect(chooseCompanyForUser({
       owned: { id: "blank-owned", name: "" },
       profileCompanyId: ORG,
-      memberships: [{ companyId: ORG, role: "hr_manager", status: "active" }],
+      memberships: [{ companyId: ORG, role: "auditor", status: "active" }],
     })).toMatchObject({
       ok: true,
       companyId: ORG,
-      source: "profile",
-      memberRole: "hr_manager",
+      source: "membership",
+      memberRole: "auditor",
     });
   });
 
@@ -824,8 +829,8 @@ describe("company row visibility", () => {
   it("lets an invited member read the selected organization and not the blank company they own", () => {
     const authorizedId = authorized({
       owned: { id: "blank-owned", name: "" },
-      profileCompanyId: ORG,
-      memberships: [{ companyId: ORG, role: "hr_manager", status: "active" }],
+      profileCompanyId: null,
+      memberships: [{ companyId: ORG, role: "auditor", status: "active" }],
     });
     expect(authorizedId).toBe(ORG);
     expect(companyRowVisible(ORG, authorizedId)).toBe(true);
@@ -844,15 +849,15 @@ describe("company row visibility", () => {
     expect(companyRowVisible(ORG, null)).toBe(false);
   });
 
-  it("shows no company row when the account has more than one organization and no explicit selection", () => {
+  it("keeps a named owned company and a membership unresolved until the profile names one", () => {
     const authorizedId = authorized({
-      owned: { id: "blank-owned", name: "" },
+      owned: { id: "owned-real", name: "Owned Co" },
       profileCompanyId: null,
       memberships: [{ companyId: ORG, role: "hr_manager", status: "active" }],
     });
     expect(authorizedId).toBeNull();
     expect(companyRowVisible(ORG, authorizedId)).toBe(false);
-    expect(companyRowVisible("blank-owned", authorizedId)).toBe(false);
+    expect(companyRowVisible("owned-real", authorizedId)).toBe(false);
   });
 });
 

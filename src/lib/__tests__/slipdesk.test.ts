@@ -25,6 +25,27 @@ describe("resolveAppRole", () => {
   it("hides billing for payroll officers", () => {
     expect(hasBillingNav("payroll_officer", "basic")).toBe(false);
   });
+
+  it("limits an auditor to reports, compliance, and the audit log", () => {
+    const hrefs = visibleNavItems("premium", true, "auditor").map((item) => item.href);
+    expect(hrefs).toEqual(expect.arrayContaining(["/reports", "/compliance", "/audit"]));
+    expect(hrefs).not.toContain("/employees");
+    expect(hrefs).not.toContain("/payroll");
+    expect(hrefs).not.toContain("/billing");
+    expect(hrefs).not.toContain("/team");
+    expect(can("auditor", "employee:view")).toBe(false);
+    expect(can("auditor", "payroll:view")).toBe(false);
+  });
+
+  it("limits an executive to reports and analytics", () => {
+    const hrefs = visibleNavItems("premium", true, "executive").map((item) => item.href);
+    expect(hrefs).toEqual(expect.arrayContaining(["/reports", "/analytics"]));
+    expect(hrefs).not.toContain("/employees");
+    expect(hrefs).not.toContain("/payroll");
+    expect(hrefs).not.toContain("/compliance");
+    expect(hrefs).not.toContain("/billing");
+    expect(can("executive", "payroll:edit")).toBe(false);
+  });
 });
 
 describe("buildPaymentReceiptUpdate", () => {

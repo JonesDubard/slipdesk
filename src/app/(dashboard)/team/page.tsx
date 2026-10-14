@@ -190,8 +190,8 @@ export default function TeamPage() {
           </div>
           <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value as Role)} style={selectStyle}>
             {ASSIGNABLE_ROLES.map((r) => (
-              <option key={r} value={r}>
-                [{ROLE_FAMILY_LABELS[roleFamily(r)]}] {ROLE_LABELS[r]}
+              <option key={r} value={r} disabled={r === "employee"}>
+                [{ROLE_FAMILY_LABELS[roleFamily(r)]}] {r === "employee" ? "Employee (Beta)" : ROLE_LABELS[r]}
               </option>
             ))}
           </select>
@@ -252,7 +252,11 @@ export default function TeamPage() {
                 </p>
               </div>
               <select value={m.role} onChange={(e) => handleRoleChange(m.id, e.target.value as Role)} style={selectStyle}>
-                {ASSIGNABLE_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+                {ASSIGNABLE_ROLES.map((r) => (
+                  <option key={r} value={r} disabled={r === "employee"}>
+                    {r === "employee" ? "Employee (Beta)" : ROLE_LABELS[r]}
+                  </option>
+                ))}
               </select>
               {m.status === "pending" && (
                 <button

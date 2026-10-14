@@ -47,6 +47,11 @@ export function visibleNavItems(
   });
 }
 
+/** True when this dashboard path is one of the screens the role is allowed to open. */
+export function pathIsVisible(pathname: string, items: readonly { href: string }[]): boolean {
+  return items.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
+}
+
 export function hasBillingNav(role: Role, tier: SubscriptionTier, billingBypass = false): boolean {
   return visibleNavItems(tier, billingBypass, role).some((i) => i.href === "/billing");
 }
