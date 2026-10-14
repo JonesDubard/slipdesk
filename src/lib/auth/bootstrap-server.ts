@@ -2,7 +2,7 @@ import type { User } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isPlatformAdminRole, isDesignatedPlatformAdmin } from "@/lib/auth/platform-admin";
 import { activatePendingInviteForUser } from "@/lib/auth/activate-invite";
-import { chooseCompanyForUser } from "@/lib/auth/resolve-company";
+import { chooseCompanyForUser, OWNED_COMPANY_FETCH_LIMIT, ownershipListIncomplete } from "@/lib/auth/resolve-company";
 
 export type BootstrapResult =
   | { ok: true; isPlatformAdmin?: boolean; isTeamMember?: boolean; companyId?: string; created?: boolean }
@@ -81,7 +81,7 @@ export async function bootstrapUserAccount(
       .select("id, name")
       .eq("owner_id", user.id)
       .order("created_at", { ascending: false })
-      .limit(1),
+      .limit(OWNED_COMPANY_FETCH_LIMIT),
     db(admin)
       .from("company_members")
       .select("company_id, role")
@@ -89,10 +89,11 @@ export async function bootstrapUserAccount(
       .eq("status", "active"),
   ]);
 
-  const owned = ownedRows?.[0] as { id: string; name?: string | null } | undefined;
+  const ownedList = (ownedRows ?? []) as { id: string; name?: string | null }[];
   const choice = chooseCompanyForUser({
-    owned: owned ? { id: owned.id, name: owned.name ?? "" } : null,
+    owned: ownedList.map((row) => ({ id: row.id, name: row.name ?? "" })),
     profileCompanyId: (profile?.company_id as string | null) ?? null,
+    ownershipIncomplete: ownershipListIncomplete(ownedList.length),
     memberships: (membershipRows ?? []).map((row: { company_id: string; role?: string | null }) => ({
       companyId: row.company_id,
       role: row.role ?? null,

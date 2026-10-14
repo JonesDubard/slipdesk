@@ -8,7 +8,7 @@ import type { User, AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import type { DbEmployee, DbCompany } from "@/lib/supabase/types";
 import { can, normalizeRole, type Role } from "@/lib/rbac";
-import { chooseCompanyForUser, ownedCompanyCreationDecision } from "@/lib/auth/resolve-company";
+import { chooseCompanyForUser, ownedCompanyCreationDecision, OWNED_COMPANY_FETCH_LIMIT, ownershipListIncomplete } from "@/lib/auth/resolve-company";
 import { resolveAppRole } from "@/lib/nav";
 import { logAudit } from "@/lib/audit";
 import { createNotification } from "@/lib/notifications";
@@ -264,7 +264,7 @@ async function resolveCompanyForUser(
       .select("*")
       .eq("owner_id", userId)
       .order("created_at", { ascending: false })
-      .limit(1),
+      .limit(OWNED_COMPANY_FETCH_LIMIT),
     db(supabase)
       .from("profiles")
       .select("company_id, role")
@@ -277,14 +277,15 @@ async function resolveCompanyForUser(
       .eq("status", "active"),
   ]);
 
-  const owned = ownedRows?.[0] as DbCompany | undefined;
+  const ownedList = (ownedRows ?? []) as DbCompany[];
   const memberships = membershipResult.error
     ? []
     : ((membershipResult.data ?? []) as Array<{ company_id: string; role: string | null; status: string }>);
 
   const choice = chooseCompanyForUser({
-    owned: owned ? { id: owned.id, name: owned.name } : null,
+    owned: ownedList.map((row) => ({ id: row.id, name: row.name })),
     profileCompanyId: profile?.company_id ?? null,
+    ownershipIncomplete: ownershipListIncomplete(ownedList.length),
     memberships: memberships
       .filter((row) => row.status === "active" && row.company_id)
       .map((row) => ({
@@ -310,7 +311,8 @@ async function resolveCompanyForUser(
         ? normalizeRole(profile.role)
         : null;
 
-  if (owned && owned.id === choice.companyId) {
+  const owned = ownedList.find((row) => row.id === choice.companyId);
+  if (owned) {
     return { company: owned, memberRole, error: null };
   }
 

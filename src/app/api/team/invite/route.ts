@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { assertNotDemoCompany } from "@/lib/demo/assert-not-demo";
 import { issueTeamInvite } from "@/lib/auth/issue-team-invite";
 import { canInviteToCompany, planAllowsTeamInvites } from "@/lib/auth/team-invite-policy";
+import { chooseCompanyForUser, OWNED_COMPANY_FETCH_LIMIT, ownershipListIncomplete } from "@/lib/auth/resolve-company";
 import type { SubscriptionTier } from "@/context/AppContext";
 
 function appBaseUrl(req: NextRequest): string {
@@ -20,13 +21,51 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const { data: company, error: coErr } = await supabase
     .from("companies")
-    .select("id, name, subscription_tier, billing_bypass")
+    .select("id, name, subscription_tier, billing_bypass, owner_id")
     .eq("owner_id", user.id)
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(OWNED_COMPANY_FETCH_LIMIT);
 
-  if (coErr || !company) {
+  if (coErr) {
+    return NextResponse.json(
+      { error: "You don't have permission to invite people to this organization.", code: "forbidden" },
+      { status: 403 },
+    );
+  }
+
+  const ownedRows = company ?? [];
+  const [{ data: profile }, { data: membershipRows }] = await Promise.all([
+    supabase.from("profiles").select("company_id").eq("id", user.id).maybeSingle(),
+    supabase
+      .from("company_members")
+      .select("company_id, role, status")
+      .eq("user_id", user.id)
+      .eq("status", "active"),
+  ]);
+
+  const choice = chooseCompanyForUser({
+    owned: ownedRows.map((row) => ({ id: row.id, name: row.name })),
+    profileCompanyId: profile?.company_id ?? null,
+    ownershipIncomplete: ownershipListIncomplete(ownedRows.length),
+    memberships: (membershipRows ?? []).map((row) => ({
+      companyId: row.company_id,
+      role: row.role,
+      status: "active" as const,
+    })),
+  });
+
+  if (!choice.ok) {
+    return NextResponse.json(
+      {
+        error: choice.message ?? "Choose one organization before sending an invitation.",
+        code: choice.code === "ambiguous" ? "ambiguous" : "forbidden",
+      },
+      { status: choice.code === "ambiguous" ? 409 : 403 },
+    );
+  }
+
+  const selected = ownedRows.find((row) => row.id === choice.companyId);
+  if (!selected || selected.owner_id !== user.id) {
     return NextResponse.json(
       { error: "You don't have permission to invite people to this organization.", code: "forbidden" },
       { status: 403 },
@@ -34,8 +73,8 @@ export async function POST(req: NextRequest) {
   }
 
   const planOk = planAllowsTeamInvites(
-    (company.subscription_tier ?? "basic") as SubscriptionTier,
-    Boolean(company.billing_bypass),
+    (selected.subscription_tier ?? "basic") as SubscriptionTier,
+    Boolean(selected.billing_bypass),
   );
   if (!canInviteToCompany({ isCompanyOwner: true, isPlatformAdmin: false, planAllowsInvites: planOk })) {
     return NextResponse.json(
@@ -44,10 +83,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const blocked = await assertNotDemoCompany(supabase, company.id);
+  const blocked = await assertNotDemoCompany(supabase, selected.id);
   if (blocked) return blocked;
 
-  await supabase.from("profiles").update({ company_id: company.id }).eq("id", user.id);
+  await supabase.from("profiles").update({ company_id: selected.id }).eq("id", user.id);
 
   let admin;
   try {
@@ -57,8 +96,8 @@ export async function POST(req: NextRequest) {
   }
 
   const result = await issueTeamInvite(admin, {
-    companyId: company.id,
-    companyName: company.name,
+    companyId: selected.id,
+    companyName: selected.name,
     email: String(body.email ?? ""),
     fullName: String(body.fullName ?? body.name ?? ""),
     role: body.role,

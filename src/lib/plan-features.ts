@@ -204,6 +204,21 @@ export function getEffectiveTier(
   return billingBypass ? "premium" : tier;
 }
 
+/**
+ * Plan shown for a loaded company. No company, or a missing tier with no
+ * billing bypass, is not a Starter subscription.
+ */
+export function confirmedPlanTier(
+  companyId: string,
+  tier: SubscriptionTier | null | undefined,
+  billingBypass: boolean,
+): SubscriptionTier | null {
+  if (!companyId) return null;
+  if (billingBypass) return "premium";
+  if (!tier) return null;
+  return tier;
+}
+
 export function planFor(tier: SubscriptionTier): PlanMeta {
   return PLANS[tier];
 }

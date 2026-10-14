@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { chooseCompanyForUser } from "@/lib/auth/resolve-company";
+import { chooseCompanyForUser, OWNED_COMPANY_FETCH_LIMIT, ownershipListIncomplete } from "@/lib/auth/resolve-company";
 
 /** Resolve company id for the authenticated user (owner, profile, or team member). */
 export async function resolveCompanyIdForUser(
@@ -13,7 +13,7 @@ export async function resolveCompanyIdForUser(
       .select("id, name")
       .eq("owner_id", userId)
       .order("created_at", { ascending: false })
-      .limit(1),
+      .limit(OWNED_COMPANY_FETCH_LIMIT),
     supabase
       .from("profiles")
       .select("company_id")
@@ -26,10 +26,11 @@ export async function resolveCompanyIdForUser(
       .eq("status", "active"),
   ]);
 
-  const owned = ownedRows?.[0] as { id: string; name?: string | null } | undefined;
+  const ownedList = (ownedRows ?? []) as { id: string; name?: string | null }[];
   const choice = chooseCompanyForUser({
-    owned: owned ? { id: owned.id, name: owned.name ?? "" } : null,
+    owned: ownedList.map((row) => ({ id: row.id, name: row.name ?? "" })),
     profileCompanyId: (profile?.company_id as string | null) ?? null,
+    ownershipIncomplete: ownershipListIncomplete(ownedList.length),
     memberships: (memberships ?? []).map((row) => ({
       companyId: row.company_id as string,
       role: (row.role as string | null) ?? null,

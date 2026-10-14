@@ -35,9 +35,11 @@ import {
 } from "@/lib/auth/callback-plan";
 import {
   chooseCompanyForUser,
+  companyDisplayName,
   isBlankOwnedCompany,
   ownedCompanyCreationDecision,
 } from "@/lib/auth/resolve-company";
+import { confirmedPlanTier } from "@/lib/plan-features";
 import { buildInviteUrl, teamInviteEmailHtml } from "@/lib/auth/team-invite-email";
 import {
   generateInviteToken,
@@ -607,16 +609,154 @@ describe("company resolution and creation", () => {
     expect(choice).toMatchObject({ ok: true, companyId: ORG, source: "owned" });
   });
 
-  it("does not let a blank owned company hide the inviting organization", () => {
-    const choice = chooseCompanyForUser({
-      owned: { id: "blank-owned", name: "" },
+  it("does not prefer a named or newer company when several owned companies exist", () => {
+    const ambiguous = chooseCompanyForUser({
+      owned: [
+        { id: "blank-new", name: "" },
+        { id: ORG, name: "Northwind Payroll" },
+      ],
+      profileCompanyId: null,
+      memberships: [],
+    });
+    expect(ambiguous.ok).toBe(false);
+    if (ambiguous.ok) return;
+    expect(ambiguous.code).toBe("ambiguous");
+
+    expect(chooseCompanyForUser({
+      owned: [
+        { id: "blank-new", name: "" },
+        { id: ORG, name: "Northwind Payroll" },
+      ],
+      profileCompanyId: "blank-new",
+      memberships: [],
+    })).toMatchObject({ ok: true, companyId: "blank-new", source: "owned" });
+  });
+
+  it("does not guess between two named companies", () => {
+    const ambiguous = chooseCompanyForUser({
+      owned: [
+        { id: ORG, name: "Northwind Payroll" },
+        { id: OTHER, name: "Other Payroll" },
+      ],
+      profileCompanyId: null,
+      memberships: [],
+    });
+    expect(ambiguous.ok).toBe(false);
+    if (ambiguous.ok) return;
+    expect(ambiguous.code).toBe("ambiguous");
+
+    expect(chooseCompanyForUser({
+      owned: [
+        { id: ORG, name: "Northwind Payroll" },
+        { id: OTHER, name: "Other Payroll" },
+      ],
+      profileCompanyId: ORG,
+      memberships: [],
+    })).toMatchObject({ ok: true, companyId: ORG, source: "owned" });
+
+    expect(chooseCompanyForUser({
+      owned: [{ id: ORG, name: "Northwind Payroll" }, { id: OTHER, name: "" }],
+      profileCompanyId: null,
+      memberships: [],
+      ownershipIncomplete: true,
+    }).ok).toBe(false);
+  });
+
+  it("ignores a pending membership and keeps the sole owned company", () => {
+    expect(chooseCompanyForUser({
+      owned: { id: ORG, name: "" },
+      profileCompanyId: null,
+      memberships: [{ companyId: OTHER, role: "hr_manager", status: "pending" }],
+    })).toMatchObject({ ok: true, companyId: ORG, source: "owned", memberRole: null });
+  });
+
+  it("keeps the owner role when the user owns the membership company", () => {
+    expect(chooseCompanyForUser({
+      owned: { id: ORG, name: "Northwind Payroll" },
+      profileCompanyId: ORG,
+      memberships: [{ companyId: ORG, role: "hr_manager", status: "active" }],
+    })).toMatchObject({ ok: true, companyId: ORG, source: "owned", memberRole: null });
+  });
+
+  it("does not label a blank company as a new starter company or invent a plan", () => {
+    expect(companyDisplayName("", true)).toBe("Unnamed organization");
+    expect(companyDisplayName("Northwind Payroll", true)).toBe("Northwind Payroll");
+    expect(companyDisplayName("", false)).toBe("No organization");
+    expect(confirmedPlanTier("", "basic", false)).toBeNull();
+    expect(confirmedPlanTier(ORG, null, false)).toBeNull();
+    expect(confirmedPlanTier(ORG, "basic", true)).toBe("premium");
+    expect(confirmedPlanTier(ORG, "premium", false)).toBe("premium");
+    expect(can("hr_manager", "billing:manage")).toBe(false);
+    expect(can("company_owner", "billing:manage")).toBe(true);
+  });
+
+  it("uses the profile when the user owns one company and belongs to another", () => {
+    expect(chooseCompanyForUser({
+      owned: { id: "owned-co", name: "Owned Co" },
+      profileCompanyId: ORG,
+      memberships: [{ companyId: ORG, role: "hr_manager", status: "active" }],
+    })).toMatchObject({
+      ok: true,
+      companyId: ORG,
+      source: "profile",
+      memberRole: "hr_manager",
+    });
+
+    expect(chooseCompanyForUser({
+      owned: { id: "owned-co", name: "Owned Co" },
+      profileCompanyId: "owned-co",
+      memberships: [{ companyId: ORG, role: "hr_manager", status: "active" }],
+    })).toMatchObject({
+      ok: true,
+      companyId: "owned-co",
+      source: "owned",
+      memberRole: null,
+    });
+
+    const ambiguous = chooseCompanyForUser({
+      owned: { id: "owned-co", name: "Owned Co" },
       profileCompanyId: null,
       memberships: [{ companyId: ORG, role: "hr_manager", status: "active" }],
     });
-    expect(choice).toMatchObject({
+    expect(ambiguous).toMatchObject({ ok: false, code: "ambiguous" });
+
+    const foreign = chooseCompanyForUser({
+      owned: { id: "owned-co", name: "Owned Co" },
+      profileCompanyId: "other-tenant",
+      memberships: [{ companyId: ORG, role: "hr_manager", status: "active" }],
+    });
+    expect(foreign.ok).toBe(false);
+    if (foreign.ok) return;
+    expect(foreign.code).toBe("ambiguous");
+  });
+
+  it("returns no company when several memberships do not match the profile", () => {
+    const choice = chooseCompanyForUser({
+      owned: [],
+      profileCompanyId: "owned-co",
+      memberships: [
+        { companyId: ORG, role: "hr_manager", status: "active" },
+        { companyId: OTHER, role: "auditor", status: "active" },
+      ],
+    });
+    expect(choice).toMatchObject({ ok: false, code: "ambiguous" });
+  });
+
+  it("does not let a blank owned company or a membership win without an explicit selection", () => {
+    expect(chooseCompanyForUser({
+      owned: { id: "blank-owned", name: "" },
+      profileCompanyId: null,
+      memberships: [{ companyId: ORG, role: "hr_manager", status: "active" }],
+    })).toMatchObject({ ok: false, code: "ambiguous" });
+
+    expect(chooseCompanyForUser({
+      owned: { id: "blank-owned", name: "" },
+      profileCompanyId: ORG,
+      memberships: [{ companyId: ORG, role: "hr_manager", status: "active" }],
+    })).toMatchObject({
       ok: true,
       companyId: ORG,
-      source: "membership",
+      source: "profile",
       memberRole: "hr_manager",
     });
   });
@@ -631,17 +771,23 @@ describe("company resolution and creation", () => {
       ],
     })).toMatchObject({ ok: true, companyId: ORG, source: "profile" });
 
-    const ambiguous = chooseCompanyForUser({
+    expect(chooseCompanyForUser({
       owned: { id: "owned-real", name: "Owned Co" },
       profileCompanyId: "owned-real",
       memberships: [
         { companyId: ORG, role: "hr_manager", status: "active" },
         { companyId: OTHER, role: "auditor", status: "active" },
       ],
-    });
-    expect(ambiguous.ok).toBe(false);
-    if (ambiguous.ok) return;
-    expect(ambiguous.code).toBe("ambiguous");
+    })).toMatchObject({ ok: true, companyId: "owned-real", source: "owned", memberRole: null });
+
+    expect(chooseCompanyForUser({
+      owned: { id: "owned-real", name: "Owned Co" },
+      profileCompanyId: "other-tenant",
+      memberships: [
+        { companyId: ORG, role: "hr_manager", status: "active" },
+        { companyId: OTHER, role: "auditor", status: "active" },
+      ],
+    })).toMatchObject({ ok: false, code: "ambiguous" });
   });
 
   it("does not create a company for a non-invited signup", () => {

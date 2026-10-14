@@ -16,6 +16,7 @@ import ErrorBoundary from "@/components/ErrorBoundary";
 import { createClient } from '@/lib/supabase/client';
 import type { SubscriptionTier } from "@/context/AppContext";
 import { visibleNavItems as filterNavItems, type NavItemDef } from "@/lib/nav";
+import { companyDisplayName } from "@/lib/auth/resolve-company";
 import { fetchNotifications, markAllNotificationsRead, type AppNotification } from "@/lib/notifications";
 import { performSignOut } from "@/lib/sign-out";
 import { isPlatformAdminRole, isDesignatedPlatformAdmin } from "@/lib/auth/platform-admin";
@@ -105,7 +106,7 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
   const navItems = visibleNavItems(company.subscriptionTier, company.billingBypass, role);
 
   const activeCount    = employees.filter((e) => e.isActive).length;
-  const companyName    = company.name || 'Your Company';
+  const companyName    = companyDisplayName(company.name, Boolean(company.id));
   const userEmail      = user?.email || '';
   const displayName    = company.name || userEmail.split('@')[0] || 'User';
   const avatarLetters  = initials(displayName) || '?';

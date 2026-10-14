@@ -1,8 +1,21 @@
 /**
  * Which company a signed-in user should see.
- * A blank owned row must not hide an active membership in the inviting org.
- * Multiple active memberships are never guessed.
- * Self-serve company creation stays retired.
+ *
+ * Allowed organizations are the companies the user owns plus active memberships.
+ * 1. One allowed organization is used, whether the user owns it or was invited.
+ * 2. Several allowed organizations use profiles.company_id only when it is one
+ *    of them. That is the explicit selection. Otherwise the result is ambiguous.
+ * 3. A profile id outside the allowed set never grants access. It is used only
+ *    when the user owns nothing and has no active membership.
+ *
+ * A company name, a blank name, and created_at are never used to break a tie.
+ * Pending memberships are ignored. If more than one organization remains,
+ * the result is ambiguous.
+ * Owning the selected company clears the membership role so the app treats
+ * the user as that company's owner.
+ *
+ * public.my_company_id() in migration 0021 must return the same company id,
+ * or null when this result is not ok. Do not change 0002 in place.
  */
 
 export interface OwnedCompanyRef {
@@ -34,57 +47,67 @@ export function isBlankOwnedCompany(company: { name?: string | null } | null | u
   return !(company.name ?? "").trim();
 }
 
+export const OWNED_COMPANY_FETCH_LIMIT = 10;
+
+export function ownershipListIncomplete(rowCount: number): boolean {
+  return rowCount >= OWNED_COMPANY_FETCH_LIMIT;
+}
+
+function ownedList(owned: OwnedCompanyRef | readonly OwnedCompanyRef[] | null | undefined): OwnedCompanyRef[] {
+  if (!owned) return [];
+  const list = Array.isArray(owned) ? owned : [owned];
+  return list.filter((row) => row?.id);
+}
+
+/** Sidebar label. A blank name is not a new company called "Your Company". */
+export function companyDisplayName(name: string | null | undefined, hasCompany: boolean): string {
+  const trimmed = (name ?? "").trim();
+  if (trimmed) return trimmed;
+  return hasCompany ? "Unnamed organization" : "No organization";
+}
+
 export function chooseCompanyForUser(opts: {
-  owned: OwnedCompanyRef | null;
+  owned: OwnedCompanyRef | readonly OwnedCompanyRef[] | null;
   profileCompanyId: string | null;
   memberships: MembershipRef[];
+  /** True when the owned-company query hit its limit and more rows may exist. */
+  ownershipIncomplete?: boolean;
 }): CompanyResolution {
+  const ownedIds = [...new Set(ownedList(opts.owned).map((row) => row.id))];
   const active = opts.memberships.filter((row) => row.status === "active" && row.companyId);
   const membershipIds = [...new Set(active.map((row) => row.companyId))];
-  const owned = opts.owned;
-  const ownedIsReal = Boolean(owned && !isBlankOwnedCompany(owned));
   const profileId = opts.profileCompanyId || null;
 
   const roleFor = (companyId: string): string | null =>
     active.find((row) => row.companyId === companyId)?.role ?? null;
 
-  if (membershipIds.length > 1) {
-    if (profileId && membershipIds.includes(profileId)) {
-      return {
-        ok: true,
-        companyId: profileId,
-        source: "profile",
-        memberRole: roleFor(profileId),
-      };
+  const selected = (companyId: string, source: "owned" | "membership" | "profile"): CompanyResolution => {
+    if (ownedIds.includes(companyId)) {
+      return { ok: true, companyId, source: "owned", memberRole: null };
     }
+    return {
+      ok: true,
+      companyId,
+      source,
+      memberRole: roleFor(companyId),
+    };
+  };
+
+  if (opts.ownershipIncomplete && ownedIds.length > 0) {
     return { ok: false, code: "ambiguous", message: AMBIGUOUS_MESSAGE };
   }
 
-  if (membershipIds.length === 1) {
-    const memberCompanyId = membershipIds[0];
-    const memberRole = roleFor(memberCompanyId);
+  const allowedIds = [...new Set([...ownedIds, ...membershipIds])];
 
-    if (ownedIsReal && owned && owned.id !== memberCompanyId) {
-      if (profileId === owned.id) {
-        return { ok: true, companyId: owned.id, source: "owned", memberRole: null };
-      }
-      if (profileId === memberCompanyId) {
-        return { ok: true, companyId: memberCompanyId, source: "membership", memberRole };
-      }
-      return { ok: false, code: "ambiguous", message: AMBIGUOUS_MESSAGE };
-    }
-
-    if (ownedIsReal && owned && owned.id === memberCompanyId) {
-      return { ok: true, companyId: owned.id, source: "owned", memberRole: null };
-    }
-
-    return { ok: true, companyId: memberCompanyId, source: "membership", memberRole };
+  if (allowedIds.length === 1) {
+    return selected(allowedIds[0], membershipIds.includes(allowedIds[0]) ? "membership" : "owned");
   }
 
-  // No membership: the owned company stays, even before a name is saved.
-  // A blank name loses only when an active membership in another organization exists.
-  if (owned) {
-    return { ok: true, companyId: owned.id, source: "owned", memberRole: null };
+  if (allowedIds.length > 1) {
+    if (profileId && allowedIds.includes(profileId)) {
+      return selected(profileId, "profile");
+    }
+    return { ok: false, code: "ambiguous", message: AMBIGUOUS_MESSAGE };
   }
 
   if (profileId) {

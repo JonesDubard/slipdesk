@@ -2,6 +2,9 @@
 
 import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { useApp } from "@/context/AppContext";
+import { can } from "@/lib/rbac";
+import { confirmedPlanTier } from "@/lib/plan-features";
+import { companyDisplayName } from "@/lib/auth/resolve-company";
 import PageSkeleton from "@/components/PageSkeleton";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -136,7 +139,7 @@ function StatusBadge({ status }: { status: string }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function BillingPage() {
-  const { employees, company, initializing, refreshCompany } = useApp();
+  const { employees, company, initializing, refreshCompany, role } = useApp();
 
   const activeCount = useMemo(
     () => employees.filter((e) => e.isActive).length,
@@ -169,8 +172,9 @@ export default function BillingPage() {
   }, []);
 
   useEffect(() => {
-    if (company.subscriptionTier) setSelectedPlan(company.subscriptionTier);
-  }, [company.subscriptionTier]);
+    const tier = confirmedPlanTier(company.id, company.subscriptionTier, company.billingBypass);
+    if (tier) setSelectedPlan(tier);
+  }, [company.id, company.subscriptionTier, company.billingBypass]);
 
   // Polling for Momo payment status
   useEffect(() => {
@@ -198,10 +202,45 @@ export default function BillingPage() {
 
   if (initializing) return <PageSkeleton />;
 
-  const companyName    = company.name || "Your Company";
+  if (!company.id) {
+    return (
+      <div style={{ padding: "32px", maxWidth: 640 }}>
+        <h1 style={{ fontSize: 26, fontWeight: 800, margin: "0 0 8px" }}>Billing</h1>
+        <p style={{ color: "var(--muted-foreground)", fontSize: 14, lineHeight: 1.5, margin: 0 }}>
+          This account is not linked to an organization, so there is no subscription to show.
+        </p>
+      </div>
+    );
+  }
+
+  if (!can(role, "billing:manage")) {
+    return (
+      <div style={{ padding: "32px", maxWidth: 640 }}>
+        <h1 style={{ fontSize: 26, fontWeight: 800, margin: "0 0 8px" }}>Billing</h1>
+        <p style={{ color: "var(--muted-foreground)", fontSize: 14, lineHeight: 1.5, margin: 0 }}>
+          Billing for {companyDisplayName(company.name, true)} is managed by the company owner.
+          Your role cannot view or change the subscription.
+        </p>
+      </div>
+    );
+  }
+
+  const planTier = confirmedPlanTier(company.id, company.subscriptionTier, company.billingBypass);
+  if (!planTier) {
+    return (
+      <div style={{ padding: "32px", maxWidth: 640 }}>
+        <h1 style={{ fontSize: 26, fontWeight: 800, margin: "0 0 8px" }}>Billing</h1>
+        <p style={{ color: "var(--muted-foreground)", fontSize: 14, lineHeight: 1.5, margin: 0 }}>
+          This organization does not have a subscription on file. No plan has been assumed.
+        </p>
+      </div>
+    );
+  }
+
+  const companyName    = companyDisplayName(company.name, true);
   const billingBypass  = company.billingBypass;
   const isLocked       = company.isLocked;
-  const currentPlan    = PLANS.find((p) => p.id === company.subscriptionTier) ?? PLANS[0];
+  const currentPlan    = PLANS.find((p) => p.id === planTier) ?? PLANS[0];
   const chosenPlan     = PLANS.find((p) => p.id === selectedPlan) ?? PLANS[0];
   const trialExpiry    = company.trialExpiresAt ? new Date(company.trialExpiresAt) : null;
   const trialDaysLeft  = trialExpiry
