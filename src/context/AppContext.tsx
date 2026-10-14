@@ -14,6 +14,10 @@ import { createNotification } from "@/lib/notifications";
 import { DemoReadonlyError } from "@/lib/demo/errors";
 import type { DemoFeatureName } from "@/lib/demo/constants";
 import { formatEmployeeFullName } from "@/lib/employee-name";
+import {
+  resolveEmployeeBranchWrite,
+  type NamedCompanyBranch,
+} from "@/lib/org/employee-branch";
 
 function blockIfDemo(isDemo: boolean, feature: DemoFeatureName) {
   if (!isDemo) return;
@@ -61,6 +65,8 @@ export interface Employee {
   // ── Extended profile (migration 0001) ── optional so existing call sites
   //    that build Employee objects continue to compile unchanged.
   branch?:            string;
+  /** FK to Organization branch. NULL / omitted = Unassigned. */
+  branchId?:          string | null;
   position?:          string;
   taxId?:             string;
   employmentStatus?:  string;
@@ -72,6 +78,14 @@ export interface Employee {
   pendingOvertimeHours?: number | null;
   pendingHolidayHours?:  number | null;
   pendingDeductions?:    number | null;
+  /** Itemized `ded_*` types from CSV. Not a DB column — in-memory until the pay run. */
+  pendingDeductionItems?: Array<{
+    label: string;
+    type?: string;
+    description?: string;
+    note?: string;
+    amount: number;
+  }> | null;
 }
 
 export interface CompanyProfile {
@@ -147,6 +161,7 @@ function dbToEmployee(row: DbEmployee): Employee {
     isActive:       row.is_active,
     isArchived:     row.is_archived,
     branch:            row.branch ?? "",
+    branchId:          row.branch_id ?? null,
     position:          row.position ?? "",
     taxId:             row.tax_id ?? "",
     employmentStatus:  row.employment_status ?? "active",
@@ -210,6 +225,30 @@ const AppContext = createContext<AppState | null>(null);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(supabase: ReturnType<typeof createClient>): any { return supabase as any; }
+
+function mapNamedBranch(row: { id: string; name: string; company_id: string }): NamedCompanyBranch {
+  return { id: row.id, companyId: row.company_id, name: row.name };
+}
+
+function companyBranchLookup(supabase: ReturnType<typeof createClient>) {
+  return {
+    async getById(id: string): Promise<NamedCompanyBranch | null> {
+      const { data } = await db(supabase)
+        .from("branches")
+        .select("id, name, company_id")
+        .eq("id", id)
+        .maybeSingle();
+      return data ? mapNamedBranch(data) : null;
+    },
+    async listByCompany(companyId: string): Promise<NamedCompanyBranch[]> {
+      const { data } = await db(supabase)
+        .from("branches")
+        .select("id, name, company_id")
+        .eq("company_id", companyId);
+      return (data ?? []).map(mapNamedBranch);
+    },
+  };
+}
 
 /** Resolve the active company for an authenticated user (owner, profile link, or team member). */
 async function resolveCompanyForUser(
@@ -548,7 +587,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       company_id:      coId,
       employee_number: finalNumber,
       first_name:      data.firstName,
-      middle_name:     data.middleName ?? "",
       last_name:       data.lastName,
       job_title:       data.jobTitle,
       department:      data.department,
@@ -566,16 +604,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       bank_name:       data.bankName,
       account_number:  data.accountNumber,
       momo_number:     data.momoNumber,
-      ...(data.gender !== undefined && data.gender !== "" && { gender: data.gender }),
       is_active:       data.isActive,
       is_archived:     false,
+    };
+    // Optional columns (migrations 0001 / 0016 / 0018 + pending hours). Retry without them
+    // if PostgREST schema cache is stale or the migration has not been applied.
+    const extended = {
+      ...(data.middleName !== undefined && { middle_name: data.middleName ?? "" }),
+      ...(data.gender !== undefined && data.gender !== "" && { gender: data.gender }),
       ...(data.pendingRegularHours  !== undefined && { pending_regular_hours:  data.pendingRegularHours  }),
       ...(data.pendingOvertimeHours !== undefined && { pending_overtime_hours: data.pendingOvertimeHours }),
       ...(data.pendingHolidayHours  !== undefined && { pending_holiday_hours:  data.pendingHolidayHours  }),
       ...(data.pendingDeductions    !== undefined && { pending_deductions:     data.pendingDeductions    }),
-    };
-    // Extended profile columns (migration 0001). Kept separate for graceful fallback.
-    const extended = {
       ...(data.branch           !== undefined && { branch:            data.branch           }),
       ...(data.position         !== undefined && { position:          data.position         }),
       ...(data.taxId            !== undefined && { tax_id:            data.taxId            }),
@@ -584,16 +624,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...(data.portalEnabled    !== undefined && { portal_enabled:    data.portalEnabled    }),
     };
 
+    const branchWrite = await resolveEmployeeBranchWrite(
+      coId,
+      { branchId: data.branchId, branch: data.branch },
+      companyBranchLookup(supabase),
+    );
+    Object.assign(extended, branchWrite);
+
     let res = await db(supabase).from("employees").insert({ ...baseInsert, ...extended }).select().single();
     if (res.error && Object.keys(extended).length > 0) {
-      // Retry without extended columns if the migration hasn't been applied.
       res = await db(supabase).from("employees").insert(baseInsert).select().single();
     }
     if (res.error) throw res.error;
     const row = res.data;
     if (!row) throw new Error("Failed to insert employee – no row returned.");
 
-    const mapped = dbToEmployee(row as DbEmployee);
+    const mapped = {
+      ...dbToEmployee(row as DbEmployee),
+      pendingDeductionItems: data.pendingDeductionItems ?? null,
+    };
     setAllEmployees((prev) => [...prev, mapped]);
 
     logAudit({ companyId: coId, action: "employee.create", entityType: "employee", entityId: mapped.id, newValue: { name: mapped.fullName, number: mapped.employeeNumber } });
@@ -607,7 +656,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const prev = allEmployees.find((e) => e.id === id);
     const baseUpdate = {
       ...(data.firstName      !== undefined && { first_name:      data.firstName      }),
-      ...(data.middleName     !== undefined && { middle_name:     data.middleName     }),
       ...(data.lastName       !== undefined && { last_name:       data.lastName       }),
       ...(data.jobTitle       !== undefined && { job_title:       data.jobTitle       }),
       ...(data.department     !== undefined && { department:      data.department     }),
@@ -625,14 +673,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...(data.bankName       !== undefined && { bank_name:       data.bankName       }),
       ...(data.accountNumber  !== undefined && { account_number:  data.accountNumber  }),
       ...(data.momoNumber          !== undefined && { momo_number:           data.momoNumber          }),
-      ...(data.gender               !== undefined && { gender:                data.gender || null      }),
       ...(data.isActive            !== undefined && { is_active:             data.isActive            }),
+    };
+    const extended = {
+      ...(data.middleName     !== undefined && { middle_name:     data.middleName     }),
+      ...(data.gender               !== undefined && { gender:                data.gender || null      }),
       ...(data.pendingRegularHours  !== undefined && { pending_regular_hours:  data.pendingRegularHours  }),
       ...(data.pendingOvertimeHours !== undefined && { pending_overtime_hours: data.pendingOvertimeHours }),
       ...(data.pendingHolidayHours  !== undefined && { pending_holiday_hours:  data.pendingHolidayHours  }),
       ...(data.pendingDeductions    !== undefined && { pending_deductions:     data.pendingDeductions    }),
-    };
-    const extended = {
       ...(data.branch           !== undefined && { branch:            data.branch           }),
       ...(data.position         !== undefined && { position:          data.position         }),
       ...(data.taxId            !== undefined && { tax_id:            data.taxId            }),
@@ -642,12 +691,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...(data.portalEnabled    !== undefined && { portal_enabled:    data.portalEnabled    }),
     };
 
+    if (data.branchId !== undefined || data.branch !== undefined) {
+      const branchWrite = await resolveEmployeeBranchWrite(
+        company.id,
+        { branchId: data.branchId, branch: data.branch },
+        companyBranchLookup(supabase),
+      );
+      Object.assign(extended, branchWrite);
+    }
+
     let res = await db(supabase).from("employees").update({ ...baseUpdate, ...extended }).eq("id", id).select().single();
     if (res.error && Object.keys(extended).length > 0) {
       res = await db(supabase).from("employees").update(baseUpdate).eq("id", id).select().single();
     }
+    if (res.error) throw res.error;
     const row = res.data;
-    if (row) setAllEmployees((list) => list.map((e) => e.id === id ? dbToEmployee(row as DbEmployee) : e));
+    if (row) {
+      setAllEmployees((list) => list.map((e) => {
+        if (e.id !== id) return e;
+        return {
+          ...dbToEmployee(row as DbEmployee),
+          pendingDeductionItems: data.pendingDeductionItems ?? e.pendingDeductionItems,
+        };
+      }));
+    }
 
     if (company.id) {
       // Salary-history trail when the pay rate changes.
@@ -697,18 +764,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const hardDeleteEmployee = useCallback(async (id: string) => {
     blockIfDemo(company.isDemo, "delete_employee");
     if (!id || !company.id) throw new Error("Company not loaded");
-    await db(supabase)
+    const { error, count } = await db(supabase)
       .from("employees")
-      .delete()
+      .delete({ count: "exact" })
       .eq("id", id)
       .eq("company_id", company.id);
+    if (error) throw new Error(error.message);
+    if (count === 0) throw new Error("Employee not found or already deleted");
     setAllEmployees((prev) => prev.filter((e) => e.id !== id));
     logAudit({ companyId: company.id, action: "employee.delete", entityType: "employee", entityId: id });
   }, [supabase, company.id]);
 
   const refreshEmployees = useCallback(async () => {
     const { data: emps } = await db(supabase).from("employees").select("*").order("employee_number");
-    if (emps) setAllEmployees((emps as DbEmployee[]).map(dbToEmployee));
+    if (emps) {
+      setAllEmployees((prev) => {
+        const prevItems = new Map(
+          prev
+            .filter((e) => (e.pendingDeductionItems?.length ?? 0) > 0)
+            .map((e) => [e.id, e.pendingDeductionItems]),
+        );
+        return (emps as DbEmployee[]).map((row) => {
+          const mapped = dbToEmployee(row);
+          const items = prevItems.get(mapped.id);
+          return items ? { ...mapped, pendingDeductionItems: items } : mapped;
+        });
+      });
+    }
   }, [supabase]);
 
   const signOut = useCallback(async () => {

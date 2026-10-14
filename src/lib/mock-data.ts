@@ -16,6 +16,10 @@ export interface DeductionItem {
   label:  string;   // e.g. "Pay Advance", "Food", "Transportation"
   note?:  string;  // optional explanation shown on payslip
   amount: number;
+  /** Stored deduction type when distinct from the display label. */
+  type?: string;
+  /** Stored description; used when label/type is missing or generic. */
+  description?: string;
 }
 
 // ─── Employee ─────────────────────────────────────────────────────────────────
@@ -62,6 +66,8 @@ export interface Employee {
   pendingHolidayHours?:  number | null;
   /** Pre-filled deduction for next pay run (null = 0) */
   pendingDeductions?:    number | null;
+  /** Itemized pending deductions (Food, Salary Advance, …) when the CSV had `ded_*` columns */
+  pendingDeductionItems?: DeductionItem[] | null;
 
   // ── Payment / Disbursement ──
   paymentMethod: PaymentMethod;

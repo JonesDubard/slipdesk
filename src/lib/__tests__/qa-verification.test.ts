@@ -22,15 +22,21 @@ import {
   rowsFromFinalizedPayroll,
 } from "@/lib/reports/disbursement";
 import {
+  lraExportRows,
   lraExportRowsFromFinalized,
+  mapPayRunLineRowToFinalized,
+  nasscorpExportRows,
   nasscorpExportRowsFromFinalized,
 } from "@/lib/compliance/statutory-exports";
+import { persistStatutoryBases } from "@/lib/payroll/statutory-bases";
+import { calculatePayroll, roundCurrency } from "@/lib/slipdesk-payroll-engine";
 import { normalizeGender } from "@/lib/employee-gender";
 import {
   estimatePayslipLayoutUnits,
   PAYSLIP_ONE_PAGE_MAX_UNITS,
 } from "@/lib/payslip-layout";
 import { computePayroll } from "@/lib/reporting";
+import { filterPayRunView } from "@/lib/payroll/grid-view-filter";
 import type { Employee } from "@/context/AppContext";
 
 const baseEmployee = (overrides: Partial<Employee> = {}): Employee => ({
@@ -164,6 +170,7 @@ describe("QA: disbursement and statutory exports", () => {
       fullName: "Ada",
       currency: "USD",
       grossPay: 2000,
+      netPay: 1720,
       incomeTax: 200,
       nasscorpEe: 80,
       nasscorpEr: 120,
@@ -173,10 +180,114 @@ describe("QA: disbursement and statutory exports", () => {
       fullName: "Ada",
       currency: "USD",
       grossPay: 2000,
+      netPay: 1720,
       incomeTax: 200,
       nasscorpEe: 80,
       nasscorpEr: 120,
     }])[0][6]).toBe("80.00");
+  });
+
+  it("keeps finalized LRA Taxable Income on the PAYE base when extras + OT + holiday are present", () => {
+    const employee = baseEmployee({ rate: 12, standardHours: 173.33, allowances: 150 });
+    const result = calculatePayroll({
+      employeeId: employee.id,
+      currency: "USD",
+      rate: 12,
+      regularHours: 173.33,
+      overtimeHours: 6,
+      holidayHours: 8,
+      exchangeRate: 185.44,
+      additionalEarnings: 150,
+    });
+    const employer = { companyName: "ACME", tin: "TIN", nasscorpRegNo: "NSS", periodLabel: "Sep 2026" };
+    const payeBase = roundCurrency(result.regularSalary + result.overtimePay + result.holidayPay);
+    const persisted = persistStatutoryBases(result);
+    const live = lraExportRows(employer, [{
+      employee, result, usd: {
+        gross: result.grossPay, net: result.netPay, incomeTax: result.Paye.taxInBase,
+        nasscorpEe: result.nasscorp.employeeContribution, nasscorpEr: result.nasscorp.employerContribution,
+      },
+    }]);
+    const finalized = lraExportRowsFromFinalized(employer, [mapPayRunLineRowToFinalized({
+      employee_number: employee.employeeNumber,
+      full_name: employee.fullName,
+      currency: "USD",
+      gross_pay: result.grossPay,
+      additional_earnings: result.additionalEarnings,
+      income_tax: result.Paye.taxInBase,
+      nasscorp_ee: result.nasscorp.employeeContribution,
+      nasscorp_er: result.nasscorp.employerContribution,
+      net_pay: result.netPay,
+      taxable_pay: persisted.taxable_pay,
+      nasscorp_base: persisted.nasscorp_base,
+      rate: 12,
+      regular_hours: 173.33,
+    })]);
+
+    expect(result.grossPay).toBeGreaterThan(payeBase);
+    expect(payeBase).toBeGreaterThan(result.nasscorp.base);
+    expect(live[0][6]).toBe(payeBase.toFixed(2));
+    expect(finalized[0][6]).toBe(payeBase.toFixed(2));
+    expect(finalized[0][6]).toBe(live[0][6]);
+    expect(finalized[0][5]).toBe(result.grossPay.toFixed(2));
+  });
+
+  it("keeps finalized NASSCORP Contribution Base on regularSalary so EE/ER stay 4%/6%", () => {
+    const employee = baseEmployee({ rate: 12, standardHours: 173.33, allowances: 150 });
+    const result = calculatePayroll({
+      employeeId: employee.id,
+      currency: "USD",
+      rate: 12,
+      regularHours: 173.33,
+      overtimeHours: 6,
+      holidayHours: 8,
+      exchangeRate: 185.44,
+      additionalEarnings: 150,
+    });
+    const employer = { companyName: "ACME", tin: "TIN", nasscorpRegNo: "NSS", periodLabel: "Sep 2026" };
+    const persisted = persistStatutoryBases(result);
+    const live = nasscorpExportRows(employer, [{
+      employee, result, usd: {
+        gross: result.grossPay, net: result.netPay, incomeTax: result.Paye.taxInBase,
+        nasscorpEe: result.nasscorp.employeeContribution, nasscorpEr: result.nasscorp.employerContribution,
+      },
+    }]);
+    const fallback = nasscorpExportRowsFromFinalized(employer, [mapPayRunLineRowToFinalized({
+      employee_number: employee.employeeNumber,
+      full_name: employee.fullName,
+      currency: "USD",
+      gross_pay: result.grossPay,
+      additional_earnings: result.additionalEarnings,
+      income_tax: result.Paye.taxInBase,
+      nasscorp_ee: result.nasscorp.employeeContribution,
+      nasscorp_er: result.nasscorp.employerContribution,
+      net_pay: result.netPay,
+      rate: 12,
+      regular_hours: 173.33,
+    })]);
+    const persistedRows = nasscorpExportRowsFromFinalized(employer, [mapPayRunLineRowToFinalized({
+      employee_number: employee.employeeNumber,
+      full_name: employee.fullName,
+      currency: "USD",
+      gross_pay: result.grossPay,
+      additional_earnings: result.additionalEarnings,
+      income_tax: result.Paye.taxInBase,
+      nasscorp_ee: result.nasscorp.employeeContribution,
+      nasscorp_er: result.nasscorp.employerContribution,
+      net_pay: result.netPay,
+      taxable_pay: persisted.taxable_pay,
+      nasscorp_base: persisted.nasscorp_base,
+      rate: 12,
+      regular_hours: 173.33,
+    })]);
+    const reportedBase = Number(persistedRows[0][8]);
+
+    expect(reportedBase).toBe(result.regularSalary);
+    expect(reportedBase).not.toBe(result.grossPay);
+    expect(live[0][8]).toBe(persistedRows[0][8]);
+    expect(fallback[0][8]).toBe(persistedRows[0][8]);
+    expect(result.nasscorp.employeeContribution).toBe(roundCurrency(reportedBase * 0.04));
+    expect(result.nasscorp.employerContribution).toBe(roundCurrency(reportedBase * 0.06));
   });
 });
 
@@ -220,20 +331,33 @@ describe("QA: one-page payslip layout budget", () => {
   });
 });
 
-describe("QA: payroll grid name filter/sort (pure)", () => {
-  it("filters and sorts display lines like payroll page", () => {
+describe("QA: payroll grid view filter/sort (pure)", () => {
+  it("defaults to numeric employee-number order, not name", () => {
     const lines = [
-      { id: "1", fullName: "Zara Zen", employeeNumber: "EMP-3" },
-      { id: "2", fullName: "Ada Lovelace", employeeNumber: "EMP-1" },
-      { id: "3", fullName: "Bob Mo", employeeNumber: "EMP-2" },
+      { id: "1", fullName: "Zara Zen", employeeNumber: "EMP-10", department: "Finance", paymentMethod: "bank_transfer" },
+      { id: "2", fullName: "Ada Lovelace", employeeNumber: "EMP-1", department: "Operations", paymentMethod: "mtn_momo" },
+      { id: "3", fullName: "Bob Mo", employeeNumber: "EMP-2", department: "Operations", paymentMethod: "cash" },
     ];
-    const q = "ada";
-    const filtered = lines.filter(
-      (l) => l.fullName.toLowerCase().includes(q) || l.employeeNumber.toLowerCase().includes(q),
-    );
-    expect(filtered).toHaveLength(1);
-    const sorted = [...lines].sort((a, b) => a.fullName.localeCompare(b.fullName));
-    expect(sorted[0].fullName).toBe("Ada Lovelace");
-    expect(sorted[sorted.length - 1].fullName).toBe("Zara Zen");
+    const byNumber = filterPayRunView(lines);
+    expect(byNumber.map((l) => l.employeeNumber)).toEqual(["EMP-1", "EMP-2", "EMP-10"]);
+    const byName = filterPayRunView(lines, { sortBy: "name-asc" });
+    expect(byName[0].fullName).toBe("Ada Lovelace");
+    expect(byName[byName.length - 1].fullName).toBe("Zara Zen");
+  });
+
+  it("jumps to an employee number and keeps optional dept/method filters", () => {
+    const lines = [
+      { id: "1", fullName: "Zara Zen", employeeNumber: "EMP-452", department: "Finance", paymentMethod: "bank_transfer" },
+      { id: "2", fullName: "Ada Lovelace", employeeNumber: "EMP-1", department: "Operations", paymentMethod: "mtn_momo" },
+      { id: "3", fullName: "Bob Mo", employeeNumber: "EMP-2", department: "Operations", paymentMethod: "cash" },
+    ];
+    const jumped = filterPayRunView(lines, { nameQuery: "452" });
+    expect(jumped.map((l) => l.employeeNumber)).toEqual(["EMP-452"]);
+    const ops = filterPayRunView(lines, { department: "Operations" });
+    expect(ops).toHaveLength(2);
+    expect(ops.every((l) => l.department === "Operations")).toBe(true);
+    const momo = filterPayRunView(lines, { paymentMethod: "mtn_momo" });
+    expect(momo.map((l) => l.employeeNumber)).toEqual(["EMP-1"]);
+    expect(lines).toHaveLength(3);
   });
 });

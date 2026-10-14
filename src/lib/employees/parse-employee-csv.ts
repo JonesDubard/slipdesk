@@ -4,6 +4,7 @@ import {
   resolveImportedBranch,
   type RegisteredBranch,
 } from "@/lib/org/branch-assignment";
+import { parseDeductionItemsFromCsvRecord } from "@/lib/csv/parse-deduction-items";
 
 export const EMPLOYEE_CSV_HEADERS = [
   "employee_number", "first_name", "middle_name", "last_name", "gender", "job_title", "department",
@@ -158,6 +159,7 @@ export function parseEmployeeCSV(
           .reduce((sum, [, val]) => sum + (parseFloat(val) || 0), 0) ||
           n(raw.deductions) ||
           null,
+        pendingDeductionItems: parseDeductionItemsFromCsvRecord(raw).deductionItems,
       },
     });
   }
