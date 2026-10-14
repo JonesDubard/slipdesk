@@ -59,6 +59,26 @@ function ownedList(owned: OwnedCompanyRef | readonly OwnedCompanyRef[] | null | 
   return list.filter((row) => row?.id);
 }
 
+/**
+ * The Team page owner row is the signed-in user. A company contact email can
+ * belong to a different account and must not be labeled as that user.
+ */
+export function signedInOwnerEmail(
+  userEmail: string | null | undefined,
+  companyEmail: string | null | undefined,
+): string {
+  const session = (userEmail ?? "").trim();
+  if (session) return session;
+  return (companyEmail ?? "").trim() || "—";
+}
+
+/** Shown when resolution produced no company. A stored error replaces the generic copy. */
+export function missingOrganizationMessage(error: string | null | undefined): string {
+  const text = (error ?? "").trim();
+  if (text) return text;
+  return "This account is not linked to an organization, so there is no subscription to show.";
+}
+
 /** Sidebar label. A blank name is not a new company called "Your Company". */
 export function companyDisplayName(name: string | null | undefined, hasCompany: boolean): string {
   const trimmed = (name ?? "").trim();

@@ -35,6 +35,8 @@ import {
 } from "@/lib/auth/callback-plan";
 import {
   chooseCompanyForUser,
+  missingOrganizationMessage,
+  signedInOwnerEmail,
   companyDisplayName,
   isBlankOwnedCompany,
   ownedCompanyCreationDecision,
@@ -688,6 +690,10 @@ describe("company resolution and creation", () => {
     expect(confirmedPlanTier(ORG, "premium", false)).toBe("premium");
     expect(can("hr_manager", "billing:manage")).toBe(false);
     expect(can("company_owner", "billing:manage")).toBe(true);
+    expect(signedInOwnerEmail("owner@example.test", "billing-contact@example.test")).toBe("owner@example.test");
+    expect(signedInOwnerEmail("", "billing-contact@example.test")).toBe("billing-contact@example.test");
+    expect(missingOrganizationMessage(null)).toContain("not linked to an organization");
+    expect(missingOrganizationMessage("Your organization membership is active, but this account cannot read the company record.")).toContain("cannot read the company record");
   });
 
   it("uses the profile when the user owns one company and belongs to another", () => {

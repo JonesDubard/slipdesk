@@ -4,7 +4,7 @@ import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { useApp } from "@/context/AppContext";
 import { can } from "@/lib/rbac";
 import { confirmedPlanTier } from "@/lib/plan-features";
-import { companyDisplayName } from "@/lib/auth/resolve-company";
+import { companyDisplayName, missingOrganizationMessage } from "@/lib/auth/resolve-company";
 import PageSkeleton from "@/components/PageSkeleton";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -139,7 +139,7 @@ function StatusBadge({ status }: { status: string }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function BillingPage() {
-  const { employees, company, initializing, refreshCompany, role } = useApp();
+  const { employees, company, initializing, refreshCompany, role, companyResolutionError } = useApp();
 
   const activeCount = useMemo(
     () => employees.filter((e) => e.isActive).length,
@@ -207,7 +207,7 @@ export default function BillingPage() {
       <div style={{ padding: "32px", maxWidth: 640 }}>
         <h1 style={{ fontSize: 26, fontWeight: 800, margin: "0 0 8px" }}>Billing</h1>
         <p style={{ color: "var(--muted-foreground)", fontSize: 14, lineHeight: 1.5, margin: 0 }}>
-          This account is not linked to an organization, so there is no subscription to show.
+          {missingOrganizationMessage(companyResolutionError)}
         </p>
       </div>
     );

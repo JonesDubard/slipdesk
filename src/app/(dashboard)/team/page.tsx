@@ -11,6 +11,7 @@ import {
   fetchMembers, inviteMember, updateMemberRole, removeMember, type CompanyMember,
 } from "@/lib/company-members";
 import { inviteFeedback } from "@/lib/auth/team-invite-policy";
+import { signedInOwnerEmail } from "@/lib/auth/resolve-company";
 import {
   ModuleShell, ModuleHeader, Card, StatTile, UpgradeNotice,
 } from "@/components/module-ui";
@@ -139,7 +140,7 @@ export default function TeamPage() {
     );
   }
 
-  const ownerEmail = company.email || user?.email || "—";
+  const ownerEmail = signedInOwnerEmail(user?.email, company.email);
 
   return (
     <ModuleShell>

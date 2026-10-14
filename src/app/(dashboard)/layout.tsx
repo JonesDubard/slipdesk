@@ -79,7 +79,7 @@ function initials(name: string): string {
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 function SidebarContent({ onClose }: { onClose: () => void }) {
   const pathname = usePathname();
-  const { employees, company, user, role, signOut, loading } = useApp();
+  const { employees, company, user, role, signOut, loading, companyResolutionError } = useApp();
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -148,6 +148,11 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
         ) : (
           <>
             <p className="text-white text-sm font-medium truncate">{companyName}</p>
+            {companyResolutionError && !company.id ? (
+              <p className="text-white/70 text-[11px] leading-snug mt-1" title={companyResolutionError}>
+                {companyResolutionError}
+              </p>
+            ) : null}
             <p className="text-white/40 text-xs font-mono">
               {activeCount} active employee{activeCount !== 1 ? 's' : ''}
             </p>
