@@ -116,8 +116,9 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
   }
 
   const adminNavItems = isPlatformAdmin ? [
-  { href: '/admin/payments', label: 'Admin: Payments', icon: CreditCard },
-] : [];
+    { href: "/admin/payments", label: "Admin: Payments", icon: CreditCard },
+    { href: "/admin/invite", label: "Admin: Invite", icon: UserCog },
+  ] : [];
 
   return (
     <div className="flex flex-col h-full">
@@ -179,7 +180,7 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
           <div className="pt-4 mt-2 border-t border-white/10">
             <p className="px-3 text-[10px] font-mono text-white/30 uppercase tracking-wider mb-2">Admin</p>
             {adminNavItems.map((item) => {
-              const active = pathname === item.href;
+              const active = pathname === item.href || pathname?.startsWith(item.href + "/");
               return (
                 <Link
                   key={item.href}

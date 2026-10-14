@@ -13,23 +13,63 @@ function SignupForm() {
   const searchParams = useSearchParams();
   const supabase = createClient();
 
-  const invited = searchParams.get("invite") === "1";
+  const token = (searchParams.get("token") ?? "").trim();
+  const invited = searchParams.get("invite") === "1" || Boolean(token);
   const invitedEmail = (searchParams.get("email") ?? "").trim().toLowerCase();
 
   const [show,    setShow]    = useState(false);
   const [loading, setLoading] = useState(false);
+  const [checking, setChecking] = useState(Boolean(token));
   const [error,   setError]   = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{
+    email: string;
+    fullName: string;
+    companyName: string;
+    roleLabel: string;
+  } | null>(null);
   const [form,    setForm]    = useState({
     email:       invitedEmail,
     password:    "",
   });
 
   useEffect(() => {
-    if (invitedEmail) {
-      setForm((prev) => ({ ...prev, email: invitedEmail }));
+    if (!token) {
+      if (invitedEmail) setForm((prev) => ({ ...prev, email: invitedEmail }));
+      return;
     }
-  }, [invitedEmail]);
+    let cancelled = false;
+    (async () => {
+      setChecking(true);
+      try {
+        const res = await fetch(`/api/auth/invite?token=${encodeURIComponent(token)}`);
+        const body = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!res.ok || !body.valid) {
+          setError(
+            body.message
+              ?? (res.ok
+                ? "This invitation link is invalid or has already been used."
+                : "Could not check this invitation. Try the link again."),
+          );
+          setPreview(null);
+          return;
+        }
+        setPreview({
+          email: String(body.email ?? ""),
+          fullName: String(body.fullName ?? ""),
+          companyName: String(body.companyName ?? "your organization"),
+          roleLabel: String(body.roleLabel ?? ""),
+        });
+        setForm((prev) => ({ ...prev, email: String(body.email ?? "") }));
+      } catch {
+        if (!cancelled) setError("Could not check this invitation. Try the link again.");
+      } finally {
+        if (!cancelled) setChecking(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, invitedEmail]);
 
   const set = (field: string, value: string) =>
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -42,8 +82,14 @@ function SignupForm() {
     setLoading(true);
 
     const email = form.email.trim().toLowerCase();
-    if (invitedEmail && email !== invitedEmail) {
-      setError(`Use the invited email address (${invitedEmail}) to join your team.`);
+    const expected = preview?.email || invitedEmail;
+    if (expected && email !== expected) {
+      setError(`Use the invited email address (${expected}) to join your team.`);
+      setLoading(false);
+      return;
+    }
+    if (form.password.length < 8) {
+      setError("Password must be at least 8 characters.");
       setLoading(false);
       return;
     }
@@ -52,14 +98,17 @@ function SignupForm() {
       email,
       password: form.password,
       options: {
-        data: {},
+        data: {
+          invite_token: token || undefined,
+          full_name: preview?.fullName || undefined,
+        },
         emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
       },
     });
 
     if (signUpErr) {
       const msg = signUpErr.message.toLowerCase().includes("already")
-        ? "An account with this email already exists. Sign in with your password instead."
+        ? "An account with this email already exists. Sign in with your password to accept the invitation."
         : signUpErr.message;
       setError(msg);
       setLoading(false);
@@ -67,7 +116,7 @@ function SignupForm() {
     }
 
     if (data.session) {
-      const boot = await bootstrapAccount({});
+      const boot = await bootstrapAccount({ inviteToken: token || undefined });
       if (!boot.ok) {
         setError(boot.error ?? "Account created but setup failed. Try signing in.");
         setLoading(false);
@@ -79,8 +128,7 @@ function SignupForm() {
     }
 
     setSuccess(
-      "Account created! Check your email for a confirmation link, then sign in. " +
-        "Use the same email and the password you just chose — invites do not include a password.",
+      "Account created. Check your email for a confirmation link, then sign in with the password you just chose. Invitations do not include a password.",
     );
     setLoading(false);
   }
@@ -163,11 +211,25 @@ function SignupForm() {
                   </a>
                 </div>
               </>
+            ) : checking ? (
+              <p className="text-slate-400 text-sm">Checking your invitation…</p>
+            ) : token && !preview ? (
+              <>
+                <h1 className="text-2xl font-bold text-slate-800 mb-1">Invitation unavailable</h1>
+                <p className="text-slate-500 text-sm mb-6 leading-relaxed">
+                  {error ?? "This invitation link is invalid or has already been used."}
+                </p>
+                <Link href="/login" className="text-[#50C878] hover:underline font-medium text-sm">
+                  Go to sign in
+                </Link>
+              </>
             ) : (
               <>
                 <h1 className="text-2xl font-bold text-slate-800 mb-1">Join your team</h1>
                 <p className="text-slate-400 text-sm mb-8">
-                  Create your Slipdesk login with the invited email and a password you choose.
+                  {preview
+                    ? `${preview.fullName ? `${preview.fullName}, you are` : "You are"} invited to ${preview.companyName}${preview.roleLabel ? ` as ${preview.roleLabel}` : ""}. Choose a password for this email. Slipdesk does not send passwords.`
+                    : "Create your Slipdesk login with the invited email and a password you choose."}
                 </p>
 
                 {error && (
@@ -187,8 +249,8 @@ function SignupForm() {
                   <div>
                     <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">Work Email</label>
                     <input type="email" value={form.email} onChange={(e) => set("email", e.target.value)}
-                      placeholder="you@company.lr" required readOnly={!!invitedEmail}
-                      className={`${inputClass}${invitedEmail ? " bg-slate-50" : ""}`} />
+                      placeholder="you@company.lr" required readOnly={!!(preview?.email || invitedEmail)}
+                      className={`${inputClass}${(preview?.email || invitedEmail) ? " bg-slate-50" : ""}`} />
                   </div>
                   <div>
                     <label className="block text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">Password</label>
@@ -212,7 +274,7 @@ function SignupForm() {
                 <p className="text-center text-sm text-slate-400 mt-5">
                   Already have an account?{" "}
                   <Link
-                    href={invitedEmail ? `/login?email=${encodeURIComponent(invitedEmail)}` : "/login"}
+                    href={signInHref(form.email || invitedEmail, token)}
                     className="text-[#50C878] hover:underline font-medium"
                   >
                     Sign in
@@ -225,6 +287,14 @@ function SignupForm() {
       </div>
     </>
   );
+}
+
+function signInHref(email: string, token: string): string {
+  const params = new URLSearchParams();
+  if (email) params.set("email", email);
+  if (token) params.set("token", token);
+  const qs = params.toString();
+  return qs ? `/login?${qs}` : "/login";
 }
 
 export default function SignupPage() {

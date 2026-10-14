@@ -5,7 +5,7 @@ import { activatePendingInviteForUser } from "@/lib/auth/activate-invite";
 
 export type BootstrapResult =
   | { ok: true; isPlatformAdmin?: boolean; isTeamMember?: boolean; companyId?: string; created?: boolean }
-  | { ok: false; error: string };
+  | { ok: false; error: string; status?: number };
 
 // profiles is not in generated Database types yet
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -15,7 +15,7 @@ function db(admin: ReturnType<typeof createAdminClient>): any {
 
 export async function bootstrapUserAccount(
   user: User,
-  opts?: { companyName?: string; lraTin?: string },
+  opts?: { companyName?: string; lraTin?: string; inviteToken?: string },
 ): Promise<BootstrapResult> {
   let admin;
   try {
@@ -62,7 +62,12 @@ export async function bootstrapUserAccount(
   }
 
   // Pending team invite — join the inviter's company (never create a new one).
-  const invite = await activatePendingInviteForUser(admin, user.id, user.email);
+  const inviteToken = (opts?.inviteToken ?? "").trim()
+    || String(user.user_metadata?.invite_token ?? "").trim();
+  const invite = await activatePendingInviteForUser(admin, user.id, user.email, {
+    token: inviteToken,
+    userMetadata: (user.user_metadata ?? null) as Record<string, unknown> | null,
+  });
   if (invite.activated) {
     return { ok: true, companyId: invite.companyId, isTeamMember: true };
   }
@@ -93,6 +98,9 @@ export async function bootstrapUserAccount(
 
   // Self-serve company / free-trial creation is retired.
   // New companies are provisioned by Slipdesk ops or via a paid onboarding path.
+  if (inviteToken && invite.message) {
+    return { ok: false, error: invite.message, status: 400 };
+  }
   return {
     ok: false,
     error:

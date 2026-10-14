@@ -2,6 +2,7 @@
 export async function bootstrapAccount(opts?: {
   companyName?: string;
   lraTin?: string;
+  inviteToken?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch("/api/auth/bootstrap", {
@@ -10,6 +11,7 @@ export async function bootstrapAccount(opts?: {
       body: JSON.stringify({
         companyName: opts?.companyName ?? "",
         lraTin: opts?.lraTin ?? "",
+        inviteToken: opts?.inviteToken ?? "",
       }),
     });
     const data = await res.json().catch(() => ({}));

@@ -36,7 +36,9 @@ export async function GET() {
       userId: r.user_id,
       role: r.role,
       invitedEmail: r.invited_email,
+      invitedName: r.invited_name ?? null,
       status: r.status ?? "pending",
+      inviteExpiresAt: r.invite_expires_at ?? null,
       createdAt: r.created_at,
     })),
   });

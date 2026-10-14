@@ -11,7 +11,9 @@ export async function POST() {
 
   try {
     const admin = createAdminClient();
-    const result = await activatePendingInviteForUser(admin, user.id, user.email);
+    const result = await activatePendingInviteForUser(admin, user.id, user.email, {
+      userMetadata: (user.user_metadata ?? null) as Record<string, unknown> | null,
+    });
     return NextResponse.json(result);
   } catch (err) {
     console.error("[activate-invite]", err);

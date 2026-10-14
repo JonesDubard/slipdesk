@@ -11,10 +11,11 @@ export async function POST(req: NextRequest) {
   const result = await bootstrapUserAccount(user, {
     companyName: String(body.companyName ?? ""),
     lraTin:      String(body.lraTin ?? ""),
+    inviteToken: String(body.inviteToken ?? ""),
   });
 
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: 500 });
+    return NextResponse.json({ error: result.error }, { status: result.status ?? 500 });
   }
   return NextResponse.json(result);
 }

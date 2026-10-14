@@ -196,6 +196,11 @@ type CompanyMemberRow = {
   role:          "super_admin" | "company_owner" | "payroll_officer" |
                  "finance_manager" | "hr_manager" | "auditor" | "executive" | "employee";
   invited_email: string | null;
+  invited_name:  string | null;
+  invite_token_hash: string | null;
+  invite_expires_at: string | null;
+  accepted_at:   string | null;
+  invited_by:    string | null;
   status:        "pending" | "active";
   created_at:    string;
 };
@@ -317,7 +322,14 @@ export interface Database {
       };
       company_members: {
         Row:    CompanyMemberRow;
-        Insert: Omit<CompanyMemberRow, "id" | "created_at"> & { id?: string };
+        Insert: Omit<CompanyMemberRow, "id" | "created_at" | "invited_name" | "invite_token_hash" | "invite_expires_at" | "accepted_at" | "invited_by"> & {
+          id?: string;
+          invited_name?: string | null;
+          invite_token_hash?: string | null;
+          invite_expires_at?: string | null;
+          accepted_at?: string | null;
+          invited_by?: string | null;
+        };
         Update: Partial<Omit<CompanyMemberRow, "id" | "created_at">>;
       };
       audit_log: {

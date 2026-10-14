@@ -30,6 +30,8 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const supabase =  createClient();
 
+  const inviteToken = (searchParams.get("token") ?? "").trim();
+
   const [mode,        setMode]        = useState<Mode>("login");
   const [email,       setEmail]       = useState("");
   const [password,    setPassword]    = useState("");
@@ -76,7 +78,7 @@ function LoginForm() {
         setLoading(false);
         return;
       }
-      const boot = await bootstrapAccount();
+      const boot = await bootstrapAccount({ inviteToken: inviteToken || undefined });
       if (!boot.ok) { setError(boot.error ?? "Account setup failed"); setLoading(false); return; }
       router.push("/dashboard");
       router.refresh();
@@ -183,6 +185,12 @@ function LoginForm() {
                 </button>
               </div>
             </div>
+
+            {mode === "login" && inviteToken && (
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Sign in with the invited email to join your team. You keep the password you already chose.
+              </p>
+            )}
 
             {/* Forgot password — sign-in mode only */}
             {mode === "login" && (

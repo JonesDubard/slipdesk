@@ -15,13 +15,21 @@ export interface CompanyMember {
   userId: string | null;
   role: Role;
   invitedEmail: string | null;
+  invitedName: string | null;
   status: "pending" | "active";
+  inviteExpiresAt: string | null;
   createdAt: string;
 }
 
 export interface MemberResult {
   ok: boolean;
   error?: string;
+  code?: string;
+  email?: string;
+  emailSent?: boolean;
+  emailError?: string;
+  inviteUrl?: string;
+  accountExists?: boolean;
 }
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -57,18 +65,41 @@ export async function fetchMembers(_companyId: string): Promise<CompanyMember[]>
   }
 }
 
-export async function inviteMember(_companyId: string, email: string, role: Role): Promise<MemberResult> {
+export async function inviteMember(
+  _companyId: string,
+  email: string,
+  role: Role,
+  opts?: { fullName?: string; resend?: boolean },
+): Promise<MemberResult> {
   try {
     const res = await fetchWithTimeout("/api/team/invite", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, role }),
+      body: JSON.stringify({
+        email,
+        role,
+        fullName: opts?.fullName ?? "",
+        resend: Boolean(opts?.resend),
+      }),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
-      return { ok: false, error: body.error ?? "Could not send invite." };
+      return {
+        ok: false,
+        error: body.error ?? "Could not send invite.",
+        code: body.code,
+        email: body.email,
+      };
     }
-    return { ok: true };
+    return {
+      ok: true,
+      code: body.code,
+      email: body.email ?? email,
+      emailSent: body.emailSent,
+      emailError: body.emailError,
+      inviteUrl: body.inviteUrl,
+      accountExists: body.accountExists,
+    };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
