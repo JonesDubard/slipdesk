@@ -7,10 +7,10 @@
  * Sends a password reset email via Supabase.
  * Supabase will email a magic link that redirects to /reset-password.
  *
- * Required in Supabase dashboard:
+ * Required in Supabase dashboard (manual; this app does not change it):
  *   Authentication → URL Configuration → Redirect URLs
- *   Add: https://yourdomain.com/reset-password
- *   (and http://localhost:3000/reset-password for local dev)
+ *   Production: https://slipdesk.com/reset-password
+ *   Local: http://localhost:3000/reset-password
  */
 
 import { useState } from "react";
@@ -18,6 +18,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { Mail, Loader, AlertCircle, CheckCircle2, ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { passwordResetRedirectUrl } from "@/lib/auth/canonical-redirect";
 
 export default function ForgotPasswordPage() {
   const supabase = createClient();
@@ -35,7 +36,10 @@ export default function ForgotPasswordPage() {
     setError("");
 
     const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo: passwordResetRedirectUrl({
+        origin: window.location.origin,
+        configuredAppUrl: process.env.NEXT_PUBLIC_APP_URL,
+      }),
     });
 
     setLoading(false);

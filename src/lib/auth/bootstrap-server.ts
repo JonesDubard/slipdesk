@@ -2,6 +2,7 @@ import type { User } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isPlatformAdminRole, isDesignatedPlatformAdmin } from "@/lib/auth/platform-admin";
 import { activatePendingInviteForUser } from "@/lib/auth/activate-invite";
+import { chooseCompanyForUser } from "@/lib/auth/resolve-company";
 
 export type BootstrapResult =
   | { ok: true; isPlatformAdmin?: boolean; isTeamMember?: boolean; companyId?: string; created?: boolean }
@@ -15,7 +16,7 @@ function db(admin: ReturnType<typeof createAdminClient>): any {
 
 export async function bootstrapUserAccount(
   user: User,
-  opts?: { companyName?: string; lraTin?: string; inviteToken?: string },
+  opts?: { companyName?: string; lraTin?: string; inviteToken?: string; emailConfirmed?: boolean },
 ): Promise<BootstrapResult> {
   let admin;
   try {
@@ -64,41 +65,56 @@ export async function bootstrapUserAccount(
   // Pending team invite — join the inviter's company (never create a new one).
   const inviteToken = (opts?.inviteToken ?? "").trim()
     || String(user.user_metadata?.invite_token ?? "").trim();
+  const emailConfirmed = opts?.emailConfirmed ?? Boolean(user.email_confirmed_at);
   const invite = await activatePendingInviteForUser(admin, user.id, user.email, {
     token: inviteToken,
     userMetadata: (user.user_metadata ?? null) as Record<string, unknown> | null,
+    emailConfirmed,
   });
   if (invite.activated) {
     return { ok: true, companyId: invite.companyId, isTeamMember: true };
   }
 
-  const { data: owned } = await db(admin)
-    .from("companies")
-    .select("id")
-    .eq("owner_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(1);
+  const [{ data: ownedRows }, { data: membershipRows }] = await Promise.all([
+    db(admin)
+      .from("companies")
+      .select("id, name")
+      .eq("owner_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(1),
+    db(admin)
+      .from("company_members")
+      .select("company_id, role")
+      .eq("user_id", user.id)
+      .eq("status", "active"),
+  ]);
 
-  if (owned?.[0]) {
-    await db(admin).from("profiles").update({ company_id: owned[0].id }).eq("id", user.id);
-    return { ok: true, companyId: owned[0].id };
+  const owned = ownedRows?.[0] as { id: string; name?: string | null } | undefined;
+  const choice = chooseCompanyForUser({
+    owned: owned ? { id: owned.id, name: owned.name ?? "" } : null,
+    profileCompanyId: (profile?.company_id as string | null) ?? null,
+    memberships: (membershipRows ?? []).map((row: { company_id: string; role?: string | null }) => ({
+      companyId: row.company_id,
+      role: row.role ?? null,
+      status: "active" as const,
+    })),
+  });
+
+  if (choice.ok) {
+    await db(admin).from("profiles").update({ company_id: choice.companyId }).eq("id", user.id);
+    return {
+      ok: true,
+      companyId: choice.companyId,
+      isTeamMember: choice.source !== "owned",
+    };
   }
-
-  const { data: memberOf } = await db(admin)
-    .from("company_members")
-    .select("company_id")
-    .eq("user_id", user.id)
-    .eq("status", "active")
-    .limit(1);
-
-  if (memberOf?.[0]?.company_id) {
-    await db(admin).from("profiles").update({ company_id: memberOf[0].company_id }).eq("id", user.id);
-    return { ok: true, companyId: memberOf[0].company_id, isTeamMember: true };
+  if (choice.code === "ambiguous" && choice.message) {
+    return { ok: false, error: choice.message, status: 400 };
   }
 
   // Self-serve company / free-trial creation is retired.
   // New companies are provisioned by Slipdesk ops or via a paid onboarding path.
-  if (inviteToken && invite.message) {
+  if (invite.message && invite.reason && invite.reason !== "none") {
     return { ok: false, error: invite.message, status: 400 };
   }
   return {

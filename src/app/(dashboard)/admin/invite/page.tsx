@@ -143,9 +143,8 @@ export default function AdminInvitePage() {
             </label>
           )}
           <p style={{ margin: 0, fontSize: 12, color: "var(--muted-foreground)", lineHeight: 1.5 }}>
-            For CHRES, use company id 4f439685-00ea-4f87-8000-7209e9cfd734 or the exact name
-            Complete Human Resources Solutions (CHRES). Choose HR Manager unless Deerah asked for a different role.
-            The teammate sets their own password. This page is only for Slipdesk platform admins.
+            Enter the company id or the exact company name. The teammate sets their own password.
+            This page is only for Slipdesk platform admins.
           </p>
         </div>
       </Card>

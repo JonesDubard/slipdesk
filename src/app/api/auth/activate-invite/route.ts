@@ -13,6 +13,7 @@ export async function POST() {
     const admin = createAdminClient();
     const result = await activatePendingInviteForUser(admin, user.id, user.email, {
       userMetadata: (user.user_metadata ?? null) as Record<string, unknown> | null,
+      emailConfirmed: Boolean(user.email_confirmed_at),
     });
     return NextResponse.json(result);
   } catch (err) {

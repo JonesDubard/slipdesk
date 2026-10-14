@@ -1,10 +1,12 @@
 import type { createAdminClient } from "@/lib/supabase/admin";
 import {
+  decideConfirmedEmailFallback,
   decideInviteAcceptance,
-  legacyEmailInviteEligible,
   type AcceptInviteRow,
+  type EmailFallbackInvite,
 } from "@/lib/auth/team-invite-policy";
 import { hashInviteToken } from "@/lib/auth/invite-token";
+import { isBlankOwnedCompany } from "@/lib/auth/resolve-company";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AdminDb = any;
@@ -34,15 +36,20 @@ function columnMissing(error: { message?: string } | null): boolean {
 
 /**
  * Activates a pending team invite for the signed-in user (service role).
- * Tokenized invites require the raw token. Older rows with no token hash
- * still match by email so in-flight invitations keep working.
+ * The signup token (argument or user_metadata) is checked first by hash.
+ * Email recovery is only for the lost-redirect case and stays unambiguous.
+ * A confirmed email alone never accepts a hashed invitation.
  * RBAC role stays on company_members. Only profile.company_id is updated.
  */
 export async function activatePendingInviteForUser(
   admin: ReturnType<typeof createAdminClient>,
   userId: string,
   email: string | undefined,
-  opts?: { token?: string | null; userMetadata?: Record<string, unknown> | null },
+  opts?: {
+    token?: string | null;
+    userMetadata?: Record<string, unknown> | null;
+    emailConfirmed?: boolean;
+  },
 ): Promise<ActivateInviteResult> {
   const clean = email?.trim().toLowerCase() ?? "";
   const token = (opts?.token ?? "").trim()
@@ -52,7 +59,13 @@ export async function activatePendingInviteForUser(
     return activateWithToken(admin as AdminDb, userId, clean, token, opts?.userMetadata ?? null);
   }
   if (!clean) return { activated: false };
-  return activateLegacyByEmail(admin as AdminDb, userId, clean);
+  return activateConfirmedEmailFallback(
+    admin as AdminDb,
+    userId,
+    clean,
+    Boolean(opts?.emailConfirmed),
+    opts?.userMetadata ?? null,
+  );
 }
 
 async function activateWithToken(
@@ -134,56 +147,106 @@ async function activateWithToken(
   return { activated: true, companyId: decision.companyId };
 }
 
-async function activateLegacyByEmail(
+async function activateConfirmedEmailFallback(
   admin: AdminDb,
   userId: string,
   email: string,
+  emailConfirmed: boolean,
+  userMetadata: Record<string, unknown> | null,
 ): Promise<ActivateInviteResult> {
-  const tokenized = await admin
+  const listed = await admin
     .from("company_members")
-    .select("id, company_id, status, invited_email, invite_token_hash")
+    .select("id, company_id, status, invited_email, invite_expires_at, user_id, invite_token_hash, invited_name")
     .eq("invited_email", email)
-    .eq("status", "pending")
-    .is("invite_token_hash", null)
-    .limit(1)
-    .maybeSingle();
+    .in("status", ["pending", "active"])
+    .limit(20);
 
-  if (tokenized.error && columnMissing(tokenized.error)) {
-    const { data: invite } = await admin
-      .from("company_members")
-      .select("id, company_id")
-      .eq("invited_email", email)
-      .eq("status", "pending")
-      .limit(1)
-      .maybeSingle();
-    if (!invite) return { activated: false };
-    return markActive(admin, userId, invite.id, invite.company_id);
+  if (listed.error) {
+    if (columnMissing(listed.error)) {
+      return {
+        activated: false,
+        reason: "migration_required",
+        message: "Invitation acceptance requires migration 0020_team_invite_tokens.sql.",
+      };
+    }
+    console.error("[team-invite] email fallback lookup failed");
+    return { activated: false, reason: "invalid", message: "This invitation link is invalid or has already been used." };
   }
 
-  const invite = tokenized.data as {
-    id: string;
-    company_id: string;
-    status: "pending" | "active";
-    invite_token_hash: string | null;
-  } | null;
-
-  if (!invite || !legacyEmailInviteEligible({
-    status: invite.status,
-    inviteTokenHash: invite.invite_token_hash,
-  })) {
-    return { activated: false };
-  }
-
-  const elsewhere = await activeCompanyElsewhere(admin, userId, invite.company_id);
-  if (elsewhere) {
+  const rows = (listed.data ?? []) as MemberInviteRow[];
+  if (rows.length >= 20) {
     return {
       activated: false,
-      reason: "other_org",
-      message: "This account already belongs to another organization.",
+      reason: "ambiguous",
+      message: "More than one invitation matches this email. Open the original invitation link.",
     };
   }
+  const invites: EmailFallbackInvite[] = rows.map((row) => ({
+    id: row.id,
+    companyId: row.company_id,
+    status: row.status,
+    invitedEmail: row.invited_email ?? "",
+    inviteExpiresAt: row.invite_expires_at,
+    userId: row.user_id,
+    inviteTokenHash: row.invite_token_hash,
+  }));
 
-  return markActive(admin, userId, invite.id, invite.company_id);
+  const provisional = decideConfirmedEmailFallback({
+    emailConfirmed,
+    userEmail: email,
+    userId,
+    now: new Date(),
+    invites,
+    activeOtherCompanyId: null,
+  });
+  if (!provisional.ok) {
+    if (provisional.code === "none") return { activated: false };
+    return { activated: false, reason: provisional.code, message: provisional.message };
+  }
+
+  const elsewhere = await activeCompanyElsewhere(admin, userId, provisional.companyId);
+  const decision = decideConfirmedEmailFallback({
+    emailConfirmed,
+    userEmail: email,
+    userId,
+    now: new Date(),
+    invites,
+    activeOtherCompanyId: elsewhere,
+  });
+  if (!decision.ok) {
+    if (decision.code === "none") return { activated: false };
+    return { activated: false, reason: decision.code, message: decision.message };
+  }
+
+  const row = rows.find((item) => item.id === decision.memberId) ?? null;
+  if (decision.alreadyActive) {
+    await linkProfile(admin, userId, decision.companyId);
+    await clearInviteToken(admin, userId, userMetadata, row?.invited_name ?? null);
+    return { activated: true, companyId: decision.companyId };
+  }
+
+  const marked = await markActive(admin, userId, decision.memberId, decision.companyId);
+  if (marked.activated) {
+    await clearInviteToken(admin, userId, userMetadata, row?.invited_name ?? null);
+  }
+  return marked;
+}
+
+function claimPendingMember(
+  admin: AdminDb,
+  userId: string,
+  memberId: string,
+  patch: Record<string, string>,
+) {
+  let update = admin
+    .from("company_members")
+    .update(patch)
+    .eq("id", memberId)
+    .eq("status", "pending");
+  if (/^[0-9a-f-]{36}$/i.test(userId)) {
+    update = update.or(`user_id.is.null,user_id.eq.${userId}`);
+  }
+  return update.select("id").maybeSingle();
 }
 
 async function markActive(
@@ -192,22 +255,24 @@ async function markActive(
   memberId: string,
   companyId: string,
 ): Promise<ActivateInviteResult> {
-  const { error: memberErr } = await admin
-    .from("company_members")
-    .update({ status: "active", user_id: userId, accepted_at: new Date().toISOString() })
-    .eq("id", memberId)
-    .eq("status", "pending");
-
-  if (memberErr) {
-    const retry = await admin
-      .from("company_members")
-      .update({ status: "active", user_id: userId })
-      .eq("id", memberId)
-      .eq("status", "pending");
-    if (retry.error) {
-      console.error("[team-invite] activate member failed");
-      return { activated: false };
-    }
+  let result = await claimPendingMember(admin, userId, memberId, {
+    status: "active",
+    user_id: userId,
+    accepted_at: new Date().toISOString(),
+  });
+  if (result.error) {
+    result = await claimPendingMember(admin, userId, memberId, {
+      status: "active",
+      user_id: userId,
+    });
+  }
+  if (result.error || !result.data) {
+    console.error("[team-invite] activate member failed");
+    return {
+      activated: false,
+      reason: "used",
+      message: "This invitation has already been accepted.",
+    };
   }
 
   await linkProfile(admin, userId, companyId);
@@ -221,11 +286,16 @@ async function activeCompanyElsewhere(
 ): Promise<string | null> {
   const { data: owned } = await admin
     .from("companies")
-    .select("id")
+    .select("id, name")
     .eq("owner_id", userId)
-    .limit(1);
-  const ownedId = owned?.[0]?.id as string | undefined;
-  if (ownedId && ownedId !== inviteCompanyId) return ownedId;
+    .order("created_at", { ascending: false })
+    .limit(5);
+  for (const row of owned ?? []) {
+    const ownedId = row.id as string;
+    if (!ownedId || ownedId === inviteCompanyId) continue;
+    if (isBlankOwnedCompany({ name: row.name as string | null })) continue;
+    return ownedId;
+  }
 
   const { data: memberships } = await admin
     .from("company_members")

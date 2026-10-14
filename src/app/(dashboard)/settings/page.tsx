@@ -169,8 +169,8 @@ export default function SettingsPage() {
       await setCompany(form);
       setSaved(true);
       setDirty(false);
-    } catch {
-      setError("Failed to save. Please try again.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save. Please try again.");
     } finally {
       setSaving(false);
     }

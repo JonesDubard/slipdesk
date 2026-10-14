@@ -226,6 +226,132 @@ export function acceptedCompanyId(decision: { ok: true; companyId: string }): st
   return decision.companyId;
 }
 
+export type EmailFallbackCode =
+  | "unconfirmed"
+  | "email_mismatch"
+  | "ambiguous"
+  | "expired"
+  | "used"
+  | "none"
+  | "other_org"
+  | "tokenized";
+
+export interface EmailFallbackInvite extends AcceptInviteRow {
+  inviteTokenHash: string | null;
+}
+
+/**
+ * Lost-redirect recovery when the signup token is not available.
+ * Hashed invites are not accepted by email alone. A confirmed email is
+ * necessary and not sufficient: the match must be unique, pending, and unexpired.
+ */
+export function decideConfirmedEmailFallback(opts: {
+  emailConfirmed: boolean;
+  userEmail: string;
+  userId: string;
+  now: Date;
+  invites: EmailFallbackInvite[];
+  activeOtherCompanyId: string | null;
+}):
+  | { ok: true; companyId: string; memberId: string; alreadyActive: boolean }
+  | { ok: false; code: EmailFallbackCode; message: string } {
+  const email = normalizeInviteEmail(opts.userEmail);
+  const matching = email
+    ? opts.invites.filter((row) => normalizeInviteEmail(row.invitedEmail) === email)
+    : [];
+
+  if (!email || (opts.invites.length > 0 && matching.length === 0)) {
+    return {
+      ok: false,
+      code: "email_mismatch",
+      message: "Sign in with the invited email address to accept this invitation.",
+    };
+  }
+  if (matching.length === 0) {
+    return {
+      ok: false,
+      code: "none",
+      message: "No pending invitation matches this email.",
+    };
+  }
+  if (!opts.emailConfirmed) {
+    return {
+      ok: false,
+      code: "unconfirmed",
+      message: "Confirm your email before this invitation can be accepted.",
+    };
+  }
+
+  const pending = matching.filter((row) => row.status === "pending");
+  const active = matching.filter((row) => row.status === "active");
+
+  if (pending.length > 1) {
+    return {
+      ok: false,
+      code: "ambiguous",
+      message: "More than one pending invitation matches this email. Open the invitation link for the organization you were invited to.",
+    };
+  }
+
+  if (pending.length === 1) {
+    const invite = pending[0];
+    if (!legacyEmailInviteEligible({ status: invite.status, inviteTokenHash: invite.inviteTokenHash })) {
+      return {
+        ok: false,
+        code: "tokenized",
+        message: "This invitation must be opened from the original invitation link.",
+      };
+    }
+    if (isInviteExpired(invite.inviteExpiresAt, opts.now)) {
+      return {
+        ok: false,
+        code: "expired",
+        message: "This invitation has expired. Ask your company owner to send a new one.",
+      };
+    }
+    if (invite.userId && invite.userId !== opts.userId) {
+      return {
+        ok: false,
+        code: "used",
+        message: "This invitation has already been accepted.",
+      };
+    }
+    if (opts.activeOtherCompanyId && opts.activeOtherCompanyId !== invite.companyId) {
+      return {
+        ok: false,
+        code: "other_org",
+        message: "This account already belongs to another organization.",
+      };
+    }
+    return { ok: true, companyId: invite.companyId, memberId: invite.id, alreadyActive: false };
+  }
+
+  const mine = active.filter((row) => row.userId === opts.userId);
+  const others = active.filter((row) => row.userId !== opts.userId);
+  if (mine.length === 1 && others.length === 0) {
+    return { ok: true, companyId: mine[0].companyId, memberId: mine[0].id, alreadyActive: true };
+  }
+  if (mine.length > 1 || (mine.length === 1 && others.length > 0)) {
+    return {
+      ok: false,
+      code: "ambiguous",
+      message: "More than one organization matches this email. Ask Slipdesk support to set the active company.",
+    };
+  }
+  if (others.length > 0) {
+    return {
+      ok: false,
+      code: "used",
+      message: "This invitation has already been accepted.",
+    };
+  }
+  return {
+    ok: false,
+    code: "none",
+    message: "No pending invitation matches this email.",
+  };
+}
+
 export function canAccessOrganization(actorCompanyId: string, resourceCompanyId: string): boolean {
   return actorCompanyId.length > 0 && actorCompanyId === resourceCompanyId;
 }

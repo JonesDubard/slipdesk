@@ -14,6 +14,7 @@ import Image from "next/image";
 import { Eye, EyeOff, Loader, AlertCircle, CheckCircle2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { bootstrapAccount } from "@/lib/auth/bootstrap-client";
+import { authCallbackRedirectUrl, loginErrorMessage } from "@/lib/auth/canonical-redirect";
 
 type Mode = "login" | "signup";
 
@@ -42,9 +43,8 @@ function LoginForm() {
   const [successMsg,  setSuccessMsg]  = useState<string | null>(null);
 
   useEffect(() => {
-    if (searchParams.get("error") === "auth_callback") {
-      setError("Email link expired or invalid. Request a new confirmation or reset link and try again.");
-    }
+    const authError = loginErrorMessage(searchParams.get("error"));
+    if (authError) setError(authError);
     const prefill = searchParams.get("email");
     if (prefill) setEmail(prefill);
   }, [searchParams]);
@@ -87,14 +87,23 @@ function LoginForm() {
         email: email.trim(),
         password,
         options: {
-          data: { company_name: company.trim() },
-          emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
+          data: {
+            company_name: company.trim(),
+            ...(inviteToken ? { invite_token: inviteToken } : {}),
+          },
+          emailRedirectTo: authCallbackRedirectUrl({
+            origin: window.location.origin,
+            configuredAppUrl: process.env.NEXT_PUBLIC_APP_URL,
+          }),
         },
       });
       if (err) { setError(err.message); setLoading(false); return; }
 
       if (data.session) {
-        const boot = await bootstrapAccount({ companyName: company.trim() });
+        const boot = await bootstrapAccount({
+          companyName: company.trim(),
+          inviteToken: inviteToken || undefined,
+        });
         if (!boot.ok) { setError(boot.error ?? "Account setup failed"); setLoading(false); return; }
         router.push("/dashboard");
         router.refresh();

@@ -11,6 +11,7 @@ import { useApp } from "@/context/AppContext";
 import { calculatePayroll } from "@/lib/slipdesk-payroll-engine";
 import { calculateMonthlyFee, getPricingTier, TIERED_PRICING } from "@/lib/billing";
 import { PLAN_LABELS } from "@/lib/plan-features";
+import { can } from "@/lib/rbac";
 
 const EXCHANGE_RATE = 185.44;
 
@@ -104,7 +105,9 @@ function StatCard({
 }
 
 export default function DashboardPage() {
-  const { employees, company, loading } = useApp();
+  const { employees, company, loading, initializing, role, companyResolutionError } = useApp();
+  const canManageCompany = can(role, "company:manage");
+  const canAddEmployees = can(role, "employee:create");
 
   const [checklistDismissed, setChecklistDismissed] = useState(false);
   useEffect(() => {
@@ -156,9 +159,37 @@ export default function DashboardPage() {
   const tierLabel     = PLAN_LABELS[currentTier]; // "basic" → "Starter"
 
   const isSetupIncomplete = !company?.name || !company?.tin;
+  const showOwnerSetup = canManageCompany && Boolean(company?.id);
+
+  // ── No linked organization — never offer owner company creation ──────────────
+  if (!initializing && !company?.id) {
+    return (
+      <div style={{ padding: "32px", minHeight: "100vh", background: "var(--background)", fontFamily: "'DM Sans',sans-serif" }}>
+        <div style={{ marginBottom: 28 }}>
+          <h1 style={{ color: "var(--foreground)", fontSize: 26, fontWeight: 800, margin: 0, letterSpacing: "-0.02em" }}>Dashboard</h1>
+          <p style={{ color: "var(--muted-foreground)", fontSize: 13, marginTop: 5, fontFamily: "'DM Mono',monospace" }}>{monthLabel}</p>
+        </div>
+        <div style={{
+          background: "var(--card)",
+          border: "1px solid var(--border)",
+          borderRadius: 20,
+          padding: "48px 36px",
+          maxWidth: 520,
+        }}>
+          <h2 style={{ color: "var(--foreground)", fontSize: 20, fontWeight: 800, margin: "0 0 8px" }}>
+            Your organization is not linked yet
+          </h2>
+          <p style={{ color: "var(--muted-foreground)", fontSize: 13, margin: 0, lineHeight: 1.5 }}>
+            {companyResolutionError
+              ?? "Slipdesk access is invite-only. If you were invited, sign out and open the invitation link again, or ask the company owner to resend it. This page does not create a company."}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // ── Empty state ───────────────────────────────────────────────────────────────
-  if (!loading && employees.length === 0) {
+  if (!initializing && employees.length === 0) {
     return (
       <div style={{ padding: "32px", minHeight: "100vh", background: "var(--background)", fontFamily: "'DM Sans',sans-serif" }}>
         <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500;600&display=swap');`}</style>
@@ -193,24 +224,28 @@ export default function DashboardPage() {
             Welcome to Slipdesk{company?.name ? `, ${company.name}` : ""}
           </h2>
           <p style={{ color: "var(--muted-foreground)", fontSize: 13, marginBottom: 28 }}>
-            Add your first employee to start running payroll.
+            {canAddEmployees
+              ? "Add your first employee to start running payroll."
+              : "No employees are on file for this organization yet."}
           </p>
           <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
-            <Link href="/employees" style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 7,
-              padding: "11px 20px",
-              borderRadius: 11,
-              background: "var(--primary)",
-              color: "var(--primary-foreground)",
-              fontWeight: 700,
-              fontSize: 13,
-              textDecoration: "none",
-            }}>
-              <Users size={15} /> Add Employees
-            </Link>
-            {isSetupIncomplete && (
+            {canAddEmployees && (
+              <Link href="/employees" style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 7,
+                padding: "11px 20px",
+                borderRadius: 11,
+                background: "var(--primary)",
+                color: "var(--primary-foreground)",
+                fontWeight: 700,
+                fontSize: 13,
+                textDecoration: "none",
+              }}>
+                <Users size={15} /> Add Employees
+              </Link>
+            )}
+            {showOwnerSetup && isSetupIncomplete && (
               <Link href="/settings" style={{
                 display: "flex",
                 alignItems: "center",
@@ -229,6 +264,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {showOwnerSetup && (
         <div style={{
           background: "var(--card)",
           border: "1px solid var(--border)",
@@ -280,6 +316,7 @@ export default function DashboardPage() {
             </Link>
           ))}
         </div>
+        )}
       </div>
     );
   }
@@ -326,7 +363,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Setup incomplete banner ─────────────────────────────────────────── */}
-      {isSetupIncomplete && !loading && (
+      {showOwnerSetup && isSetupIncomplete && !loading && (
         <Link href="/settings" style={{
           display: "flex",
           alignItems: "center",
@@ -371,7 +408,7 @@ export default function DashboardPage() {
       )}
 
       {/* ── Getting started checklist ───────────────────────────────────────── */}
-      {!checklistDismissed && !loading && (
+      {showOwnerSetup && !checklistDismissed && !loading && (
         <div style={{
           background: "var(--card)",
           border: "1px solid var(--border)",

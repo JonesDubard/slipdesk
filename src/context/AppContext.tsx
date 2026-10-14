@@ -7,7 +7,8 @@ import {
 import type { User, AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import type { DbEmployee, DbCompany } from "@/lib/supabase/types";
-import { normalizeRole, type Role } from "@/lib/rbac";
+import { can, normalizeRole, type Role } from "@/lib/rbac";
+import { chooseCompanyForUser, ownedCompanyCreationDecision } from "@/lib/auth/resolve-company";
 import { resolveAppRole } from "@/lib/nav";
 import { logAudit } from "@/lib/audit";
 import { createNotification } from "@/lib/notifications";
@@ -207,6 +208,8 @@ interface AppState {
   loading:      boolean;
   initializing: boolean;
   company:    CompanyProfile;
+  /** Set when memberships conflict and the app will not guess a company. */
+  companyResolutionError: string | null;
   setCompany: (profile: Partial<CompanyProfile>) => Promise<void>;
   employees:          Employee[];
   archivedEmployees:  Employee[];
@@ -254,9 +257,8 @@ function companyBranchLookup(supabase: ReturnType<typeof createClient>) {
 async function resolveCompanyForUser(
   supabase: ReturnType<typeof createClient>,
   userId: string,
-): Promise<{ company: DbCompany | null; memberRole: Role | null }> {
-  // owners + profile in parallel — most users hit one of these first
-  const [{ data: owned }, { data: profile }] = await Promise.all([
+): Promise<{ company: DbCompany | null; memberRole: Role | null; error: string | null }> {
+  const [{ data: ownedRows }, { data: profile }, membershipResult] = await Promise.all([
     db(supabase)
       .from("companies")
       .select("*")
@@ -268,67 +270,68 @@ async function resolveCompanyForUser(
       .select("company_id, role")
       .eq("id", userId)
       .maybeSingle(),
+    db(supabase)
+      .from("company_members")
+      .select("company_id, role, status")
+      .eq("user_id", userId)
+      .eq("status", "active"),
   ]);
 
-  if (owned?.[0]) return { company: owned[0] as DbCompany, memberRole: null };
+  const owned = ownedRows?.[0] as DbCompany | undefined;
+  const memberships = membershipResult.error
+    ? []
+    : ((membershipResult.data ?? []) as Array<{ company_id: string; role: string | null; status: string }>);
 
-  if (profile?.company_id) {
-    // Prefer company_members.role when present (employee / invited teammates).
-    const { data: member } = await db(supabase)
-      .from("company_members")
-      .select("role")
-      .eq("user_id", userId)
-      .eq("company_id", profile.company_id)
-      .eq("status", "active")
-      .maybeSingle();
+  const choice = chooseCompanyForUser({
+    owned: owned ? { id: owned.id, name: owned.name } : null,
+    profileCompanyId: profile?.company_id ?? null,
+    memberships: memberships
+      .filter((row) => row.status === "active" && row.company_id)
+      .map((row) => ({
+        companyId: row.company_id,
+        role: row.role,
+        status: "active" as const,
+      })),
+  });
 
-    if (owned?.[0]?.id === profile.company_id) {
-      return {
-        company: owned[0] as DbCompany,
-        memberRole: member
-          ? normalizeRole(member.role)
-          : profile.role
-            ? normalizeRole(profile.role)
-            : null,
-      };
-    }
-    const { data: co } = await db(supabase)
-      .from("companies")
-      .select("*")
-      .eq("id", profile.company_id)
-      .single();
-    if (co) {
-      return {
-        company: co as DbCompany,
-        memberRole: member
-          ? normalizeRole(member.role)
-          : profile.role
-            ? normalizeRole(profile.role)
-            : null,
-      };
-    }
+  if (!choice.ok) {
+    return {
+      company: null,
+      memberRole: null,
+      error: choice.code === "ambiguous" ? (choice.message ?? "This account belongs to more than one organization.") : null,
+    };
   }
 
-  // Requires migration 0001 — silently skipped if the table is not provisioned.
-  const { data: member, error: memberErr } = await db(supabase)
-    .from("company_members")
-    .select("company_id, role")
-    .eq("user_id", userId)
-    .eq("status", "active")
-    .limit(1)
+  const memberRole = choice.memberRole
+    ? normalizeRole(choice.memberRole)
+    : choice.source === "owned"
+      ? null
+      : profile?.role
+        ? normalizeRole(profile.role)
+        : null;
+
+  if (owned && owned.id === choice.companyId) {
+    return { company: owned, memberRole, error: null };
+  }
+
+  const { data: co } = await db(supabase)
+    .from("companies")
+    .select("*")
+    .eq("id", choice.companyId)
     .maybeSingle();
-  if (!memberErr && member?.company_id) {
-    const { data: co } = await db(supabase)
-      .from("companies")
-      .select("*")
-      .eq("id", member.company_id)
-      .single();
-    if (co) {
-      return { company: co as DbCompany, memberRole: normalizeRole(member.role) };
-    }
+  if (co) {
+    return { company: co as DbCompany, memberRole, error: null };
   }
 
-  return { company: null, memberRole: null };
+  if (choice.source === "membership" || choice.source === "profile") {
+    return {
+      company: null,
+      memberRole: null,
+      error: "Your organization membership is active, but this account cannot read the company record. Ask a Slipdesk administrator to check companies access.",
+    };
+  }
+
+  return { company: null, memberRole: null, error: null };
 }
 
 /** Ensure pending team invites are activated after login / refresh. */
@@ -352,6 +355,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [booted,       setBooted]       = useState(_hasBooted);
   const [dataLoading,  setDataLoading]  = useState(false);
   const [company,      setCompanyState] = useState<CompanyProfile>(EMPTY_COMPANY);
+  const [companyResolutionError, setCompanyResolutionError] = useState<string | null>(null);
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
   const [role,         setRole]         = useState<Role>("payroll_officer");
 
@@ -374,13 +378,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Resolve company first. Only hit invite activation when we have no company yet
       // (avoids a ~0.5–1s POST on every demo / returning-owner boot).
       let resolved = await resolveCompanyForUser(supabase, userId);
-      if (!resolved.company && retries > 0) {
+      if (!resolved.company && !resolved.error && retries > 0) {
         await activatePendingInvite();
         if (gen !== _loadGeneration) return;
         resolved = await resolveCompanyForUser(supabase, userId);
       }
 
-      if (!resolved.company && retries > 0) {
+      if (!resolved.company && !resolved.error && retries > 0) {
         await new Promise((r) => setTimeout(r, 400));
         if (gen !== _loadGeneration) return;
         return loadData(retries - 1, userId);
@@ -390,6 +394,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       const co = resolved.company;
       const memberRole = resolved.memberRole;
+
+      setCompanyResolutionError(resolved.error);
 
       if (co) {
         // Profile role + employees in parallel once company is known.
@@ -433,6 +439,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           .eq("id", userId)
           .limit(1);
         if (gen !== _loadGeneration) return;
+        setCompanyState(EMPTY_COMPANY);
         setRole(normalizeRole(profileRows?.[0]?.role ?? null));
         setAllEmployees([]);
       }
@@ -468,6 +475,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (error || !verified) {
             setUser(null);
             setCompanyState(EMPTY_COMPANY);
+            setCompanyResolutionError(null);
             setAllEmployees([]);
           } else if (verified.id !== currentUser?.id) {
             setUser(verified);
@@ -508,6 +516,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
         } else {
           setCompanyState(EMPTY_COMPANY);
+          setCompanyResolutionError(null);
           setAllEmployees([]);
           setRole("payroll_officer");
         }
@@ -552,12 +561,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (data) setCompanyState(dbToCompany(data as DbCompany));
       logAudit({ companyId: company.id, action: "company.update", entityType: "company", entityId: company.id, newValue: profile });
     } else {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      await db(supabase).from("companies").upsert({ owner_id: user.id, email: user.email ?? "", ...base });
-      await loadData();
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (!currentUser) throw new Error("Not authenticated");
+      const { data: memberships } = await db(supabase)
+        .from("company_members")
+        .select("id")
+        .eq("user_id", currentUser.id)
+        .in("status", ["pending", "active"])
+        .limit(1);
+      const decision = ownedCompanyCreationDecision({
+        hasPendingOrActiveMembership: Boolean(memberships?.length),
+        canManageCompany: can(role, "company:manage"),
+      });
+      throw new Error(decision.message);
     }
-  }, [company.id, supabase]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [company.id, company.isDemo, role, supabase]);
 
   const nextEmpNumber = useCallback((currentList: Employee[] = allEmployees) => {
     const nums = currentList
@@ -809,13 +827,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 const refreshCompany = useCallback(async () => {
     const { data: { user: currentUser } } = await supabase.auth.getUser();
     if (!currentUser) return;
-    const { data: companies } = await db(supabase)
-      .from("companies")
-      .select("*")
-      .eq("owner_id", currentUser.id)
-      .order("created_at", { ascending: false });
-    const co = companies?.[0] ?? null;
-    if (co) setCompanyState(dbToCompany(co as DbCompany));
+    const resolved = await resolveCompanyForUser(supabase, currentUser.id);
+    if (resolved.error) {
+      setCompanyResolutionError(resolved.error);
+      setCompanyState(EMPTY_COMPANY);
+      return;
+    }
+    if (resolved.company) {
+      setCompanyResolutionError(null);
+      setCompanyState(dbToCompany(resolved.company));
+    }
   }, [supabase]);
 
   return (
@@ -824,7 +845,7 @@ const refreshCompany = useCallback(async () => {
       role,
       loading,
       initializing: loading || dataLoading,
-      company, setCompany,
+      company, companyResolutionError, setCompany,
       employees, archivedEmployees,
       addEmployee, refreshEmployees, updateEmployee,
       archiveEmployee, restoreEmployee, hardDeleteEmployee,

@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Eye, EyeOff, ArrowRight, CheckCircle2, AlertCircle, Loader } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { bootstrapAccount } from "@/lib/auth/bootstrap-client";
+import { authCallbackRedirectUrl } from "@/lib/auth/canonical-redirect";
 
 function SignupForm() {
   const router = useRouter();
@@ -102,7 +103,10 @@ function SignupForm() {
           invite_token: token || undefined,
           full_name: preview?.fullName || undefined,
         },
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
+        emailRedirectTo: authCallbackRedirectUrl({
+          origin: window.location.origin,
+          configuredAppUrl: process.env.NEXT_PUBLIC_APP_URL,
+        }),
       },
     });
 
