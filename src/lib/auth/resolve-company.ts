@@ -138,6 +138,15 @@ export function chooseCompanyForUser(opts: {
 }
 
 /**
+ * Companies SELECT rule: a row is visible only when its id is the company
+ * returned by my_company_id(). Null matches nothing, so another tenant's row
+ * stays hidden.
+ */
+export function companyRowVisible(rowId: string, authorizedCompanyId: string | null): boolean {
+  return Boolean(rowId) && rowId === authorizedCompanyId;
+}
+
+/**
  * New companies are provisioned by Slipdesk ops. The dashboard must not
  * insert a companies row for an invitee, an HR manager, or a non-invited signup.
  */

@@ -91,6 +91,33 @@ export function isInviteExpired(expiresAt: string | null, now: Date): boolean {
   return at <= now.getTime();
 }
 
+export interface SignupInviteProbe {
+  invitedEmail: string;
+  status: InviteStatus;
+  inviteExpiresAt: string | null;
+}
+
+/**
+ * Whether signup may leave a company owned by the new account.
+ * A pending, unexpired invitation for this exact email suppresses that company.
+ * The invitation is not accepted here, and a company id or user metadata is ignored.
+ * Migration 0022 uses the same rule inside the database trigger.
+ */
+export function signupMayProvisionOwnedCompany(opts: {
+  email: string;
+  pendingInvites: SignupInviteProbe[];
+  now: Date;
+}): boolean {
+  const email = normalizeInviteEmail(opts.email);
+  if (!email) return true;
+  const invited = opts.pendingInvites.some((row) =>
+    row.status === "pending"
+    && normalizeInviteEmail(row.invitedEmail) === email
+    && !isInviteExpired(row.inviteExpiresAt, opts.now),
+  );
+  return !invited;
+}
+
 /** Email-only activation is limited to invites created before tokens existed. */
 export function legacyEmailInviteEligible(invite: {
   status: InviteStatus;

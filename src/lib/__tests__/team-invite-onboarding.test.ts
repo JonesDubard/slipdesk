@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { can } from "@/lib/rbac";
 import {
   acceptedCompanyId,
@@ -14,6 +15,7 @@ import {
   parseAssignableRole,
   planAllowsTeamInvites,
   safeEmailError,
+  signupMayProvisionOwnedCompany,
   stateAfterEmailFailure,
   type EmailFallbackInvite,
 } from "@/lib/auth/team-invite-policy";
@@ -38,6 +40,7 @@ import {
   missingOrganizationMessage,
   signedInOwnerEmail,
   companyDisplayName,
+  companyRowVisible,
   isBlankOwnedCompany,
   ownedCompanyCreationDecision,
 } from "@/lib/auth/resolve-company";
@@ -809,5 +812,113 @@ describe("company resolution and creation", () => {
       hasPendingOrActiveMembership: false,
       canManageCompany: can("company_owner", "company:manage"),
     }).message).toContain("invite-only");
+  });
+});
+
+describe("company row visibility", () => {
+  function authorized(opts: Parameters<typeof chooseCompanyForUser>[0]): string | null {
+    const choice = chooseCompanyForUser(opts);
+    return choice.ok ? choice.companyId : null;
+  }
+
+  it("lets an invited member read the selected organization and not the blank company they own", () => {
+    const authorizedId = authorized({
+      owned: { id: "blank-owned", name: "" },
+      profileCompanyId: ORG,
+      memberships: [{ companyId: ORG, role: "hr_manager", status: "active" }],
+    });
+    expect(authorizedId).toBe(ORG);
+    expect(companyRowVisible(ORG, authorizedId)).toBe(true);
+    expect(companyRowVisible("blank-owned", authorizedId)).toBe(false);
+    expect(companyRowVisible(OTHER, authorizedId)).toBe(false);
+  });
+
+  it("lets a sole owner read that company and hides every other company", () => {
+    const authorizedId = authorized({
+      owned: { id: ORG, name: "Northwind Payroll" },
+      profileCompanyId: null,
+      memberships: [],
+    });
+    expect(companyRowVisible(ORG, authorizedId)).toBe(true);
+    expect(companyRowVisible(OTHER, authorizedId)).toBe(false);
+    expect(companyRowVisible(ORG, null)).toBe(false);
+  });
+
+  it("shows no company row when the account has more than one organization and no explicit selection", () => {
+    const authorizedId = authorized({
+      owned: { id: "blank-owned", name: "" },
+      profileCompanyId: null,
+      memberships: [{ companyId: ORG, role: "hr_manager", status: "active" }],
+    });
+    expect(authorizedId).toBeNull();
+    expect(companyRowVisible(ORG, authorizedId)).toBe(false);
+    expect(companyRowVisible("blank-owned", authorizedId)).toBe(false);
+  });
+});
+
+describe("signup company provisioning", () => {
+  const invite = {
+    invitedEmail: "ama@example.test",
+    status: "pending" as const,
+    inviteExpiresAt: future(),
+  };
+
+  it("does not provision a company for an invited email", () => {
+    expect(signupMayProvisionOwnedCompany({
+      email: "Ama@example.test",
+      pendingInvites: [invite],
+      now: NOW,
+    })).toBe(false);
+  });
+
+  it("still allows the database trigger to provision a company when nobody was invited", () => {
+    expect(signupMayProvisionOwnedCompany({
+      email: "owner@example.test",
+      pendingInvites: [],
+      now: NOW,
+    })).toBe(true);
+  });
+
+  it("does not treat a retry as a second company", () => {
+    const input = {
+      email: "ama@example.test",
+      pendingInvites: [invite],
+      now: NOW,
+    };
+    expect(signupMayProvisionOwnedCompany(input)).toBe(signupMayProvisionOwnedCompany(input));
+  });
+
+  it("does not suppress a company for an expired, reused, or different-email invitation", () => {
+    expect(signupMayProvisionOwnedCompany({
+      email: "ama@example.test",
+      pendingInvites: [{ ...invite, inviteExpiresAt: "2020-01-01T00:00:00.000Z" }],
+      now: NOW,
+    })).toBe(true);
+    expect(signupMayProvisionOwnedCompany({
+      email: "ama@example.test",
+      pendingInvites: [{ ...invite, inviteExpiresAt: null }],
+      now: NOW,
+    })).toBe(true);
+    expect(signupMayProvisionOwnedCompany({
+      email: "ama@example.test",
+      pendingInvites: [{ ...invite, status: "active" }],
+      now: NOW,
+    })).toBe(true);
+    expect(signupMayProvisionOwnedCompany({
+      email: "other@example.test",
+      pendingInvites: [invite],
+      now: NOW,
+    })).toBe(true);
+  });
+
+  it("does not insert a company from application bootstrap or signup", () => {
+    const bootstrap = readFileSync("src/lib/auth/bootstrap-server.ts", "utf8");
+    const signup = readFileSync("src/app/(auth)/signup/page.tsx", "utf8");
+    const callback = readFileSync("src/app/auth/callback/route.ts", "utf8");
+    expect(bootstrap).not.toMatch(/from\("companies"\)[\s\S]{0,80}\.insert/);
+    expect(signup).not.toMatch(/from\("companies"\)/);
+    expect(callback).not.toMatch(/from\("companies"\)/);
+    expect(can("company_owner", "company:manage")).toBe(true);
+    expect(can("hr_manager", "company:manage")).toBe(false);
   });
 });
