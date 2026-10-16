@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { loginWithPassword } from "@/lib/employee-portal/auth";
+import { readLoginIdentifier } from "@/lib/employee-portal/password-auth";
 import { logAuditServer } from "@/lib/audit-server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
-  const identifier = String(body.phone ?? body.identifier ?? "");
+  const identifier = readLoginIdentifier(body);
   const password = String(body.password ?? body.pin ?? "");
 
   const result = await loginWithPassword(identifier, password);

@@ -20,26 +20,38 @@ type AnyClient = any;
 export const MAX_FAILED_ATTEMPTS = 5;
 export const LOCKOUT_MS = 30 * 60 * 1000;
 
+/** Same text for a bad, unknown, or ambiguous identifier. */
+export const GENERIC_LOGIN_ERROR = "Invalid email, phone, or password.";
+
+export function readLoginIdentifier(body: {
+  identifier?: unknown;
+  email?: unknown;
+  phone?: unknown;
+}): string {
+  return String(body.identifier ?? body.email ?? body.phone ?? "");
+}
+
+type PortalEmployee = {
+  id: string;
+  company_id: string;
+  phone_e164: string | null;
+  portal_enabled: boolean;
+};
+
 export class PasswordAuth implements AuthMethod {
   readonly id = "password" as const;
 
   async authenticate(input: AuthInput): Promise<AuthResult> {
     assertPasswordInput(input);
 
-    const phoneE164 = normalizeLiberianPhone(input.identifier);
-    if (!phoneE164) {
-      return { ok: false, error: "Enter a valid Liberian phone number.", status: 400 };
-    }
     if (!String(input.password ?? "").trim()) {
       return { ok: false, error: "Enter your password or PIN.", status: 400 };
     }
 
     const admin = createAdminClient() as AnyClient;
-
-    const emp = await findPortalEmployeeByPhone(admin, phoneE164);
-    if (!emp) {
-      // Generic failure — no enumeration
-      return { ok: false, error: "Invalid phone or password.", status: 401, code: "invalid" };
+    const emp = await findPortalEmployee(admin, input.identifier);
+    if (emp === "ambiguous" || !emp) {
+      return { ok: false, error: GENERIC_LOGIN_ERROR, status: 401, code: "invalid" };
     }
 
     if (!emp.portal_enabled) {
@@ -49,7 +61,7 @@ export class PasswordAuth implements AuthMethod {
         eventType: "login_fail",
         meta: { reason: "disabled" },
       });
-      return { ok: false, error: "Invalid phone or password.", status: 401, code: "disabled" };
+      return { ok: false, error: GENERIC_LOGIN_ERROR, status: 401, code: "disabled" };
     }
 
     const { data: cred } = await admin
@@ -121,7 +133,7 @@ export class PasswordAuth implements AuthMethod {
           retryAfterMs: LOCKOUT_MS,
         };
       }
-      return { ok: false, error: "Invalid phone or password.", status: 401, code: "invalid" };
+      return { ok: false, error: GENERIC_LOGIN_ERROR, status: 401, code: "invalid" };
     }
 
     await admin
@@ -134,9 +146,11 @@ export class PasswordAuth implements AuthMethod {
       })
       .eq("employee_id", emp.id);
 
-    // Persist normalized phone for future logins
-    if (emp.phone_e164 !== phoneE164) {
-      await admin.from("employees").update({ phone_e164: phoneE164 }).eq("id", emp.id);
+    const normalizedPhone = String(input.identifier).includes("@")
+      ? null
+      : normalizeLiberianPhone(input.identifier);
+    if (normalizedPhone && emp.phone_e164 !== normalizedPhone) {
+      await admin.from("employees").update({ phone_e164: normalizedPhone }).eq("id", emp.id);
     }
 
     await logEmployeeAuthEvent(admin, {
@@ -156,37 +170,57 @@ export class PasswordAuth implements AuthMethod {
   }
 }
 
+async function findPortalEmployee(
+  admin: AnyClient,
+  identifier: string,
+): Promise<PortalEmployee | "ambiguous" | null> {
+  const raw = String(identifier ?? "").trim();
+  if (!raw) return null;
+  if (raw.includes("@")) {
+    const email = raw.toLowerCase();
+    const { data } = await admin
+      .from("employees")
+      .select("id, company_id, phone_e164, portal_enabled, phone, email, is_active, is_archived")
+      .ilike("email", email)
+      .eq("is_active", true)
+      .eq("is_archived", false);
+    return oneOrAmbiguous(data);
+  }
+
+  const phoneE164 = normalizeLiberianPhone(raw);
+  if (!phoneE164) return null;
+  return findPortalEmployeeByPhone(admin, phoneE164);
+}
+
+function oneOrAmbiguous(rows: PortalEmployee[] | null | undefined): PortalEmployee | "ambiguous" | null {
+  const list = rows ?? [];
+  if (list.length > 1) return "ambiguous";
+  return list[0] ?? null;
+}
+
 export async function findPortalEmployeeByPhone(
   admin: AnyClient,
   phoneE164: string,
-): Promise<{
-  id: string;
-  company_id: string;
-  phone_e164: string | null;
-  portal_enabled: boolean;
-} | null> {
+): Promise<PortalEmployee | "ambiguous" | null> {
   const { data: byE164 } = await admin
     .from("employees")
     .select("id, company_id, phone_e164, portal_enabled, phone, is_active, is_archived")
     .eq("phone_e164", phoneE164)
     .eq("is_active", true)
-    .eq("is_archived", false)
-    .limit(1)
-    .maybeSingle();
+    .eq("is_archived", false);
 
-  if (byE164) return byE164;
+  const exact = (byE164 ?? []) as PortalEmployee[];
+  if (exact.length > 0) return oneOrAmbiguous(exact);
 
   const { data: candidates } = await admin
     .from("employees")
     .select("id, company_id, phone_e164, portal_enabled, phone, is_active, is_archived")
     .eq("is_active", true)
-    .eq("is_archived", false)
-    .limit(500);
+    .eq("is_archived", false);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const match = ((candidates ?? []) as any[]).find((row) => {
+  const matched = ((candidates ?? []) as Array<PortalEmployee & { phone?: string | null }>).filter((row) => {
     const normalized = normalizeLiberianPhone(row.phone_e164 || row.phone || "");
     return normalized === phoneE164;
   });
-  return match ?? null;
+  return oneOrAmbiguous(matched);
 }

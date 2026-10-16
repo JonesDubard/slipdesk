@@ -26,8 +26,16 @@ const PROTECTED_PREFIXES = [
 
 const AUTH_PAGES = new Set(["/login", "/signup", "/portal/login"]);
 
+/** Signed-out employees must be able to open these without a session. */
+const PUBLIC_PORTAL_PATHS = new Set([
+  "/portal/login",
+  "/portal/forgot-password",
+  "/portal/reset-password",
+]);
+
 export function isEmployeePortalPath(pathname: string): boolean {
-  return pathname === "/portal" || (pathname.startsWith("/portal/") && pathname !== "/portal/login");
+  if (PUBLIC_PORTAL_PATHS.has(pathname)) return false;
+  return pathname === "/portal" || pathname.startsWith("/portal/");
 }
 
 export function isProtectedAppPath(pathname: string): boolean {

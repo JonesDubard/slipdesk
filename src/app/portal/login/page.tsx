@@ -7,7 +7,7 @@ import { Loader, AlertCircle, Lock } from "lucide-react";
 
 export default function PortalLoginPage() {
   const router = useRouter();
-  const [phone, setPhone] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +19,7 @@ export default function PortalLoginPage() {
       const res = await fetch("/api/employee/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, password }),
+        body: JSON.stringify({ identifier, password }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -53,7 +53,7 @@ export default function PortalLoginPage() {
             <h1 className="font-semibold">Sign in with your PIN</h1>
           </div>
           <p className="text-sm text-slate-500 mb-5">
-            Use the mobile number on your employee record and the password or PIN from HR.
+            Use the email or mobile number on your employee record and the password or PIN from HR.
           </p>
 
           {error && (
@@ -65,12 +65,14 @@ export default function PortalLoginPage() {
 
           <div className="space-y-4">
             <label className="block text-sm font-medium text-slate-700">
-              Phone number
+              Email or phone
               <input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="0775123456 or +231775123456"
+                type="text"
+                inputMode="text"
+                autoComplete="username"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                placeholder="you@example.com or 077…"
                 className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#50C878]/40"
               />
             </label>
@@ -89,7 +91,7 @@ export default function PortalLoginPage() {
             </label>
             <button
               onClick={login}
-              disabled={loading || !phone.trim() || !password.trim()}
+              disabled={loading || !identifier.trim() || !password.trim()}
               className="w-full rounded-xl bg-[#002147] text-white py-2.5 text-sm font-semibold hover:bg-[#003066] disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {loading && <Loader className="w-4 h-4 animate-spin" />}

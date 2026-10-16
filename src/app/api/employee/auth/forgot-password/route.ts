@@ -9,7 +9,13 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const email = String(body.email ?? "");
 
-  await requestPasswordResetByEmail(email);
+  const result = await requestPasswordResetByEmail(email);
+  if (result.ambiguous) {
+    return NextResponse.json({
+      ok: true,
+      message: "More than one employee uses that email. Contact HR to reset your password.",
+    });
+  }
 
   return NextResponse.json({
     ok: true,

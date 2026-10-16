@@ -446,31 +446,41 @@ export async function notifyPayslipsReady(opts: {
 }
 
 /**
- * Password reset via email. Always returns generic success to callers (no enumeration).
- * Returns whether an email was actually queued for internal use only.
+ * Password reset via email.
+ * Zero matches stay generic so the address is not confirmed.
+ * Two or more matches do not send mail.
  */
-export async function requestPasswordResetByEmail(emailInput: string): Promise<{
+export async function requestPasswordResetByEmail(
+  emailInput: string,
+  opts?: { companyId?: string | null },
+): Promise<{
   accepted: true;
   emailed: boolean;
+  ambiguous: boolean;
 }> {
   const email = emailInput.trim().toLowerCase();
   if (!isValidEmail(email)) {
-    return { accepted: true, emailed: false };
+    return { accepted: true, emailed: false, ambiguous: false };
   }
 
-  const { data: emp } = await db()
+  let query = db()
     .from("employees")
     .select("id, company_id, full_name, email, portal_enabled, is_active, is_archived")
     .ilike("email", email)
     .eq("is_active", true)
     .eq("is_archived", false)
-    .eq("portal_enabled", true)
-    .limit(1)
-    .maybeSingle();
+    .eq("portal_enabled", true);
+  if (opts?.companyId) query = query.eq("company_id", opts.companyId);
 
-  if (!emp) {
-    return { accepted: true, emailed: false };
+  const { data: matches, error } = await query;
+  if (error || !matches || matches.length === 0) {
+    return { accepted: true, emailed: false, ambiguous: false };
   }
+  if (matches.length > 1) {
+    return { accepted: true, emailed: false, ambiguous: true };
+  }
+
+  const emp = matches[0];
 
   const { data: company } = await db()
     .from("companies")
@@ -509,7 +519,7 @@ export async function requestPasswordResetByEmail(emailInput: string): Promise<{
     },
   });
 
-  return { accepted: true, emailed: result.status === "sent" };
+  return { accepted: true, emailed: result.status === "sent", ambiguous: false };
 }
 
 export async function notifyPasswordChanged(opts: {
