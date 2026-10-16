@@ -7,6 +7,7 @@ import {
   FileText, Shield, ClipboardList, Home, LogOut, Loader, Menu, X, Bell, CalendarDays, Clock,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { isPublicPortalPath, runPortalGate } from "@/lib/employee-portal/portal-gate";
 import type { LinkedEmployee } from "@/lib/employee-portal/session";
 
 const NAV = [
@@ -19,16 +20,10 @@ const NAV = [
   { href: "/portal/preferences", label: "Alerts", icon: Bell },
 ];
 
-const PUBLIC_PATHS = new Set([
-  "/portal/login",
-  "/portal/forgot-password",
-  "/portal/reset-password",
-]);
-
 export default function PortalLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const isPublic = PUBLIC_PATHS.has(pathname);
+  const isPublic = isPublicPortalPath(pathname);
   const isChangePassword = pathname === "/portal/change-password";
   const [employee, setEmployee] = useState<LinkedEmployee | null>(null);
   const [loading, setLoading] = useState(!isPublic);
@@ -36,22 +31,25 @@ export default function PortalLayout({ children }: { children: ReactNode }) {
   const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
-    if (isPublic) return;
-    let cancelled = false;
-    (async () => {
-      const res = await fetch("/api/employee/me");
-      if (cancelled) return;
-      if (res.status === 401 || res.status === 403) {
-        router.replace("/portal/login");
-        return;
-      }
-      const data = await res.json();
-      if (data.mustChangePassword && !isChangePassword) {
-        router.replace("/portal/change-password?first=1");
-        return;
-      }
-      setEmployee(data.employee ?? null);
+    if (isPublic) {
       setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const result = await runPortalGate({
+        pathname,
+        isChangePassword,
+        fetchMe: (signal) => fetch("/api/employee/me", { signal }),
+      });
+      if (cancelled) return;
+      if (result.action === "ready") {
+        setEmployee((result.employee ?? null) as LinkedEmployee | null);
+      }
+      setLoading(false);
+      if (result.action === "redirect-login") router.replace("/portal/login");
+      if (result.action === "redirect-change-password") router.replace("/portal/change-password?first=1");
     })();
     return () => { cancelled = true; };
   }, [isPublic, isChangePassword, router, pathname]);

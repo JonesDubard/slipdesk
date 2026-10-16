@@ -12,6 +12,12 @@ vi.mock("@supabase/ssr", () => ({
 import { proxy } from "@/proxy";
 
 describe("signed-out portal paths", () => {
+  it("returns /portal/login directly with no redirect", async () => {
+    const res = await proxy(new NextRequest("http://localhost/portal/login"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
   it("does not redirect /portal/forgot-password", async () => {
     const res = await proxy(new NextRequest("http://localhost/portal/forgot-password"));
     expect(res.headers.get("location")).toBeNull();
