@@ -86,15 +86,41 @@ select
   (select count(*) from down_signatures) as down_file_signatures_present,
   'Policy text decides PASS/FAIL. schema_migrations can be empty when these files were applied by hand.' as note;
 
--- 2. Migration history. Empty is expected for a hand-applied file.
+-- 2. Migration history. A missing schema must not abort the script.
+-- A static FROM cannot be skipped with a CTE: Postgres resolves the relation
+-- before any WHERE/CASE runs. Dynamic SQL runs the original select only when
+-- the table exists.
+drop table if exists pg_temp._0025_schema_migrations_check;
+
+do $$
+declare
+  history_sql text := $hist$
+    insert into pg_temp._0025_schema_migrations_check (version, name)
+    select version, name
+    from supabase_migrations.schema_migrations
+    where version in ('0022', '0023', '0024', '0025')
+       or version like '0022_%'
+       or version like '0023_%'
+       or version like '0024_%'
+       or version like '0025_%'
+       or split_part(coalesce(name, ''), '_', 1) in ('0022', '0023', '0024', '0025')
+    order by version
+  $hist$;
+begin
+  create temp table _0025_schema_migrations_check (
+    version text,
+    name text
+  );
+  if to_regclass('supabase_migrations.schema_migrations') is null then
+    insert into pg_temp._0025_schema_migrations_check (version, name)
+    values ('SKIPPED', 'schema_migrations absent (hand-applied)');
+  else
+    execute history_sql;
+  end if;
+end $$;
+
 select version, name
-from supabase_migrations.schema_migrations
-where version in ('0022', '0023', '0024', '0025')
-   or version like '0022_%'
-   or version like '0023_%'
-   or version like '0024_%'
-   or version like '0025_%'
-   or split_part(coalesce(name, ''), '_', 1) in ('0022', '0023', '0024', '0025')
+from pg_temp._0025_schema_migrations_check
 order by version;
 
 -- 3. Every RLS policy on the tables 0025 touched.

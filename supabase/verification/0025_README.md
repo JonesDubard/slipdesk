@@ -4,11 +4,13 @@ Run `0025_tenant_scope_readonly_check.sql` in the Supabase SQL editor. It only s
 
 The script returns three results.
 
-1. A header row. `result` is `PASS` or `FAIL`.
-2. Rows from `supabase_migrations.schema_migrations` whose version or name starts with `0022`, `0023`, `0024`, or `0025`.
+1. A header row. `result` is `PASS` or `FAIL`. Query 1 is the source of truth.
+2. Migration history. If `supabase_migrations.schema_migrations` exists, the original version/name filter runs. If that schema is absent, query 2 returns one row: `version = SKIPPED`, `name = schema_migrations absent (hand-applied)`. It does not raise and it does not stop query 3.
 3. Every RLS policy on the 13 tables whose SELECT policies 0025 replaces, with `policyname`, `cmd`, `roles`, `qual`, `with_check`, and `flag`.
 
-A healthy header is `PASS`, with `missing_or_unscoped_select_policies = 0` and `down_file_signatures_present = 0`.
+A missing `schema_migrations` schema means these files were applied by hand in the SQL editor. That is not a missing policy and it is not a failed migration.
+
+A healthy header is `PASS`, with `missing_or_unscoped_select_policies = 0` and `down_file_signatures_present = 0`. On 2026-10-16 this project returned that PASS.
 
 A healthy policy list has these SELECT policies, each with `flag = OK` and `my_company_id()` in `qual`:
 
@@ -30,6 +32,6 @@ A healthy policy list has these SELECT policies, each with `flag = OK` and `my_c
 
 Write policies are `INFO`. 0025 did not change them. `using (false)` on a no-client-write policy is expected.
 
-The migration-history result can be empty. These files were written to be applied by hand, and a hand run does not insert `schema_migrations`. An empty history with `PASS` on the policy header means the policies are installed and the CLI history was not updated. Do not rerun 0022, 0023, 0024, or 0025 to fill that table.
+Do not rerun 0022, 0023, 0024, or 0025 to create `schema_migrations`. If the Supabase CLI is baselined later, insert rows for versions 0022–0025 into `supabase_migrations.schema_migrations` before the next `supabase db push`.
 
 The SQL editor is not a signed-in user, so this check cannot prove which company a member sees. That still needs a signed-in session after the policies are in place.
