@@ -1,5 +1,5 @@
-import { createAdminClient } from "@/lib/supabase/admin";
-import { can, normalizeRole, type Role } from "@/lib/rbac";
+import { resolveAppCompanyAccess } from "@/lib/auth/resolve-app-company";
+import { can, type Role } from "@/lib/rbac";
 
 export type PayRunStatus =
   | "draft"
@@ -19,45 +19,7 @@ export async function resolvePayrollAccess(
   userId: string,
   fallbackClient?: unknown,
 ) {
-  let admin: unknown;
-  try {
-    admin = createAdminClient();
-  } catch {
-    if (!fallbackClient) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured");
-    admin = fallbackClient;
-  }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db = admin as any;
-
-  const { data: owned } = await db
-    .from("companies")
-    .select("id")
-    .eq("owner_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (owned?.id) {
-    return { companyId: owned.id as string, role: "company_owner" as Role, admin };
-  }
-
-  const { data: member } = await db
-    .from("company_members")
-    .select("company_id, role")
-    .eq("user_id", userId)
-    .eq("status", "active")
-    .limit(1)
-    .maybeSingle();
-
-  if (member?.company_id) {
-    return {
-      companyId: member.company_id as string,
-      role: normalizeRole(member.role),
-      admin,
-    };
-  }
-
-  return null;
+  return resolveAppCompanyAccess(userId, fallbackClient);
 }
 
 export function canViewPayroll(role: Role): boolean {

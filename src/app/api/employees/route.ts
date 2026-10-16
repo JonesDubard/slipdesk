@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
-import { assertNotDemoForUser } from "@/lib/demo/assert-not-demo";
+import { resolveAppCompanyAccess } from "@/lib/auth/resolve-app-company";
+import { authorizeCompanyPermission } from "@/lib/auth/authorize-company-permission";
+import { assertNotDemoCompany } from "@/lib/demo/assert-not-demo";
 
 const TIER_LIMITS = {
   basic:    80,
@@ -8,26 +10,35 @@ const TIER_LIMITS = {
   premium:  Infinity,
 } as const;
 
-export async function POST(req: NextRequest) {
+export async function POST(_req: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { blocked } = await assertNotDemoForUser(supabase, user.id);
+  const access = await resolveAppCompanyAccess(user.id, supabase);
+  if (!access) return NextResponse.json({ error: "Company not found" }, { status: 403 });
+  const gate = authorizeCompanyPermission(
+    { companyId: access.companyId, role: access.role },
+    "employee:create",
+    "Company not found",
+  );
+  if (!gate.proceed) return NextResponse.json({ error: gate.error }, { status: 403 });
+
+  const blocked = await assertNotDemoCompany(access.admin, gate.companyId);
   if (blocked) return blocked;
 
-  // Get company with tier info
-  const { data: company } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = access.admin as any;
+  const { data: company } = await db
     .from("companies")
     .select("id, subscription_tier, billing_bypass, is_locked")
-    .eq("owner_id", user.id)
-    .single();
+    .eq("id", gate.companyId)
+    .maybeSingle();
 
   if (!company) {
     return NextResponse.json({ error: "Company not found" }, { status: 400 });
   }
 
-  // Locked accounts cannot add employees
   if (company.is_locked) {
     return NextResponse.json({
       error: "Your account is locked. Please contact support or renew your subscription.",
@@ -35,15 +46,14 @@ export async function POST(req: NextRequest) {
     }, { status: 403 });
   }
 
-  // Check employee limit unless billing_bypass
   if (!company.billing_bypass) {
     const tier  = (company.subscription_tier ?? "basic") as keyof typeof TIER_LIMITS;
     const limit = TIER_LIMITS[tier];
 
-    const { count } = await supabase
+    const { count } = await db
       .from("employees")
       .select("*", { count: "exact", head: true })
-      .eq("company_id", company.id)
+      .eq("company_id", gate.companyId)
       .eq("is_archived", false);
 
     const current = count ?? 0;
@@ -59,14 +69,29 @@ export async function POST(req: NextRequest) {
       }, { status: 403 });
     }
   }
-}
 
+  return NextResponse.json({ ok: true });
+}
 
 export async function GET() {
   try {
     const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { data, error } = await supabase
+    const access = await resolveAppCompanyAccess(user.id, supabase);
+    if (!access) return NextResponse.json({ error: "Company not found" }, { status: 403 });
+    const gate = authorizeCompanyPermission(
+      { companyId: access.companyId, role: access.role },
+      "employee:view",
+      "Company not found",
+    );
+    if (!gate.proceed) {
+      return NextResponse.json({ error: gate.error }, { status: 403 });
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (access.admin as any)
       .from("employees")
       .select(`
         id,
@@ -77,7 +102,8 @@ export async function GET() {
         currency,
         rate,
         standard_hours
-      `);
+      `)
+      .eq("company_id", gate.companyId);
 
     if (error) throw error;
 

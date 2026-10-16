@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { sendPayslipEmails, type PayslipAttachment } from "@/lib/email/send-payslips";
-import { resolveCompanyIdForUser } from "@/lib/payments/server";
+import { resolveAppCompanyAccess } from "@/lib/auth/resolve-app-company";
+import { payslipNotifyCallerGate } from "@/lib/payroll/notify-payslips-access";
 import { assertNotDemoCompany } from "@/lib/demo/assert-not-demo";
 
 /**
@@ -18,12 +19,14 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const companyId = await resolveCompanyIdForUser(supabase, user.id);
-  if (!companyId) {
-    return NextResponse.json({ error: "No company found" }, { status: 403 });
+  const access = await resolveAppCompanyAccess(user.id, supabase);
+  if (!access) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const caller = payslipNotifyCallerGate({ companyId: access.companyId, role: access.role });
+  if (!caller.proceed) {
+    return NextResponse.json({ error: caller.error }, { status: caller.status });
   }
 
-  const blocked = await assertNotDemoCompany(supabase, companyId);
+  const blocked = await assertNotDemoCompany(access.admin, caller.companyId);
   if (blocked) return blocked;
 
   const body = await req.json().catch(() => ({}));

@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
   canViewPayroll,
-  resolvePayrollAccess,
 } from "@/lib/payroll/resolve-payroll-access";
+import { resolveAppCompanyAccess } from "@/lib/auth/resolve-app-company";
 import {
   FINALIZED_EMPLOYEE_SELECT,
   mapFinalizedPayrollLine,
@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const access = await resolvePayrollAccess(user.id, supabase);
+  const access = await resolveAppCompanyAccess(user.id, supabase);
   if (!access || !canViewPayroll(access.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

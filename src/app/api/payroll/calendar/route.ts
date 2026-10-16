@@ -1,19 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
-import { resolveCompanyIdForUser } from "@/lib/payments/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveAppCompanyAccess } from "@/lib/auth/resolve-app-company";
+import { authorizeCompanyPermission } from "@/lib/auth/authorize-company-permission";
 import { buildPayrollCalendarMonth } from "@/lib/payroll/periods";
 import type { SubscriptionTier } from "@/context/AppContext";
-
-/** Prefer service role; fall back to the user session (works when SERVICE_ROLE_KEY is unset). */
-function dbForCalendar(userClient: Awaited<ReturnType<typeof createClient>>) {
-  try {
-    return createAdminClient();
-  } catch {
-    return userClient;
-  }
-}
 
 /** GET /api/payroll/calendar?year=2026&month=7 */
 export async function GET(req: NextRequest) {
@@ -21,14 +12,20 @@ export async function GET(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const companyId = await resolveCompanyIdForUser(supabase, user.id);
-  if (!companyId) return NextResponse.json({ error: "No company" }, { status: 403 });
+  const access = await resolveAppCompanyAccess(user.id, supabase);
+  if (!access) return NextResponse.json({ error: "No company" }, { status: 403 });
+  const gate = authorizeCompanyPermission(
+    { companyId: access.companyId, role: access.role },
+    "payroll:view",
+  );
+  if (!gate.proceed) return NextResponse.json({ error: gate.error }, { status: gate.status });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: company } = await (supabase as any)
+  const db = access.admin as any;
+  const { data: company } = await db
     .from("companies")
     .select("subscription_tier, billing_bypass")
-    .eq("id", companyId)
+    .eq("id", gate.companyId)
     .maybeSingle();
 
   const tier = getEffectiveTier(
@@ -47,12 +44,10 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db = dbForCalendar(supabase) as any;
     const { data: payRuns, error: runsErr } = await db
       .from("pay_runs")
       .select("id, status, pay_period_start, pay_period_end, pay_date, period_label, created_at")
-      .eq("company_id", companyId)
+      .eq("company_id", gate.companyId)
       .order("created_at", { ascending: false })
       .limit(50);
 

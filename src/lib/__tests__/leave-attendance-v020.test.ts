@@ -176,19 +176,13 @@ describe("leave / attendance notification templates", () => {
 describe("notification failure isolation", () => {
   it("notify helpers catch failures and do not throw", async () => {
     vi.resetModules();
-    vi.doMock("@/lib/notifications/service", async () => {
-      const actual = await vi.importActual<typeof import("@/lib/notifications/service")>(
-        "@/lib/notifications/service",
-      );
-      return {
-        ...actual,
-        sendTemplatedEmail: async () => {
-          throw new Error("Resend down");
-        },
-        isValidEmail: () => true,
-        appUrl: () => "http://localhost:3000",
-      };
-    });
+    // Reject in the mock itself. Loading the real notification service here
+    // pulls Resend into the suite and can exceed the 5s test timeout.
+    vi.doMock("@/lib/notifications/service", () => ({
+      sendTemplatedEmail: () => Promise.reject(new Error("Resend down")),
+      isValidEmail: () => true,
+      appUrl: () => "http://localhost:3000",
+    }));
     const { notifyLeaveApproved } = await import("@/lib/notifications/leave-attendance-notify");
     const result = await notifyLeaveApproved({
       companyId: "c",

@@ -4,9 +4,9 @@ import { assertNotDemoCompany } from "@/lib/demo/assert-not-demo";
 import {
   FINALIZED_PAY_RUN_STATUSES,
   canEditPayrollDraft,
-  resolvePayrollAccess,
   type PayRunStatus,
 } from "@/lib/payroll/resolve-payroll-access";
+import { resolveAppCompanyAccess } from "@/lib/auth/resolve-app-company";
 import {
   computeDraftTotals,
   parseDraftPayload,
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest, ctx: RouteCtx) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const access = await resolvePayrollAccess(user.id, supabase);
+  const access = await resolveAppCompanyAccess(user.id, supabase);
   if (!access || !canEditPayrollDraft(access.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

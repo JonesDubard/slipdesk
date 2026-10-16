@@ -1,8 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { NextRequest, NextResponse } from "next/server";
 import { canUse, getEffectiveTier } from "@/lib/plan-features";
-import { resolveCompanyIdForUser } from "@/lib/payments/server";
+import { resolveAppCompanyAccess } from "@/lib/auth/resolve-app-company";
+import { authorizeCompanyPermission } from "@/lib/auth/authorize-company-permission";
 import type { SubscriptionTier } from "@/context/AppContext";
 import { assertNotDemoCompany } from "@/lib/demo/assert-not-demo";
 
@@ -10,21 +10,30 @@ async function resolve() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  const companyId = await resolveCompanyIdForUser(supabase, user.id);
-  if (!companyId) return { error: NextResponse.json({ error: "No company" }, { status: 403 }) };
+
+  const access = await resolveAppCompanyAccess(user.id, supabase);
+  if (!access) return { error: NextResponse.json({ error: "No company" }, { status: 403 }) };
+  const gate = authorizeCompanyPermission(
+    { companyId: access.companyId, role: access.role },
+    "compliance:view",
+  );
+  if (!gate.proceed) {
+    return { error: NextResponse.json({ error: gate.error }, { status: 403 }) };
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: company } = await (supabase as any)
+  const db = access.admin as any;
+  const { data: company } = await db
     .from("companies")
     .select("subscription_tier, billing_bypass")
-    .eq("id", companyId)
+    .eq("id", gate.companyId)
     .maybeSingle();
 
   const tier = getEffectiveTier(
     (company?.subscription_tier as SubscriptionTier) || "basic",
     Boolean(company?.billing_bypass),
   );
-  return { companyId, tier };
+  return { companyId: gate.companyId, tier, db };
 }
 
 /** GET /api/compliance/snapshots — Enterprise compliance history */
@@ -35,9 +44,7 @@ export async function GET() {
     return NextResponse.json({ error: "Upgrade required", code: "PLAN_GATE" }, { status: 403 });
   }
 
-  const admin = createAdminClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (admin as any)
+  const { data, error } = await ctx.db
     .from("compliance_snapshots")
     .select("*")
     .eq("company_id", ctx.companyId)
@@ -56,8 +63,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Upgrade required", code: "PLAN_GATE" }, { status: 403 });
   }
 
-  const supabase = await createClient();
-  const blocked = await assertNotDemoCompany(supabase, ctx.companyId);
+  const blocked = await assertNotDemoCompany(ctx.db, ctx.companyId);
   if (blocked) return blocked;
 
   const body = await req.json().catch(() => ({}));
@@ -66,9 +72,7 @@ export async function POST(req: NextRequest) {
   const criticalCount = Number(body.criticalCount ?? 0);
   const warningCount = Number(body.warningCount ?? 0);
 
-  const admin = createAdminClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (admin as any)
+  const { data, error } = await ctx.db
     .from("compliance_snapshots")
     .insert({
       company_id: ctx.companyId,
