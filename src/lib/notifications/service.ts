@@ -452,7 +452,7 @@ export async function notifyPayslipsReady(opts: {
  */
 export async function requestPasswordResetByEmail(
   emailInput: string,
-  opts?: { companyId?: string | null },
+  opts?: { companyId?: string | null; templateKey?: "password_reset" | "portal_invite" },
 ): Promise<{
   accepted: true;
   emailed: boolean;
@@ -498,17 +498,18 @@ export async function requestPasswordResetByEmail(
   });
 
   const ctaUrl = `${appUrl()}/portal/reset-password?t=${encodeURIComponent(token)}`;
+  const templateKey = opts?.templateKey === "portal_invite" ? "portal_invite" : "password_reset";
   const result = await sendTemplatedEmail({
     employeeId: emp.id,
     companyId: emp.company_id,
     recipient: email,
-    templateKey: "password_reset",
+    templateKey,
     eventType: "password_reset",
     vars: {
       employeeName: emp.full_name,
       companyName: company?.name ?? "your company",
       ctaUrl,
-      ctaLabel: "Choose a new password",
+      ctaLabel: templateKey === "portal_invite" ? "Set your password" : "Choose a new password",
       branding: {
         companyName: company?.name ?? "Slipdesk",
         logoUrl: company?.logo_url,

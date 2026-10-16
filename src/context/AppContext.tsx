@@ -19,6 +19,7 @@ import {
   resolveEmployeeBranchWrite,
   type NamedCompanyBranch,
 } from "@/lib/org/employee-branch";
+import { DUPLICATE_EMPLOYEE_EMAIL, employeeEmailCollision } from "@/lib/employee-portal/provision";
 
 function blockIfDemo(isDemo: boolean, feature: DemoFeatureName) {
   if (!isDemo) return;
@@ -601,6 +602,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     if (!coId) throw new Error("Company not found. Please set up your company profile first.");
 
+    // Client-side only. The 0026 unique index is deferred; see provision.ts.
+    if (employeeEmailCollision(data.email, allEmployees)) {
+      throw new Error(DUPLICATE_EMPLOYEE_EMAIL);
+    }
+
     const finalNumber = employeeNumber || data.employeeNumber || nextEmpNumber();
 
     const baseInsert = {
@@ -669,10 +675,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     createNotification({ companyId: coId, type: "employee_added", title: "Employee added", body: `${mapped.fullName} (${mapped.employeeNumber}) was added.`, severity: "info", link: "/employees" });
 
     return mapped;
-  }, [supabase, nextEmpNumber, company.id]);
+  }, [supabase, nextEmpNumber, company.id, allEmployees]);
 
   const updateEmployee = useCallback(async (id: string, data: Partial<Employee>) => {
     blockIfDemo(company.isDemo, "edit_employee");
+    if (data.email !== undefined && employeeEmailCollision(data.email, allEmployees, id)) {
+      throw new Error(DUPLICATE_EMPLOYEE_EMAIL);
+    }
     const prev = allEmployees.find((e) => e.id === id);
     const baseUpdate = {
       ...(data.firstName      !== undefined && { first_name:      data.firstName      }),

@@ -149,6 +149,28 @@ export function renderPasswordResetEmail(v: TemplateVars): { subject: string; ht
   };
 }
 
+export function renderPortalInviteEmail(v: TemplateVars): { subject: string; html: string; text: string } {
+  const name = escapeHtml(v.employeeName);
+  const html = shell({
+    title: "Set up your SlipDesk portal",
+    preheader: "Create your SlipDesk employee portal password",
+    branding: { ...v.branding, companyName: v.companyName },
+    bodyHtml: `
+      <h1 style="margin:0 0 12px;font-size:22px;color:#002147">Set up your SlipDesk portal</h1>
+      <p style="margin:0;color:#475569;font-size:15px;line-height:1.55">
+        Hi ${name}, ${escapeHtml(v.companyName || "your employer")} invited you to the employee portal. Choose a password to finish setup. This link expires in 1 hour and can be used once.
+      </p>
+      ${v.ctaUrl ? ctaButton(v.ctaUrl, v.ctaLabel || "Set your password") : ""}
+      <p style="margin:20px 0 0;color:#94a3b8;font-size:12px">If you did not expect this, you can ignore this email.</p>
+    `,
+  });
+  return {
+    subject: "Set up your SlipDesk portal",
+    html,
+    text: `Hi ${v.employeeName}, set up your SlipDesk portal: ${v.ctaUrl ?? ""}`,
+  };
+}
+
 export function renderPasswordChangedEmail(v: TemplateVars): { subject: string; html: string; text: string } {
   const name = escapeHtml(v.employeeName);
   const html = shell({
@@ -375,6 +397,8 @@ export function renderTemplate(
       return renderPayslipReadyEmail(vars);
     case "password_reset":
       return renderPasswordResetEmail(vars);
+    case "portal_invite":
+      return renderPortalInviteEmail(vars);
     case "password_changed":
       return renderPasswordChangedEmail(vars);
     case "leave_submitted":

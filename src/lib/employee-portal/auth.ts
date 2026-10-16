@@ -6,6 +6,7 @@
  * AuthMethod abstraction allows a future OtpAuth without restructuring callers.
  */
 
+import { randomBytes } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ACTIVE_AUTH_METHOD, type AuthFailure } from "@/lib/employee-portal/auth-method";
 import { PasswordAuth } from "@/lib/employee-portal/password-auth";
@@ -15,7 +16,14 @@ import {
   validatePasswordPolicy,
   verifyPassword,
 } from "@/lib/employee-portal/password";
-import { employeePortalEmail, normalizeLiberianPhone } from "@/lib/employee-portal/phone";
+import { employeePortalEmail } from "@/lib/employee-portal/phone";
+import {
+  DUPLICATE_EMPLOYEE_EMAIL,
+  employeeEmailCollision,
+  normalizeEmployeeEmail,
+  portalAssignContact,
+} from "@/lib/employee-portal/provision";
+import { requestPasswordResetByEmail } from "@/lib/notifications/service";
 import { findAuthUserByEmail } from "@/lib/employee-portal/find-auth-user";
 import { logEmployeeAuthEvent } from "@/lib/employee-portal/auth-events";
 import { logAuditServer } from "@/lib/audit-server";
@@ -154,7 +162,7 @@ export async function assignOrResetPortalPassword(opts: {
 
   const { data: emp, error } = await admin
     .from("employees")
-    .select("id, company_id, full_name, phone, phone_e164, portal_enabled, is_active, is_archived")
+    .select("id, company_id, full_name, email, phone, phone_e164, portal_enabled, is_active, is_archived")
     .eq("id", opts.employeeId)
     .eq("company_id", opts.companyId)
     .maybeSingle();
@@ -166,14 +174,15 @@ export async function assignOrResetPortalPassword(opts: {
     return { ok: false, error: "Employee must be active.", status: 400 };
   }
 
-  const phoneNorm = normalizeLiberianPhone(emp.phone_e164 || emp.phone || "");
-  if (!phoneNorm) {
-    return {
-      ok: false,
-      error: "Employee needs a valid Liberian phone number before portal access.",
-      status: 400,
-    };
-  }
+  const contact = portalAssignContact({
+    email: emp.email,
+    phone: emp.phone,
+    phoneE164: emp.phone_e164,
+  });
+  if (!contact.ok) return { ok: false, error: contact.error, status: 400 };
+
+  const unique = await anotherEmployeeUsesEmail(admin, emp.company_id, contact.email, emp.id);
+  if (!unique.ok) return unique;
 
   const temporaryPassword = opts.temporaryPassword?.trim() || generateTemporaryPin(8);
   const policy = validatePasswordPolicy(temporaryPassword);
@@ -181,10 +190,9 @@ export async function assignOrResetPortalPassword(opts: {
 
   const passwordHash = hashPassword(temporaryPassword);
 
-  await admin
-    .from("employees")
-    .update({ portal_enabled: true, phone_e164: phoneNorm })
-    .eq("id", emp.id);
+  const employeePatch: { portal_enabled: boolean; phone_e164?: string } = { portal_enabled: true };
+  if (contact.phone) employeePatch.phone_e164 = contact.phone;
+  await admin.from("employees").update(employeePatch).eq("id", emp.id);
 
   const { data: existing } = await admin
     .from("employee_credentials")
@@ -239,9 +247,136 @@ export async function assignOrResetPortalPassword(opts: {
   return {
     ok: true,
     temporaryPassword,
-    phone: phoneNorm,
+    phone: contact.phone ?? "",
     employeeName: emp.full_name,
   };
+}
+
+/**
+ * Email invite. Does not generate or return a PIN.
+ * A placeholder credential exists only so the existing one-hour reset link can replace it.
+ */
+export async function invitePortalByEmail(opts: {
+  employeeId: string;
+  companyId: string;
+  actorUserId: string;
+  actorEmail?: string | null;
+}): Promise<
+  | { ok: true; phone: string; employeeName: string }
+  | { ok: false; error: string; status: number }
+> {
+  const admin = createAdminClient() as AnyClient;
+  const { data: emp, error } = await admin
+    .from("employees")
+    .select("id, company_id, full_name, email, phone, phone_e164, portal_enabled, is_active, is_archived")
+    .eq("id", opts.employeeId)
+    .eq("company_id", opts.companyId)
+    .maybeSingle();
+
+  if (error || !emp) return { ok: false, error: "Employee not found.", status: 404 };
+  if (!emp.is_active || emp.is_archived) {
+    return { ok: false, error: "Employee must be active.", status: 400 };
+  }
+
+  const email = normalizeEmployeeEmail(emp.email);
+  if (!email) {
+    return { ok: false, error: "Employee needs an email address before an email invite.", status: 400 };
+  }
+
+  const unique = await anotherEmployeeUsesEmail(admin, emp.company_id, email, emp.id);
+  if (!unique.ok) return unique;
+
+  await admin.from("employees").update({ portal_enabled: true }).eq("id", emp.id);
+
+  const { data: existing } = await admin
+    .from("employee_credentials")
+    .select("employee_id")
+    .eq("employee_id", emp.id)
+    .maybeSingle();
+
+  if (existing) {
+    await admin
+      .from("employee_credentials")
+      .update({
+        must_change_password: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("employee_id", emp.id);
+  } else {
+    await admin.from("employee_credentials").insert({
+      employee_id: emp.id,
+      company_id: emp.company_id,
+      password_hash: hashPassword(randomBytes(24).toString("base64url")),
+      must_change_password: false,
+    });
+  }
+
+  await ensureEmployeeAuthUser(admin, emp.id, emp.company_id);
+
+  const sent = await requestPasswordResetByEmail(email, {
+    companyId: emp.company_id,
+    templateKey: "portal_invite",
+  });
+  if (sent.ambiguous || !sent.emailed) {
+    await admin.from("employees").update({ portal_enabled: Boolean(emp.portal_enabled) }).eq("id", emp.id);
+    if (!existing) {
+      await admin.from("employee_credentials").delete().eq("employee_id", emp.id);
+    }
+    if (sent.ambiguous) {
+      return { ok: false, error: DUPLICATE_EMPLOYEE_EMAIL, status: 409 };
+    }
+    return { ok: false, error: "Could not email the portal invite.", status: 502 };
+  }
+
+  await logEmployeeAuthEvent(admin, {
+    employeeId: emp.id,
+    companyId: emp.company_id,
+    eventType: "password_assigned",
+    actorId: opts.actorUserId,
+    meta: { mode: "email_invite" },
+  });
+  await logAuditServer(admin, {
+    companyId: emp.company_id,
+    action: "employee.portal_password_assign",
+    entityType: "employee",
+    entityId: emp.id,
+    actorId: opts.actorUserId,
+    actorEmail: opts.actorEmail ?? null,
+    newValue: { portal_enabled: true, must_change_password: false, invited: true },
+  });
+
+  const phone = portalAssignContact({
+    email,
+    phone: emp.phone,
+    phoneE164: emp.phone_e164,
+  });
+
+  return {
+    ok: true,
+    phone: phone.ok ? phone.phone ?? "" : "",
+    employeeName: emp.full_name,
+  };
+}
+
+async function anotherEmployeeUsesEmail(
+  admin: AnyClient,
+  companyId: string,
+  email: string | null,
+  selfId: string,
+): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+  if (!email) return { ok: true };
+  const { data, error } = await admin
+    .from("employees")
+    .select("id, email")
+    .eq("company_id", companyId)
+    .ilike("email", email);
+  if (error) {
+    return { ok: false, error: "Could not verify that this email is unique.", status: 500 };
+  }
+  if (employeeEmailCollision(email, data ?? [], selfId)) {
+    return { ok: false, error: DUPLICATE_EMPLOYEE_EMAIL, status: 409 };
+  }
+  return { ok: true };
 }
 
 export async function disablePortalAccess(opts: {

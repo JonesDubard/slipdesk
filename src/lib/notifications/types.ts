@@ -28,6 +28,7 @@ export type TemplateKey =
   | "welcome"
   | "payslip_ready"
   | "password_reset"
+  | "portal_invite"
   | "password_changed"
   | "leave_submitted"
   | "leave_approved"

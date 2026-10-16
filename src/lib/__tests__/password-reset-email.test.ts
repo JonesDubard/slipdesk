@@ -3,14 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   employees: [] as Array<Record<string, unknown>>,
   sends: 0,
+  subjects: [] as string[],
   companyFilter: null as string | null,
 }));
 
 vi.mock("resend", () => ({
   Resend: class {
     emails = {
-      send: async () => {
+      send: async (payload: { subject?: string }) => {
         state.sends += 1;
+        state.subjects.push(String(payload.subject ?? ""));
         return { data: { id: "msg-1" }, error: null };
       },
     };
@@ -77,6 +79,7 @@ describe("requestPasswordResetByEmail", () => {
   beforeEach(() => {
     state.employees = [];
     state.sends = 0;
+    state.subjects = [];
     state.companyFilter = null;
     process.env.RESEND_API_KEY = "re_test";
   });
@@ -93,6 +96,7 @@ describe("requestPasswordResetByEmail", () => {
     expect(result.ambiguous).toBe(false);
     expect(result.emailed).toBe(true);
     expect(state.sends).toBe(1);
+    expect(state.subjects).toEqual(["Reset your Slipdesk portal password"]);
   });
 
   it("does not send when two employees match", async () => {
@@ -115,5 +119,13 @@ describe("requestPasswordResetByEmail", () => {
     expect(result.ambiguous).toBe(false);
     expect(result.emailed).toBe(true);
     expect(state.sends).toBe(1);
+  });
+
+  it("sends the portal invite subject without changing the reset template", async () => {
+    state.employees = [{ ...base, id: "emp-1" }];
+    const result = await requestPasswordResetByEmail("ada@example.com", { templateKey: "portal_invite" });
+    expect(result.emailed).toBe(true);
+    expect(state.sends).toBe(1);
+    expect(state.subjects).toEqual(["Set up your SlipDesk portal"]);
   });
 });

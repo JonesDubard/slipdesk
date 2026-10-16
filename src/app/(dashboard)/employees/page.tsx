@@ -1689,6 +1689,11 @@ import {
   syncBranchAssignment,
 } from "@/lib/org/employee-branch";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import {
+  DUPLICATE_EMPLOYEE_EMAIL,
+  employeeEmailCollision,
+  whatsAppPinHref,
+} from "@/lib/employee-portal/provision";
 
 const DEPARTMENTS = ["All", "Operations", "Finance", "Engineering", "Sales", "Human Resources"];
 const DEPT_LIST   = ["Operations", "Finance", "Engineering", "Sales", "Human Resources"];
@@ -1819,16 +1824,26 @@ const inputBase: React.CSSProperties = {
 function PortalAccessPanel({
   employeeId,
   enabled,
+  email,
+  phone,
   onEnabledChange,
 }: {
   employeeId?: string;
   enabled: boolean;
+  email?: string;
+  phone?: string;
   onEnabledChange: (v: boolean) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [tempPin, setTempPin] = useState<string | null>(null);
+  const [relayPhone, setRelayPhone] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const hasEmail = Boolean(email?.trim());
+  const waHref = tempPin
+    ? whatsAppPinHref(relayPhone || phone, tempPin, process.env.NEXT_PUBLIC_APP_URL)
+    : null;
 
   async function callCredentials(action: "assign" | "reset" | "disable") {
     if (!employeeId) {
@@ -1839,6 +1854,8 @@ function PortalAccessPanel({
     setErr(null);
     setMsg(null);
     setTempPin(null);
+    setRelayPhone(null);
+    setCopied(false);
     try {
       const res = await fetch(`/api/hr/employees/${employeeId}/portal-credentials`, {
         method: "POST",
@@ -1857,6 +1874,7 @@ function PortalAccessPanel({
       }
       onEnabledChange(true);
       setTempPin(data.temporaryPassword ?? null);
+      setRelayPhone(data.phone || phone || null);
       setMsg(
         action === "reset"
           ? "PIN reset. Relay the temporary PIN to the employee — it will not be shown again."
@@ -1866,6 +1884,45 @@ function PortalAccessPanel({
       setErr("Network error.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function inviteByEmail() {
+    if (!employeeId) {
+      setErr("Save the employee first, then send a portal invite.");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    setMsg(null);
+    setTempPin(null);
+    try {
+      const res = await fetch(`/api/hr/employees/${employeeId}/portal-invite`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErr(data.error ?? "Request failed.");
+        return;
+      }
+      onEnabledChange(true);
+      setMsg("Invite sent. The employee has one hour to choose a password.");
+    } catch {
+      setErr("Network error.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyPin() {
+    if (!tempPin) return;
+    try {
+      await navigator.clipboard.writeText(tempPin);
+      setCopied(true);
+    } catch {
+      setErr("Could not copy the PIN.");
     }
   }
 
@@ -1880,7 +1937,7 @@ function PortalAccessPanel({
             Employee portal access
           </p>
           <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--muted-foreground)", lineHeight: 1.4 }}>
-            Sign-in uses phone + HR-assigned PIN (no SMS). Employee must set a new password on first login.
+            Sign-in uses an email or a Liberian phone with an HR-assigned PIN. The PIN is shown once. Email-only employees can get a self-service invite instead.
           </p>
         </div>
         <span style={{
@@ -1918,6 +1975,21 @@ function PortalAccessPanel({
             Disable portal
           </button>
         )}
+        {employeeId && !enabled && hasEmail && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void inviteByEmail()}
+            style={{
+              padding: "8px 12px", borderRadius: 8, cursor: busy ? "wait" : "pointer",
+              background: "transparent", border: "1px solid var(--border)",
+              color: "var(--foreground)", fontSize: 12, fontWeight: 600,
+              opacity: busy ? 0.6 : 1,
+            }}
+          >
+            Invite via email
+          </button>
+        )}
       </div>
       {!employeeId && (
         <p style={{ margin: 0, fontSize: 11, color: "#D97706" }}>
@@ -1941,6 +2013,33 @@ function PortalAccessPanel({
           }}>
             {tempPin}
           </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+            <button
+              type="button"
+              onClick={() => void copyPin()}
+              style={{
+                padding: "8px 12px", borderRadius: 8, cursor: "pointer",
+                background: "var(--card)", border: "1px solid var(--border)",
+                color: "var(--foreground)", fontSize: 12, fontWeight: 700,
+              }}
+            >
+              {copied ? "Copied" : "Copy PIN"}
+            </button>
+            {waHref && (
+              <a
+                href={waHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  padding: "8px 12px", borderRadius: 8, textDecoration: "none",
+                  background: "var(--card)", border: "1px solid var(--border)",
+                  color: "var(--foreground)", fontSize: 12, fontWeight: 700,
+                }}
+              >
+                Send via WhatsApp
+              </a>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -1987,12 +2086,13 @@ function Sel({ value, onChange, children }: {
 
 type DrawerTab = "basic" | "pay" | "payment";
 
-function EmployeeDrawer({ employee, onClose, onSave, allowLRD, orgBranches = [] }: {
+function EmployeeDrawer({ employee, onClose, onSave, allowLRD, orgBranches = [], emailRoster = [] }: {
   employee?: Employee;
   onClose: () => void;
   onSave: (data: Omit<Employee, "id" | "fullName" | "isArchived">) => Promise<void>;
   allowLRD?: boolean;
   orgBranches?: { id: string; name: string }[];
+  emailRoster?: { id?: string | null; email?: string | null }[];
 }) {
   const isEdit = !!employee;
   const [form, setForm] = useState<Omit<Employee, "id" | "fullName" | "isArchived">>(
@@ -2015,6 +2115,7 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD, orgBranches = [] 
     } : { ...EMPTY_FORM, employeeNumber: "" }
   );
   const [saving, setSaving] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [tab, setTab] = useState<DrawerTab>("basic");
 
   const set = (field: keyof typeof form, value: unknown) =>
@@ -2024,6 +2125,12 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD, orgBranches = [] 
 
   async function submit() {
     if (!valid) return;
+    if (employeeEmailCollision(form.email, emailRoster, employee?.id)) {
+      setEmailError(DUPLICATE_EMPLOYEE_EMAIL);
+      setTab("basic");
+      return;
+    }
+    setEmailError(null);
     setSaving(true);
     try {
       const synced = syncBranchAssignment(
@@ -2169,11 +2276,16 @@ function EmployeeDrawer({ employee, onClose, onSave, allowLRD, orgBranches = [] 
                   </Sel>
                 </Field>
               </div>
-              <Field label="Email"><Inp type="email" value={form.email} onChange={(v) => set("email", v)} placeholder="employee@company.lr"/></Field>
+              <Field label="Email">
+                <Inp type="email" value={form.email} onChange={(v) => { setEmailError(null); set("email", v); }} placeholder="employee@company.lr"/>
+                {emailError && <p style={{ margin: 0, fontSize: 12, color: "#DC2626" }}>{emailError}</p>}
+              </Field>
               <Field label="Phone"><Inp value={form.phone} onChange={(v) => set("phone", v)} placeholder="+231770000000"/></Field>
               <PortalAccessPanel
                 employeeId={employee?.id}
                 enabled={!!form.portalEnabled}
+                email={form.email}
+                phone={form.phone}
                 onEnabledChange={(v) => set("portalEnabled", v)}
               />
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
@@ -3074,6 +3186,15 @@ export default function EmployeesPage() {
       const name = [row.firstName, row.middleName, row.lastName].filter(Boolean).join(" ");
       const classified = classifyEmployeeImport(roster, csvNum);
 
+      if (employeeEmailCollision(
+        row.email,
+        roster,
+        classified.action === "update" ? classified.existing.id : undefined,
+      )) {
+        skipped.push({ rowNum: i + 2, name, reasons: [DUPLICATE_EMPLOYEE_EMAIL] });
+        continue;
+      }
+
       try {
         if (classified.action === "update") {
           const existing = classified.existing;
@@ -3634,6 +3755,7 @@ export default function EmployeesPage() {
           onSave={handleSaveEmployee}
           allowLRD={allowLRD}
           orgBranches={orgBranches}
+          emailRoster={allEmployees.map((e) => ({ id: e.id, email: e.email }))}
         />
       )}
       {showUpload && (

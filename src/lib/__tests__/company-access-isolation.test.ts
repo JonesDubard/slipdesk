@@ -20,6 +20,7 @@ const ROUTES = [
   "src/app/api/hr/notifications/route.ts",
   "src/app/api/hr/notifications/[id]/retry/route.ts",
   "src/app/api/hr/employees/[id]/portal-credentials/route.ts",
+  "src/app/api/hr/employees/[id]/portal-invite/route.ts",
   "src/app/api/payroll/validate/route.ts",
   "src/app/api/hr/change-requests/route.ts",
   "src/app/api/hr/change-requests/[id]/route.ts",
