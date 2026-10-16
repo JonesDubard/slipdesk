@@ -6,9 +6,9 @@ import {
   FINALIZED_PAY_RUN_STATUSES,
   canEditPayrollDraft,
   canViewPayroll,
-  resolvePayrollAccess,
   type PayRunStatus,
 } from "@/lib/payroll/resolve-payroll-access";
+import { resolveAppCompanyAccess } from "@/lib/auth/resolve-app-company";
 import {
   buildDraftPayload,
   computeDraftTotals,
@@ -43,7 +43,7 @@ export async function GET(_req: NextRequest, ctx: RouteCtx) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const access = await resolvePayrollAccess(user.id, supabase);
+  const access = await resolveAppCompanyAccess(user.id, supabase);
   if (!access || !canViewPayroll(access.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -123,7 +123,7 @@ export async function PATCH(req: NextRequest, ctx: RouteCtx) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const access = await resolvePayrollAccess(user.id, supabase);
+  const access = await resolveAppCompanyAccess(user.id, supabase);
   if (!access || !canEditPayrollDraft(access.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
