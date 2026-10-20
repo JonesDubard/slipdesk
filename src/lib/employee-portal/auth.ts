@@ -181,8 +181,12 @@ export async function assignOrResetPortalPassword(opts: {
   });
   if (!contact.ok) return { ok: false, error: contact.error, status: 400 };
 
-  const unique = await anotherEmployeeUsesEmail(admin, emp.company_id, contact.email, emp.id);
-  if (!unique.ok) return unique;
+  // A Liberian phone is the PIN login. A shared email must not block that.
+  // Email-only assignment still refuses a company-wide duplicate.
+  if (!contact.phone) {
+    const unique = await anotherEmployeeUsesEmail(admin, emp.company_id, contact.email, emp.id);
+    if (!unique.ok) return unique;
+  }
 
   const temporaryPassword = opts.temporaryPassword?.trim() || generateTemporaryPin(8);
   const policy = validatePasswordPolicy(temporaryPassword);

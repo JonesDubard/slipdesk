@@ -229,6 +229,23 @@ describe("portal assign contact", () => {
     expect(result).toEqual({ ok: false, error: DUPLICATE_EMPLOYEE_EMAIL, status: 409 });
     expect(state.credentialInserts).toHaveLength(0);
   });
+
+  it("assign still issues a PIN when a phone exists and the email is shared", async () => {
+    state.employee = employee({
+      email: "employee@company.lr",
+      phone: "+231770000001",
+    });
+    state.companyEmails = [
+      { id: "emp-1", email: "employee@company.lr" },
+      { id: "emp-2", email: "employee@company.lr" },
+    ];
+    const result = await assignOrResetPortalPassword(assignOpts);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.phone).toBe("+231770000001");
+    expect(result.temporaryPassword).toMatch(/^\d{8}$/);
+    expect(state.credentialInserts).toHaveLength(1);
+  });
 });
 
 describe("portal email invite", () => {
