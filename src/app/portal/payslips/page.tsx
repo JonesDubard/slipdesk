@@ -177,7 +177,7 @@ function PayslipsInner() {
               Close
             </button>
           </div>
-          <dl className="grid grid-cols-2 gap-3 text-sm">
+          <dl className="grid grid-cols-2 gap-3 text-sm leading-relaxed">
             <div><dt className="text-slate-400 text-xs">Gross</dt><dd className="font-mono">{selected.currency} {selected.grossPay.toFixed(2)}</dd></div>
             <div><dt className="text-slate-400 text-xs">Net</dt><dd className="font-mono font-semibold">{selected.currency} {selected.netPay.toFixed(2)}</dd></div>
             <div>
@@ -195,7 +195,7 @@ function PayslipsInner() {
             )}
           </dl>
           <PortalDeductionList payslip={selected} />
-          <p className="text-[11px] text-slate-400">
+          <p className="text-xs text-slate-400 leading-relaxed">
             Cached for offline viewing.{" "}
             <Link href="/portal/nasscorp" className="text-[#002147] underline">View NASSCORP totals</Link>
           </p>
@@ -211,7 +211,7 @@ function PortalDeductionList({ payslip }: { payslip: EmployeePayslip }) {
   return (
     <div>
       <p className="text-slate-400 text-xs mb-1">Deductions</p>
-      <ul className="text-sm space-y-1">
+      <ul className="text-sm space-y-1 leading-relaxed">
         {rows.map((row, i) => (
           <li key={`${row.label}-${i}`} className="flex justify-between gap-3">
             <span>{row.label || row.note}</span>

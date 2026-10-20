@@ -119,13 +119,15 @@ export default function PortalPreferencesPage() {
                     {LABELS[p.event_type] ?? p.event_type}
                     {locked && <span className="block text-xs text-slate-400 mt-0.5">Cannot be disabled</span>}
                   </span>
-                  <input
-                    type="checkbox"
-                    checked={Boolean(p.enabled)}
-                    disabled={locked || saving === p.event_type}
-                    onChange={(e) => void toggle(p, e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300"
-                  />
+                  <span className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(p.enabled)}
+                      disabled={locked || saving === p.event_type}
+                      onChange={(e) => void toggle(p, e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                  </span>
                 </label>
               );
             })}
@@ -137,7 +139,9 @@ export default function PortalPreferencesPage() {
               {(["whatsapp", "sms"] as const).map((ch) => (
                   <label key={ch} className="flex items-center justify-between gap-4 px-4 py-3.5">
                     <span className="text-sm text-slate-500 capitalize">{ch} payslip alerts</span>
-                    <input type="checkbox" checked={false} disabled className="h-4 w-4" />
+                    <span className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center">
+                      <input type="checkbox" checked={false} disabled className="h-4 w-4" />
+                    </span>
                   </label>
                 ))}
             </div>

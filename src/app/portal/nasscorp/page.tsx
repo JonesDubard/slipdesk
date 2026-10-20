@@ -87,7 +87,7 @@ export default function PortalNasscorpPage() {
                 <tr key={line.payslipId} className="border-t border-slate-100">
                   <td className="px-4 py-2.5">
                     <p className="text-slate-800">{line.periodLabel}</p>
-                    <p className="text-[11px] text-slate-400">{line.payDate} · {line.currency}</p>
+                    <p className="text-xs text-slate-400">{line.payDate} · {line.currency}</p>
                   </td>
                   <td className="px-4 py-2.5 text-right font-mono">{line.employeeContribution.toFixed(2)}</td>
                   <td className="px-4 py-2.5 text-right font-mono">{line.employerContribution.toFixed(2)}</td>

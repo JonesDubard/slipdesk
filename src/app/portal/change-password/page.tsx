@@ -82,6 +82,8 @@ function ChangePasswordForm() {
           {firstLogin ? "Temporary PIN from HR" : "Current password"}
           <input
             type="password"
+            autoComplete="current-password"
+            inputMode={firstLogin ? "numeric" : undefined}
             value={currentPassword}
             onChange={(e) => setCurrentPassword(e.target.value)}
             className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
@@ -91,6 +93,7 @@ function ChangePasswordForm() {
           New password
           <input
             type="password"
+            autoComplete="new-password"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
             className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
@@ -100,6 +103,7 @@ function ChangePasswordForm() {
           Confirm new password
           <input
             type="password"
+            autoComplete="new-password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
@@ -109,7 +113,7 @@ function ChangePasswordForm() {
           type="button"
           onClick={submit}
           disabled={loading || !currentPassword || !newPassword || !confirm}
-          className="w-full rounded-xl bg-[#002147] text-white py-2.5 text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+          className="w-full rounded-xl bg-[#002147] text-white py-3 text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
         >
           {loading && <Loader className="w-4 h-4 animate-spin" />}
           Save password

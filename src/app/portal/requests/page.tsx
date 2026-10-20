@@ -138,6 +138,8 @@ export default function PortalRequestsPage() {
           <label className="block text-sm font-medium text-slate-700">
             New phone
             <input
+              type="tel"
+              inputMode="tel"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
@@ -168,7 +170,7 @@ export default function PortalRequestsPage() {
               </>
             )}
             {(paymentMethod === "mtn_momo" || paymentMethod === "orange_money") && (
-              <Field label="Mobile money number" value={momoNumber} onChange={setMomoNumber} />
+              <Field label="Mobile money number" value={momoNumber} onChange={setMomoNumber} type="tel" inputMode="tel" />
             )}
           </div>
         )}
@@ -177,7 +179,7 @@ export default function PortalRequestsPage() {
           type="button"
           onClick={submit}
           disabled={submitting || !employee}
-          className="w-full rounded-xl bg-[#002147] text-white py-2.5 text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+          className="w-full rounded-xl bg-[#002147] text-white py-3 text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
         >
           {submitting && <Loader className="w-4 h-4 animate-spin" />}
           Submit for HR approval
@@ -210,12 +212,20 @@ export default function PortalRequestsPage() {
 }
 
 function Field({
-  label, value, onChange,
-}: { label: string; value: string; onChange: (v: string) => void }) {
+  label, value, onChange, type = "text", inputMode,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: "text" | "tel";
+  inputMode?: "tel" | "text" | "numeric";
+}) {
   return (
     <label className="block text-sm font-medium text-slate-700">
       {label}
       <input
+        type={type}
+        inputMode={inputMode}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
@@ -232,7 +242,7 @@ function StatusBadge({ status }: { status: string }) {
         ? "bg-red-50 text-red-600"
         : "bg-amber-50 text-amber-700";
   return (
-    <span className={`text-[11px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full ${styles}`}>
+    <span className={`text-xs font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full ${styles}`}>
       {status}
     </span>
   );

@@ -89,14 +89,20 @@ export default function PortalAttendancePage() {
       <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
         <p className="text-sm font-medium text-slate-700">Manual hours</p>
         <div className="grid grid-cols-2 gap-3">
-          <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
-          <input type="number" step="0.25" min="0" max="24" placeholder="Hours" value={manualHours} onChange={(e) => setManualHours(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
+          <label className="block text-sm font-medium text-slate-700">
+            Date
+            <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
+          </label>
+          <label className="block text-sm font-medium text-slate-700">
+            Hours
+            <input type="text" inputMode="numeric" placeholder="Hours" value={manualHours} onChange={(e) => setManualHours(e.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
+          </label>
         </div>
         <button
           type="button"
           disabled={busy || !manualDate || !manualHours}
           onClick={() => void post({ action: "manual", workDate: manualDate, hours: Number(manualHours) })}
-          className="w-full rounded-xl bg-slate-800 text-white py-2.5 text-sm font-semibold disabled:opacity-50"
+          className="w-full rounded-xl bg-slate-800 text-white py-3 text-sm font-semibold disabled:opacity-50"
         >
           Save hours
         </button>

@@ -80,6 +80,7 @@ export default function PortalLoginPage() {
               Password / PIN
               <input
                 type="password"
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="PIN from HR"
@@ -92,7 +93,7 @@ export default function PortalLoginPage() {
             <button
               onClick={login}
               disabled={loading || !identifier.trim() || !password.trim()}
-              className="w-full rounded-xl bg-[#002147] text-white py-2.5 text-sm font-semibold hover:bg-[#003066] disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full rounded-xl bg-[#002147] text-white py-3 text-sm font-semibold hover:bg-[#003066] disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {loading && <Loader className="w-4 h-4 animate-spin" />}
               Sign in

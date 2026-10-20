@@ -87,9 +87,9 @@ export default function PortalLeavePage() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {balances.map((b) => (
             <div key={b.leaveType} className="bg-white border border-slate-200 rounded-xl px-3 py-2">
-              <p className="text-[11px] text-slate-400 uppercase capitalize">{b.leaveType}</p>
+              <p className="text-xs text-slate-400 uppercase capitalize">{b.leaveType}</p>
               <p className="text-sm font-semibold text-[#002147] mt-0.5">{b.remaining} left</p>
-              <p className="text-[10px] text-slate-400">
+              <p className="text-xs text-slate-400 leading-relaxed">
                 {b.used} used · {b.pending} pending · {b.allocated} allocated
               </p>
             </div>
@@ -147,8 +147,10 @@ export default function PortalLeavePage() {
           />
         </label>
         {leaveType !== "unpaid" && (
-          <label className="flex items-center gap-2 text-sm text-slate-600">
-            <input type="checkbox" checked={isUnpaid} onChange={(e) => setIsUnpaid(e.target.checked)} />
+          <label className="flex items-center gap-2 text-sm text-slate-600 min-h-11">
+            <span className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center">
+              <input type="checkbox" checked={isUnpaid} onChange={(e) => setIsUnpaid(e.target.checked)} />
+            </span>
             Treat as unpaid (deduct hours from payroll)
           </label>
         )}
@@ -156,7 +158,7 @@ export default function PortalLeavePage() {
           type="button"
           disabled={submitting || !startDate || !endDate}
           onClick={() => void submit()}
-          className="w-full rounded-xl bg-[#002147] text-white py-2.5 text-sm font-semibold disabled:opacity-50"
+          className="w-full rounded-xl bg-[#002147] text-white py-3 text-sm font-semibold disabled:opacity-50"
         >
           {submitting ? "Submitting…" : "Submit leave request"}
         </button>
@@ -174,10 +176,10 @@ export default function PortalLeavePage() {
                 <span className="font-medium capitalize">{r.leaveType}</span>
                 <span className="text-xs capitalize text-slate-500">{r.status.replace("_", " ")}</span>
               </div>
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
                 {r.startDate} → {r.endDate} · {r.days} day(s)
               </p>
-              {r.hrNote && <p className="text-xs text-amber-700 mt-1">HR: {r.hrNote}</p>}
+              {r.hrNote && <p className="text-xs text-amber-700 mt-1 leading-relaxed">HR: {r.hrNote}</p>}
             </li>
           ))}
         </ul>

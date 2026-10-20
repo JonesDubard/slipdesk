@@ -83,6 +83,7 @@ export default function PortalForgotPasswordPage() {
                 Email
                 <input
                   type="email"
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@company.com"
@@ -96,7 +97,7 @@ export default function PortalForgotPasswordPage() {
                 type="button"
                 onClick={submit}
                 disabled={loading || !email.trim()}
-                className="mt-4 w-full rounded-xl bg-[#002147] text-white py-2.5 text-sm font-semibold hover:bg-[#003066] disabled:opacity-50 flex items-center justify-center gap-2"
+                className="mt-4 w-full rounded-xl bg-[#002147] text-white py-3 text-sm font-semibold hover:bg-[#003066] disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {loading && <Loader className="w-4 h-4 animate-spin" />}
                 Send reset link
