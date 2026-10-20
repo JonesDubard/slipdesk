@@ -21,6 +21,7 @@ import {
   formatPayslipCurrencyLine,
 } from "@/lib/payslip-content";
 import BulkUpload, { type BulkRow } from "@/components/BulkUpload";
+import { PayslipPreviewModal } from "@/components/payslip/PayslipPreviewModal";
 import { findEmployeeByNumber } from "@/lib/csv/match-employee";
 import {
   applyEnsuredBranch,
@@ -311,6 +312,7 @@ function DownloadSlipButton({
   const { company: appCompany } = useApp();
   const { guardAction } = useDemoGuard();
   const [loading, setLoading] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [wasCounted, setWasCounted] = useState(false); // track if already counted this session
 
   async function handle() {
@@ -357,35 +359,63 @@ function DownloadSlipButton({
   }
 
   return (
-    <button
-      onClick={handle}
-      disabled={loading || !line.calc}
-      style={{
-        display: "flex", alignItems: "center", gap: 4,
-        padding: "5px 9px", borderRadius: 7,
-        border: "1px solid var(--border)",
-        background: "transparent",
-        color: line.calc ? "var(--primary)" : "var(--muted-foreground)",
-        fontSize: 11, fontWeight: 600,
-        cursor: line.calc ? "pointer" : "not-allowed",
-        transition: "all 0.15s",
-      }}
-      onMouseEnter={(e) => {
-        if (line.calc) {
-          e.currentTarget.style.background = "color-mix(in oklch, var(--primary) 15%, transparent)";
-        }
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "transparent";
-      }}
-    >
-      {loading ? (
-        <Loader style={{ animation: "spin 1s linear infinite" }} size={12} />
-      ) : (
-        <FileDown size={12} />
-      )}
-      PDF
-    </button>
+    <>
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <button
+          type="button"
+          onClick={() => { if (line.calc) setPreviewOpen(true); }}
+          disabled={!line.calc}
+          style={{
+            display: "flex", alignItems: "center", gap: 4,
+            padding: "5px 9px", borderRadius: 7,
+            border: "1px solid var(--border)",
+            background: "transparent",
+            color: line.calc ? "var(--foreground)" : "var(--muted-foreground)",
+            fontSize: 11, fontWeight: 600,
+            cursor: line.calc ? "pointer" : "not-allowed",
+          }}
+        >
+          Preview
+        </button>
+        <button
+          onClick={handle}
+          disabled={loading || !line.calc}
+          style={{
+            display: "flex", alignItems: "center", gap: 4,
+            padding: "5px 9px", borderRadius: 7,
+            border: "1px solid var(--border)",
+            background: "transparent",
+            color: line.calc ? "var(--primary)" : "var(--muted-foreground)",
+            fontSize: 11, fontWeight: 600,
+            cursor: line.calc ? "pointer" : "not-allowed",
+            transition: "all 0.15s",
+          }}
+          onMouseEnter={(e) => {
+            if (line.calc) {
+              e.currentTarget.style.background = "color-mix(in oklch, var(--primary) 15%, transparent)";
+            }
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "transparent";
+          }}
+        >
+          {loading ? (
+            <Loader style={{ animation: "spin 1s linear infinite" }} size={12} />
+          ) : (
+            <FileDown size={12} />
+          )}
+          PDF
+        </button>
+      </div>
+      <PayslipPreviewModal
+        open={previewOpen}
+        line={line}
+        periodLabel={periodLabel}
+        onClose={() => setPreviewOpen(false)}
+        onDownloadPdf={() => { void handle(); }}
+        downloading={loading}
+      />
+    </>
   );
 }
 
@@ -1485,7 +1515,7 @@ export default function PayrollPage() {
       col.display({
         id: "slip",
         header: "",
-        size: 70,
+        size: 130,
         cell: (c) => (
           <DownloadSlipButton
             line={c.row.original}
